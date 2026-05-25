@@ -1,0 +1,209 @@
+@page "/datalake"
+@inherits BasePage
+@rendermode InteractiveServer
+@inject DataLakeClient _dlClient
+
+<PageTitle>数据湖配置</PageTitle>
+
+<div class="datalake-config-toolbar">
+    <MudText Typo="Typo.h5">数据湖配置</MudText>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+}
+else
+{
+    @if (!_hasConfig)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-4">
+            尚未配置数据湖连接，采集服务和同步服务将无法工作。请填写以下配置并保存。
+        </MudAlert>
+    }
+
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.BaseUrl" Label="BaseUrl" Required="true"
+                              Variant="Variant.Outlined" HelperText="数据湖服务地址，如 https://192.168.234.101:8080" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.TokenEndpoint" Label="Token 端点" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.QueryEndpoint" Label="查询端点" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.SysCode" Label="SysCode" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.ClientId" Label="ClientId" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.ClientSecret" Label="ClientSecret" Required="true"
+                              Variant="Variant.Outlined"
+                              InputType="@(_showSecret ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSecret = !_showSecret)" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_config.PageSize" Label="每页大小" Min="1"
+                                 Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_config.MaxResultSize" Label="最大结果数" Min="1"
+                                 Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_config.RequestIntervalMilliseconds" Label="请求间隔(毫秒)" Min="0"
+                                 Variant="Variant.Outlined" HelperText="0 表示不限制；建议先用 200~500" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudSwitch @bind-Value="_config.DebugLogEnabled"
+                           Label="启用调试日志（开启后将在 logs/datalake_debug 文件中记录请求参数、Token 和返回数据）"
+                           Color="Color.Primary" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <div class="datalake-config-actions mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Save" Disabled="_saving">
+            @(_saving ? "保存中..." : "保存")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" Class="ml-2"
+                   StartIcon="@Icons.Material.Filled.NetworkCheck"
+                   OnClick="TestConnection" Disabled="_testing">
+            @(_testing ? "测试中..." : "测试连接")
+        </MudButton>
+    </div>
+}
+
+@code {
+    private DataLakeConfig _config = new();
+    private bool _hasConfig;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private bool _showSecret;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var existing = await db.DataLakeConfigs.FirstOrDefaultAsync(CancellationToken);
+
+            if (existing != null)
+            {
+                _config = existing;
+                _hasConfig = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载配置失败：{ex.Message}", Severity.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task TestConnection()
+    {
+        if (!ValidateForm()) return;
+
+        _testing = true;
+        try
+        {
+            await _dlClient.TestConnectionAsync(_config, CancellationToken);
+            inj_snackbar.Add("连接测试成功", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"连接测试失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (!ValidateForm()) return;
+
+        _saving = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var existing = await db.DataLakeConfigs.FirstOrDefaultAsync(CancellationToken);
+
+            if (existing != null)
+            {
+                existing.BaseUrl = _config.BaseUrl;
+                existing.TokenEndpoint = _config.TokenEndpoint;
+                existing.QueryEndpoint = _config.QueryEndpoint;
+                existing.ClientId = _config.ClientId;
+                existing.ClientSecret = _config.ClientSecret;
+                existing.SysCode = _config.SysCode;
+                existing.PageSize = _config.PageSize;
+                existing.MaxResultSize = _config.MaxResultSize;
+                existing.RequestIntervalMilliseconds = _config.RequestIntervalMilliseconds;
+                existing.DebugLogEnabled = _config.DebugLogEnabled;
+                existing.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _config.UpdatedAt = DateTime.UtcNow;
+                db.DataLakeConfigs.Add(_config);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            _dlClient.ReloadConfig();
+            _hasConfig = true;
+            inj_snackbar.Add("数据湖配置已保存并生效", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private bool ValidateForm()
+    {
+        if (string.IsNullOrWhiteSpace(_config.BaseUrl) ||
+            string.IsNullOrWhiteSpace(_config.TokenEndpoint) ||
+            string.IsNullOrWhiteSpace(_config.QueryEndpoint) ||
+            string.IsNullOrWhiteSpace(_config.ClientId) ||
+            string.IsNullOrWhiteSpace(_config.ClientSecret) ||
+            string.IsNullOrWhiteSpace(_config.SysCode))
+        {
+            inj_snackbar.Add("请填写所有必填字段", Severity.Warning);
+            return false;
+        }
+
+        if (_config.PageSize < 1 || _config.MaxResultSize < 1)
+        {
+            inj_snackbar.Add("每页大小和最大结果数必须大于 0", Severity.Warning);
+            return false;
+        }
+
+        if (_config.RequestIntervalMilliseconds < 0)
+        {
+            inj_snackbar.Add("请求间隔不能小于 0", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+}

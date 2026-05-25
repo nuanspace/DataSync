@@ -1,0 +1,131 @@
+@page "/ingestion"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>采集源管理</PageTitle>
+
+<div class="ingestion-list-toolbar">
+    <MudText Typo="Typo.h5">采集源管理</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => inj_navigationManager.NavigateTo("/ingestion/create"))">
+        新增采集源
+    </MudButton>
+</div>
+
+<MudTable Items="_sources" Hover="true" Striped="true" Loading="_loading" LoadingProgressColor="Color.Primary"
+          Dense="true" Class="mt-4">
+    <HeaderContent>
+        <MudTh>名称</MudTh>
+        <MudTh>ServerCode</MudTh>
+        <MudTh>时间字段</MudTh>
+        <MudTh>主键</MudTh>
+        <MudTh>轮询间隔</MudTh>
+        <MudTh>额外条件</MudTh>
+        <MudTh>本地表名</MudTh>
+        <MudTh>启用</MudTh>
+        <MudTh>操作</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="名称">@context.Name</MudTd>
+        <MudTd DataLabel="ServerCode">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.ServerCode</MudChip>
+        </MudTd>
+        <MudTd DataLabel="时间字段">@context.TimeField</MudTd>
+        <MudTd DataLabel="主键">@context.PrimaryKeys</MudTd>
+        <MudTd DataLabel="轮询间隔">@(context.PollingIntervalSeconds)s</MudTd>
+        <MudTd DataLabel="额外条件">@(GetConditionCount(context.Conditions))</MudTd>
+        <MudTd DataLabel="本地表名">
+            <MudText Typo="Typo.body2" Style="font-family: monospace">
+                @IngestionService.GetLocalTableName(context.ServerCode)
+            </MudText>
+        </MudTd>
+        <MudTd DataLabel="启用">
+            <MudSwitch T="bool" Value="context.Enabled" Color="Color.Success"
+                       ValueChanged="@(v => ToggleEnabled(context, v))" />
+        </MudTd>
+        <MudTd DataLabel="操作">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                           OnClick="@(() => inj_navigationManager.NavigateTo($"/ingestion/edit/{context.Id}"))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="@(() => DeleteSource(context))" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>暂无采集源</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<IngestionSource> _sources = [];
+    private bool _loading = true;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadSources();
+    }
+
+    private async Task LoadSources()
+    {
+        _loading = true;
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _sources = await db.IngestionSources.OrderBy(s => s.Id).ToListAsync(CancellationToken);
+        _loading = false;
+    }
+
+    private async Task ToggleEnabled(IngestionSource source, bool enabled)
+    {
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.IngestionSources.FindAsync([source.Id], CancellationToken);
+            if (entity is null) return;
+
+            entity.Enabled = enabled;
+            await db.SaveChangesAsync(CancellationToken);
+            source.Enabled = enabled;
+            inj_snackbar.Add($"已{(enabled ? "启用" : "禁用")}采集源：{source.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private static string GetConditionCount(string? conditions)
+    {
+        if (string.IsNullOrWhiteSpace(conditions)) return "无";
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<object>>(conditions);
+            return list?.Count > 0 ? $"{list.Count} 条" : "无";
+        }
+        catch { return "无"; }
+    }
+
+    private async Task DeleteSource(IngestionSource source)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除采集源「{source.Name}」吗？本地采集表不会被删除。",
+            yesText: "删除", cancelText: "取消");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.IngestionSources.FindAsync([source.Id], CancellationToken);
+            if (entity is null) return;
+
+            db.IngestionSources.Remove(entity);
+            await db.SaveChangesAsync(CancellationToken);
+
+            _sources.Remove(source);
+            inj_snackbar.Add($"已删除采集源：{source.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+        }
+    }
+}

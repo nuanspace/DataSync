@@ -1,0 +1,6 @@
+bin/
+obj/
+.codex-temp/
+docker包/
+*.tar
+*.rar

@@ -1,0 +1,812 @@
+﻿@* 统一字段映射编辑对话框 *@
+
+<MudDialog Visible="Visible" VisibleChanged="OnVisibleChanged" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@Title</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (EditItem != null)
+        {
+            @if (JsonTreeLayout == JsonTreeLayout.SidePanel)
+            {
+                @* SidePanel 模式：左 5 格 JSON 树 + 右 7 格表单 *@
+                <MudGrid Style="min-height:75vh;">
+                    <MudItem xs="12" md="5">
+                        @if (_pathPickTarget == PathPickTarget.MainSourcePath)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">正在为 <b>源路径</b> 选取，请点击下方节点</MudAlert>
+                        }
+                        else if (_pathPickTarget == PathPickTarget.FilterRuleSourcePath)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">正在为 <b>过滤规则 #@(_pickFilterRuleIndex + 1)</b> 选取源路径</MudAlert>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.subtitle2" Class="mb-2">点击右侧路径输入框，再点击下方节点填入</MudText>
+                        }
+                        <MudPaper Outlined="true" Class="pa-2" Style="max-height:calc(75vh - 60px);overflow-y:auto;">
+                            @if (!string.IsNullOrWhiteSpace(JsonText))
+                            {
+                                <JsonTreeViewer JsonText="@JsonText" ShowSearch="true" UseArrayBrackets="@UseArrayBrackets" PreferFirstArrayItemAsRoot="true" OnPathSelected="OnPathPicked" />
+                            }
+                            else
+                            {
+                                <MudAlert Severity="Severity.Info" Dense="true">无可用 JSON 数据</MudAlert>
+                            }
+                        </MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" md="7">
+                        @FormContent
+                    </MudItem>
+                </MudGrid>
+            }
+            else
+            {
+                @* Collapse 模式：全宽表单 *@
+                @FormContent
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="HandleCancel">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="HandleSave">@SaveButtonText</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Inject] private BioCoreIntegrationService BioCoreService { get; set; } = default!;
+
+    // 核心数据
+    [Parameter] public EsbFieldMapping? EditItem { get; set; }
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public string Title { get; set; } = "编辑映射";
+    [Parameter] public string SaveButtonText { get; set; } = "保存";
+
+    // JSON
+    [Parameter] public string? JsonText { get; set; }
+    [Parameter] public string? MainRecordArrayPath { get; set; }
+    [Parameter] public JsonTreeLayout JsonTreeLayout { get; set; } = JsonTreeLayout.Collapse;
+
+    // 布局
+    [Parameter] public MaxWidth DialogMaxWidth { get; set; } = MaxWidth.Medium;
+
+    // 字段显隐
+    [Parameter] public bool MappingTargetEditable { get; set; } = true;
+    [Parameter] public bool UseTargetFieldSelector { get; set; } = true;
+    [Parameter] public string? LicenseCode { get; set; }
+    [Parameter] public bool ShowSortOrder { get; set; }
+    [Parameter] public bool ShowIsRequired { get; set; }
+    [Parameter] public bool ShowIsEnabled { get; set; }
+    [Parameter] public bool ShowDescription { get; set; }
+    [Parameter] public bool ShowFilterRules { get; set; }
+    [Parameter] public bool ShowSubCardArrayPathEditor { get; set; } = true;
+
+    // TranCode（ConfigOverviewPage 需要）
+    [Parameter] public bool ShowTranCode { get; set; }
+    [Parameter] public bool TranCodeReadOnly { get; set; }
+    [Parameter] public List<EsbInterfaceConfig>? TranCodeOptions { get; set; }
+    [Parameter] public EventCallback<string> TranCodeChanged { get; set; }
+
+    // TargetField 只读格式化（ConfigOverviewPage 需要）
+    [Parameter] public Func<EsbFieldMapping, string>? TargetFieldFormatter { get; set; }
+
+    // 过滤规则
+    [Parameter] public List<EsbFilterRule> FilterRules { get; set; } = [];
+    [Parameter] public EventCallback<List<EsbFilterRule>> FilterRulesChanged { get; set; }
+
+    // CardId（文本形式，父页面负责解析）
+    [Parameter] public string? EditCardId { get; set; }
+    [Parameter] public EventCallback<string?> EditCardIdChanged { get; set; }
+
+    // TranCode 只读显示文本
+    [Parameter] public string? TranCodeDisplayText { get; set; }
+
+    // 回调
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    // 内部状态
+    private bool _showSourcePathTree;
+    private DialogOptions _dialogOptions => new() { MaxWidth = DialogMaxWidth, FullWidth = true };
+    private bool UseArrayBrackets => EditItem?.MappingTarget == MappingTarget.SubCard;
+    private string DisplaySourcePath => EditItem == null
+        ? ""
+        : UseArrayBrackets
+            ? BuildSubCardDisplaySourcePath(EditItem.SourcePath, EditItem.ArrayPath)
+            : BuildStandaloneDisplaySourcePath(EditItem.SourcePath);
+    private string? _cachedLicenseCode;
+    private Dictionary<string, List<string>> _questionOptions = new(StringComparer.OrdinalIgnoreCase);
+    private JToken? _parsedJson;
+
+    // 路径选择焦点状态
+    private enum PathPickTarget { None, MainSourcePath, FilterRuleSourcePath }
+    private PathPickTarget _pathPickTarget = PathPickTarget.None;
+    private int _pickFilterRuleIndex = -1;
+
+    /// <summary>缓存的 FilterRuleEditor 路径选取回调（避免每次渲染创建新实例）</summary>
+    private EventCallback<int> _filterRulePathPickCallback;
+
+    // CardId 文本绑定
+    private string? _editCardIdText
+    {
+        get => EditCardId;
+        set => EditCardIdChanged.InvokeAsync(value);
+    }
+
+    // TranCode 只读显示
+    private string _tranCodeDisplay => TranCodeDisplayText ?? EditItem?.TranCode ?? "";
+
+    protected override void OnInitialized()
+    {
+        _filterRulePathPickCallback = EventCallback.Factory.Create<int>(this, HandleFilterRulePathPick);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (EditItem != null)
+        {
+            EditItem.DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(EditItem.DictMatchMode);
+        }
+
+        _parsedJson = MessageJsonHelper.TryParseToken(JsonText ?? "", out var parsedJson, out _)
+            ? parsedJson
+            : null;
+
+        if (_cachedLicenseCode == LicenseCode)
+        {
+            return;
+        }
+
+        _cachedLicenseCode = LicenseCode;
+        _questionOptions.Clear();
+
+        if (string.IsNullOrWhiteSpace(LicenseCode))
+        {
+            return;
+        }
+
+        var dict = await BioCoreService.GetFormQuestionDictAsync(LicenseCode);
+        foreach (var (id, q) in dict)
+        {
+            var question = FormBrowserHelper.BuildQuestionInfo(q);
+            if (question.Options.Count > 0)
+            {
+                _questionOptions[id.ToString()] = question.Options;
+            }
+        }
+    }
+
+    private Task OnDictCodeChanged(string? value)
+    {
+        if (EditItem != null)
+        {
+            EditItem.DictCode = value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private IEnumerable<string> GetSuggestedDictSourceValues()
+    {
+        if (EditItem?.MappingTarget is not (MappingTarget.Question or MappingTarget.SubCard))
+        {
+            return [];
+        }
+
+        if (string.IsNullOrWhiteSpace(EditItem.TargetField))
+        {
+            return [];
+        }
+
+        return _questionOptions.TryGetValue(EditItem.TargetField, out var options) ? options : [];
+    }
+
+    private void HandleFilterRulePathPick(int idx)
+    {
+        SetPathPickTarget(PathPickTarget.FilterRuleSourcePath, idx);
+    }
+
+    /// <summary>表单内容（SidePanel 和 Collapse 两种布局复用）</summary>
+    private RenderFragment FormContent => __builder =>
+    {
+        <MudGrid Spacing="2">
+            @* TranCode（ConfigOverviewPage 需要） *@
+            @if (ShowTranCode)
+            {
+                <MudItem xs="6">
+                    @if (TranCodeReadOnly)
+                    {
+                        <MudTextField T="string" Value="@_tranCodeDisplay" Label="接口" ReadOnly="true"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    }
+                    else
+                    {
+                        <MudSelect T="string" Value="EditItem!.TranCode" ValueChanged="OnTranCodeSelect"
+                                   Label="选择接口" Required="true"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @if (TranCodeOptions != null)
+                            {
+                                @foreach (var iface in TranCodeOptions)
+                                {
+                                    <MudSelectItem T="string" Value="@iface.TranCode">@iface.TranCode (@iface.TranName)</MudSelectItem>
+                                }
+                            }
+                        </MudSelect>
+                    }
+                </MudItem>
+            }
+
+            @* MappingTarget *@
+            <MudItem xs="6" sm="6">
+                @if (MappingTargetEditable)
+                {
+                    <MudSelect T="MappingTarget" @bind-Value="EditItem!.MappingTarget" Label="映射目标" Required="true">
+                        <MudSelectItem Value="MappingTarget.Patient">Patient（患者）</MudSelectItem>
+                        <MudSelectItem Value="MappingTarget.Event">Event（事件）</MudSelectItem>
+                        <MudSelectItem Value="MappingTarget.Question">Question（问题）</MudSelectItem>
+                        <MudSelectItem Value="MappingTarget.SubCard">SubCard（子卡片）</MudSelectItem>
+                    </MudSelect>
+                }
+                else
+                {
+                    <MudTextField T="string" Value="@(EditItem!.MappingTarget.ToString())" Label="映射目标" ReadOnly="true"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                }
+            </MudItem>
+
+            @* SortOrder *@
+            @if (ShowSortOrder)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudNumericField @bind-Value="EditItem!.SortOrder" Label="排序" />
+                </MudItem>
+            }
+
+            @* 源路径 *@
+            <MudItem xs="12">
+                @if (JsonTreeLayout == JsonTreeLayout.Collapse)
+                {
+                    <div class="d-flex align-center gap-2">
+                        <MudTextField T="string" Value="@DisplaySourcePath" ValueChanged="OnSourcePathChanged" Label="源路径（JSON Path）"
+                                      HelperText="如: PatientInfo.Name、$main.PatientInfo.Name、$.Body.PatientInfo.Name；只用默认值时可留空"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex:1;" />
+                        @if (!string.IsNullOrWhiteSpace(JsonText))
+                        {
+                            <MudTooltip Text="从 JSON 树选取">
+                                <MudIconButton Icon="@Icons.Material.Filled.AccountTree" Color="Color.Primary"
+                                               OnClick="@(() => _showSourcePathTree = !_showSourcePathTree)" />
+                            </MudTooltip>
+                        }
+                    </div>
+                    @if (_showSourcePathTree && !string.IsNullOrWhiteSpace(JsonText))
+                    {
+                        <MudPaper Outlined="true" Class="pa-2 mt-1" Style="max-height:250px;overflow-y:auto;">
+                            <JsonTreeViewer JsonText="@JsonText" ShowSearch="true" UseArrayBrackets="@UseArrayBrackets" PreferFirstArrayItemAsRoot="true" OnPathSelected="OnCollapsePathPicked" />
+                        </MudPaper>
+                    }
+                    else if (_showSourcePathTree)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-1">无可用 JSON 数据</MudAlert>
+                    }
+                }
+                else
+                {
+                    @* SidePanel 模式下源路径（聚焦即激活，点击左侧树自动填入） *@
+                    <PathPickTextField Value="@DisplaySourcePath" ValueChanged="OnSourcePathChanged" Label="源路径"
+                                       HelperText="点击左侧 JSON 树自动填入；只用默认值时可留空"
+                                       IsActive="@(_pathPickTarget == PathPickTarget.MainSourcePath)"
+                                       OnActivated="@(() => SetPathPickTarget(PathPickTarget.MainSourcePath))"
+                                       Style="flex:1;" />
+                }
+            </MudItem>
+
+            @* TargetField *@
+            <MudItem xs="12">
+                @if (UseTargetFieldSelector)
+                {
+                    <TargetFieldSelector MappingTargetType="EditItem!.MappingTarget"
+                                         LicenseCode="@LicenseCode"
+                                         CardId="@EditItem.CardId"
+                                         Value="@(EditItem.TargetField ?? "")"
+                                         ValueChanged="v => EditItem.TargetField = v" />
+                }
+                else if (TargetFieldFormatter != null)
+                {
+                    <MudTextField T="string" Value="@TargetFieldFormatter(EditItem!)" Label="目标字段" ReadOnly="true"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                }
+                else
+                {
+                    <MudTextField T="string" Value="@EditItem!.TargetField" Label="目标字段" ReadOnly="true"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                }
+            </MudItem>
+
+            @* SubCard 附加字段 *@
+            @if (EditItem!.MappingTarget == MappingTarget.SubCard)
+            {
+                @if (ShowSubCardArrayPathEditor)
+                {
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editCardIdText" Label="卡片 ID（GUID）" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="EditItem.ArrayPath" Label="容器路径（ArrayPath）"
+                                      HelperText="如: DiagnosisList 或 Request.Body.CommonOrder" />
+                    </MudItem>
+                }
+                else
+                {
+                    <MudItem xs="12">
+                        <MudAlert Severity="Severity.Info" Dense="true">CardId 和 ArrayPath 请回到 SubCard 根节点汇总区修改。</MudAlert>
+                    </MudItem>
+                }
+            }
+
+            @* 通用字段 *@
+            <MudItem xs="12" sm="6">
+                <DictCodeEditor Value="@EditItem!.DictCode" ValueChanged="OnDictCodeChanged" SuggestedSourceValues="@GetSuggestedDictSourceValues()" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="EditItem!.DictMatchMode" Label="字典匹配"
+                           Margin="Margin.Dense" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
+                    <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="EditItem!.DefaultValue" Label="默认值"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="EditItem!.ValueExpression" Label="值表达式"
+                              HelperText="如: format:yyyy-MM-dd, substring:0,10"
+                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+            </MudItem>
+
+            @* IsRequired *@
+            @if (ShowIsRequired)
+            {
+                <MudItem xs="6" sm="3">
+                    <MudSwitch @bind-Value="EditItem!.IsRequired" Label="必填" Color="Color.Warning" />
+                </MudItem>
+            }
+
+            @* IsEnabled *@
+            @if (ShowIsEnabled)
+            {
+                <MudItem xs="6" sm="3">
+                    <MudSwitch @bind-Value="EditItem!.IsEnabled" Label="启用" Color="Color.Primary" />
+                </MudItem>
+            }
+
+            @* Description *@
+            @if (ShowDescription)
+            {
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="EditItem!.Description" Label="说明" />
+                </MudItem>
+            }
+
+            @* FilterRuleEditor *@
+            @if (ShowFilterRules)
+            {
+                <MudItem xs="12">
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">过滤条件</MudText>
+                    <FilterRuleEditor Rules="FilterRules" RulesChanged="OnFilterRulesChanged"
+                                      JsonText="@(JsonTreeLayout == JsonTreeLayout.SidePanel ? null : JsonText)"
+                                      ShowScope="false"
+                                      OnRequestPathPick="@(JsonTreeLayout == JsonTreeLayout.SidePanel ? _filterRulePathPickCallback : default(EventCallback<int>))"
+                                      ActivePickIndex="@(_pathPickTarget == PathPickTarget.FilterRuleSourcePath ? _pickFilterRuleIndex : -1)" />
+                </MudItem>
+            }
+        </MudGrid>
+    };
+
+    private async Task OnPathPicked(string path)
+    {
+        if (EditItem == null) return;
+
+        switch (_pathPickTarget)
+        {
+            case PathPickTarget.MainSourcePath:
+                await ApplySourcePathAsync(path);
+                break;
+            case PathPickTarget.FilterRuleSourcePath:
+                if (_pickFilterRuleIndex >= 0 && _pickFilterRuleIndex < FilterRules.Count)
+                    FilterRules[_pickFilterRuleIndex].SourcePath = await NormalizePickedPathAsync(path, FilterRules[_pickFilterRuleIndex].SourcePath);
+                break;
+        }
+    }
+
+    /// <summary>Collapse 模式下直接填入源路径</summary>
+    private async Task OnCollapsePathPicked(string path)
+    {
+        if (EditItem != null)
+        {
+            await ApplySourcePathAsync(path);
+            _showSourcePathTree = false;
+        }
+    }
+
+    private Task OnSourcePathChanged(string? value)
+    {
+        if (EditItem != null)
+        {
+            EditItem.SourcePath = value ?? "";
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplySourcePathAsync(string path)
+    {
+        if (EditItem != null)
+        {
+            EditItem.SourcePath = await NormalizePickedPathAsync(path, EditItem.SourcePath);
+        }
+    }
+
+    private async Task<string> NormalizePickedPathAsync(string path, string? currentPath)
+    {
+        var normalizedPath = SubCardPathHelper.NormalizeArrayPath(path);
+        if (UseArrayBrackets)
+        {
+            var effectiveArrayPath = ExpandArrayPathToRoot(EditItem?.ArrayPath);
+            if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+                && SubCardPathHelper.TryBuildRelativePath(normalizedPath, effectiveArrayPath, out var currentRelativePath))
+            {
+                if (string.IsNullOrWhiteSpace(currentRelativePath))
+                {
+                    inj_snackbar.Add("子卡源路径必须选到容器内的具体字段。", Severity.Warning);
+                    return currentPath ?? "";
+                }
+
+                return currentRelativePath;
+            }
+
+            if (TryInferSubCardContainerPath(
+                    normalizedPath,
+                    out var inferredArrayPath,
+                    out var inferredRelativePath,
+                    string.IsNullOrWhiteSpace(EditItem?.ArrayPath))
+                && !string.IsNullOrWhiteSpace(inferredRelativePath))
+            {
+                if (EditItem != null)
+                {
+                    EditItem.ArrayPath = inferredArrayPath;
+                }
+
+                return inferredRelativePath;
+            }
+
+            if (TryNormalizeMainRecordSourcePath(normalizedPath, out var mainRecordScopedPath)
+                && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainRecordScopedPath)))
+            {
+                return mainRecordScopedPath;
+            }
+        }
+
+        if (!UseArrayBrackets || !SubCardPathHelper.TrySplitWildcardPath(normalizedPath, out var pickedArrayPath, out var relativePath))
+        {
+            var existingArrayPath = EditItem?.ArrayPath;
+            if (UseArrayBrackets
+                && !string.IsNullOrWhiteSpace(existingArrayPath)
+                && SubCardPathHelper.TryBuildRelativePath(normalizedPath, existingArrayPath, out var currentRelativePath))
+            {
+                if (string.IsNullOrWhiteSpace(currentRelativePath))
+                {
+                    inj_snackbar.Add("子卡源路径必须选到容器内的具体字段。", Severity.Warning);
+                    return currentPath ?? "";
+                }
+
+                return currentRelativePath;
+            }
+
+            return !UseArrayBrackets
+                   && TryNormalizeMainRecordRelativeSourcePath(normalizedPath, out var mainRecordRelativePath)
+                ? mainRecordRelativePath
+                : normalizedPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            inj_snackbar.Add("子卡源路径必须选到数组项内的具体字段。", Severity.Warning);
+            return currentPath ?? "";
+        }
+
+        var currentArrayPath = EditItem?.ArrayPath;
+        if (!string.IsNullOrWhiteSpace(currentArrayPath)
+            && !SubCardPathHelper.PathsEqual(currentArrayPath, pickedArrayPath))
+        {
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "数组路径确认",
+                $"当前 ArrayPath 为：{currentArrayPath}\n新选择的路径属于：{pickedArrayPath}\n是否更新为新数组路径？",
+                yesText: "更新",
+                cancelText: "取消");
+            if (confirmed != true)
+            {
+                return currentPath ?? "";
+            }
+        }
+
+        if (EditItem != null)
+        {
+            EditItem.ArrayPath = pickedArrayPath;
+        }
+
+        return relativePath;
+    }
+
+    private string? GetNormalizedMainRecordArrayPath()
+    {
+        var normalized = SubCardPathHelper.NormalizeArrayContainerPath(MainRecordArrayPath);
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private JToken? GetMainRecordContext()
+    {
+        var mainRecordArrayPath = GetNormalizedMainRecordArrayPath();
+        if (_parsedJson == null || string.IsNullOrWhiteSpace(mainRecordArrayPath))
+        {
+            return null;
+        }
+
+        return SubCardPathHelper.ResolveFirstSubCardContext(_parsedJson, mainRecordArrayPath);
+    }
+
+    private string BuildScopedPath(string arrayPath, string sourcePath)
+    {
+        if (SubCardPathHelper.PathsEqual(arrayPath, "$"))
+        {
+            return sourcePath;
+        }
+
+        return _parsedJson != null && SubCardPathHelper.ResolveSubCardContainer(_parsedJson, arrayPath) is JObject
+            ? $"{arrayPath}.{sourcePath}"
+            : $"{arrayPath}[].{sourcePath}";
+    }
+
+    private string? ExpandArrayPathToRoot(string? arrayPath)
+        => SubCardPathHelper.ExpandArrayPathToRoot(_parsedJson, arrayPath, GetNormalizedMainRecordArrayPath());
+
+    private bool TryInferSubCardContainerPath(
+        string? sourcePath,
+        out string arrayPath,
+        out string relativePath,
+        bool allowMainRecordRoot = true)
+    {
+        arrayPath = "";
+        relativePath = "";
+        if (_parsedJson == null)
+        {
+            return false;
+        }
+
+        var normalizedSource = SubCardPathHelper.NormalizeArrayPath(sourcePath);
+        var mainRecordArrayPath = GetNormalizedMainRecordArrayPath();
+        var mainContext = GetMainRecordContext();
+        if (!string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalizedSource, mainRecordArrayPath, out var mainRelativePath)
+            && !string.IsNullOrWhiteSpace(mainRelativePath))
+        {
+            if (SubCardPathHelper.TrySplitWildcardPath(mainRelativePath, out var nestedArrayPath, out var nestedRelativePath)
+                && !string.IsNullOrWhiteSpace(nestedRelativePath))
+            {
+                arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(nestedArrayPath);
+                relativePath = nestedRelativePath;
+                return true;
+            }
+
+            if (SubCardPathHelper.TryInferObjectContainerPath(mainContext, mainRelativePath, out var objectPath, out var objectRelativePath))
+            {
+                arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(objectPath);
+                relativePath = objectRelativePath;
+                return true;
+            }
+
+            if (allowMainRecordRoot
+                && mainContext != null
+                && SubCardPathHelper.ResolveFirstToken(mainContext, mainRelativePath) != null)
+            {
+                arrayPath = SubCardPathHelper.MainRecordContainerPath;
+                relativePath = mainRelativePath;
+                return true;
+            }
+        }
+
+        if (SubCardPathHelper.TrySplitWildcardPath(normalizedSource, out var parsedArrayPath, out var parsedRelativePath)
+            && !string.IsNullOrWhiteSpace(parsedRelativePath)
+            && MessageJsonHelper.SelectSampleToken(_parsedJson, parsedArrayPath) is JArray)
+        {
+            arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(parsedArrayPath);
+            relativePath = parsedRelativePath;
+            return true;
+        }
+
+        if (SubCardPathHelper.TryInferObjectContainerPath(_parsedJson, normalizedSource, out var rootObjectPath, out var rootObjectRelativePath))
+        {
+            arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(rootObjectPath);
+            relativePath = rootObjectRelativePath;
+            return true;
+        }
+
+        if (allowMainRecordRoot
+            && !string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            && mainContext != null
+            && SubCardPathHelper.ResolveFirstToken(mainContext, normalizedSource) != null)
+        {
+            arrayPath = SubCardPathHelper.MainRecordContainerPath;
+            relativePath = normalizedSource;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryNormalizeMainRecordSourcePath(string? sourcePath, out string normalizedPath)
+    {
+        return MessageJsonHelper.TryNormalizeMainRecordSourcePath(
+            sourcePath,
+            GetNormalizedMainRecordArrayPath(),
+            out normalizedPath);
+    }
+
+    private bool TryNormalizeMainRecordRelativeSourcePath(string? sourcePath, out string normalizedPath)
+    {
+        return MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(
+            sourcePath,
+            GetNormalizedMainRecordArrayPath(),
+            out normalizedPath);
+    }
+
+    private bool TryBuildMainRecordScopedPath(string? sourcePath, out string scopedPath)
+    {
+        scopedPath = "";
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        var mainRecordArrayPath = GetNormalizedMainRecordArrayPath();
+        var mainRecordContext = GetMainRecordContext();
+        if (string.IsNullOrWhiteSpace(normalizedSource)
+            || string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            || mainRecordContext == null
+            || SubCardPathHelper.IsAbsoluteJsonPath(normalizedSource)
+            || SubCardPathHelper.IsRootScopedPath(normalizedSource, mainRecordArrayPath))
+        {
+            return false;
+        }
+
+        if (MessageJsonHelper.IsMainRecordScopedPath(normalizedSource))
+        {
+            var relativePath = MessageJsonHelper.TrimMainRecordScopePrefix(normalizedSource);
+            if (string.IsNullOrWhiteSpace(relativePath))
+            {
+                return false;
+            }
+
+            scopedPath = MessageJsonHelper.EnsureMainRecordScopedPath(relativePath);
+            return true;
+        }
+
+        if (SubCardPathHelper.ResolveFirstToken(mainRecordContext, normalizedSource) == null)
+        {
+            return false;
+        }
+
+        scopedPath = MessageJsonHelper.EnsureMainRecordScopedPath(normalizedSource);
+        return true;
+    }
+
+    private bool TryExpandMainRecordScopedPath(string? sourcePath, out string scopedPath)
+    {
+        scopedPath = "";
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        var mainRecordArrayPath = GetNormalizedMainRecordArrayPath();
+        var mainRecordContext = GetMainRecordContext();
+        if (string.IsNullOrWhiteSpace(normalizedSource)
+            || string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            || mainRecordContext == null
+            || SubCardPathHelper.IsAbsoluteJsonPath(normalizedSource)
+            || SubCardPathHelper.IsRootScopedPath(normalizedSource, mainRecordArrayPath))
+        {
+            return false;
+        }
+
+        var relativePath = MessageJsonHelper.IsMainRecordScopedPath(normalizedSource)
+            ? MessageJsonHelper.TrimMainRecordScopePrefix(normalizedSource)
+            : normalizedSource;
+        if (string.IsNullOrWhiteSpace(relativePath)
+            || SubCardPathHelper.ResolveFirstToken(mainRecordContext, relativePath) == null)
+        {
+            return false;
+        }
+
+        scopedPath = BuildScopedPath(mainRecordArrayPath, relativePath);
+        return true;
+    }
+
+    private string BuildStandaloneDisplaySourcePath(string? sourcePath)
+    {
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(normalizedSource))
+        {
+            return "";
+        }
+
+        return TryNormalizeMainRecordRelativeSourcePath(normalizedSource, out var mainRecordRelativePath)
+            ? mainRecordRelativePath
+            : normalizedSource;
+    }
+
+    private string BuildSubCardDisplaySourcePath(string? sourcePath, string? arrayPath)
+    {
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(normalizedSource))
+        {
+            return "";
+        }
+
+        var effectiveArrayPath = ExpandArrayPathToRoot(arrayPath);
+        if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalizedSource, effectiveArrayPath, out var relativePath)
+            && !string.IsNullOrWhiteSpace(relativePath))
+        {
+            normalizedSource = relativePath;
+        }
+
+        return TryNormalizeMainRecordSourcePath(normalizedSource, out var mainRecordScopedPath)
+               && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainRecordScopedPath))
+            ? mainRecordScopedPath
+            : SubCardPathHelper.BuildDisplayPath(_parsedJson, normalizedSource, arrayPath, MainRecordArrayPath);
+    }
+
+    private void SetPathPickTarget(PathPickTarget target, int filterIndex = -1)
+    {
+        _pathPickTarget = target;
+        _pickFilterRuleIndex = filterIndex;
+    }
+
+    private void ResetPathPickTarget()
+    {
+        _pathPickTarget = PathPickTarget.None;
+        _pickFilterRuleIndex = -1;
+    }
+
+    private async Task OnTranCodeSelect(string value)
+    {
+        if (EditItem != null)
+            EditItem.TranCode = value;
+        await TranCodeChanged.InvokeAsync(value);
+    }
+
+    private async Task OnFilterRulesChanged(List<EsbFilterRule> rules)
+    {
+        await FilterRulesChanged.InvokeAsync(rules);
+    }
+
+    private async Task OnVisibleChanged(bool value)
+    {
+        if (!value)
+        {
+            _showSourcePathTree = false;
+            ResetPathPickTarget();
+        }
+        await VisibleChanged.InvokeAsync(value);
+    }
+
+    private async Task HandleSave()
+    {
+        await OnSave.InvokeAsync();
+    }
+
+    private async Task HandleCancel()
+    {
+        _showSourcePathTree = false;
+        ResetPathPickTarget();
+        if (OnCancel.HasDelegate)
+            await OnCancel.InvokeAsync();
+        else
+            await VisibleChanged.InvokeAsync(false);
+    }
+}

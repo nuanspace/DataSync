@@ -1,0 +1,300 @@
+﻿@page "/"
+@inherits BasePage
+@implements IDisposable
+
+<PageTitle>状态总览 - LHYY V2</PageTitle>
+
+<div class="home-page">
+    @if (_databaseNeedsUpgrade)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="false">
+            当前数据库结构可能过旧，部分统计无法加载。请先进入数据库升级页面完成升级。
+            <MudButton Href="/database-upgrade" Variant="Variant.Filled" Color="Color.Warning"
+                       StartIcon="@Icons.Material.Filled.SystemUpdateAlt" Class="home-upgrade-button">
+                去数据库升级
+            </MudButton>
+        </MudAlert>
+    }
+
+    <section class="home-hero">
+        <div class="home-hero-copy">
+            <MudText Typo="Typo.h5" Class="home-hero-title">状态总览</MudText>
+            <MudText Typo="Typo.body2" Class="home-hero-desc">查看今日消息接收、待处理积压与失败记录，值守时先看这里。</MudText>
+        </div>
+
+        <div class="home-hero-actions">
+            <MudButton Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.Refresh"
+                       Color="Color.Primary" OnClick="RefreshData" Disabled="_loading" Size="Size.Small" Class="home-refresh-button">
+                刷新数据
+            </MudButton>
+            <MudPaper Elevation="0" Class="home-auto-refresh-shell">
+                <MudTooltip Text="@(_autoRefresh ? "暂停自动刷新" : "自动刷新")">
+                    <MudToggleIconButton Toggled="_autoRefresh" ToggledChanged="OnAutoRefreshChanged"
+                                         Icon="@Icons.Material.Filled.PlayArrow" ToggledIcon="@Icons.Material.Filled.Pause"
+                                         Size="Size.Small" Color="Color.Primary" />
+                </MudTooltip>
+                <MudText Typo="Typo.body2">@(_autoRefresh ? "自动刷新中" : "自动刷新已暂停")</MudText>
+            </MudPaper>
+        </div>
+    </section>
+
+    <MudGrid Class="home-summary-grid">
+        <MudItem xs="12" md="6" xl="3">
+            <MudPaper Elevation="0" Class="home-summary-card home-summary-card-total">
+                <div class="home-summary-icon-shell">
+                    <MudIcon Icon="@Icons.Material.Filled.Email" Size="Size.Large" Color="Color.Primary" />
+                </div>
+                <MudText Typo="Typo.caption" Class="home-summary-label">今日总消息</MudText>
+                <MudText Typo="Typo.h4" Class="home-summary-value">@_summary.Total</MudText>
+                <MudText Typo="Typo.body2" Class="home-summary-note">接收侧流量总计</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6" xl="3">
+            <MudPaper Elevation="0" Class="home-summary-card home-summary-card-pending">
+                <div class="home-summary-icon-shell">
+                    <MudIcon Icon="@Icons.Material.Filled.HourglassEmpty" Size="Size.Large" Color="Color.Warning" />
+                </div>
+                <MudText Typo="Typo.caption" Class="home-summary-label">待处理</MudText>
+                @if (_summary.Pending > 0)
+                {
+                    <MudLink Href="@GetMessageLogUrl(MessageStatus.Pending)" Color="Color.Warning" Underline="Underline.None" Class="home-summary-value-link">
+                        <MudText Typo="Typo.h4" Class="home-summary-value" Color="Color.Warning">@_summary.Pending</MudText>
+                    </MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.h4" Class="home-summary-value">@_summary.Pending</MudText>
+                }
+                <MudText Typo="Typo.body2" Class="home-summary-note">等待进入处理队列</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6" xl="3">
+            <MudPaper Elevation="0" Class="home-summary-card home-summary-card-success">
+                <div class="home-summary-icon-shell">
+                    <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Large" Color="Color.Success" />
+                </div>
+                <MudText Typo="Typo.caption" Class="home-summary-label">成功</MudText>
+                <MudText Typo="Typo.h4" Class="home-summary-value">@_summary.Success</MudText>
+                <MudText Typo="Typo.body2" Class="home-summary-note">处理完成并已落库</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6" xl="3">
+            <MudPaper Elevation="0" Class="home-summary-card home-summary-card-failed">
+                <div class="home-summary-icon-shell">
+                    <MudIcon Icon="@Icons.Material.Filled.Error" Size="Size.Large" Color="Color.Error" />
+                </div>
+                <MudText Typo="Typo.caption" Class="home-summary-label">失败</MudText>
+                @if (_summary.Failed > 0)
+                {
+                    <MudLink Href="@GetMessageLogUrl(MessageStatus.Failed)" Color="Color.Error" Underline="Underline.None" Class="home-summary-value-link">
+                        <MudText Typo="Typo.h4" Class="home-summary-value" Color="Color.Error">@_summary.Failed</MudText>
+                    </MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.h4" Class="home-summary-value">@_summary.Failed</MudText>
+                }
+                <MudText Typo="Typo.body2" Class="home-summary-note">需要优先排查的异常</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <section class="home-panel">
+        <div class="home-panel-heading">
+            <div>
+                <MudText Typo="Typo.h6">今日接口统计</MudText>
+                <MudText Typo="Typo.body2" Class="home-panel-note">按事件代码查看处理量与异常分布。</MudText>
+            </div>
+        </div>
+
+        <MudTable Items="_tranCodeStats" Dense="true" Hover="true" Bordered="false" Striped="false" Loading="_loading" Class="home-table">
+            <HeaderContent>
+                <MudTh>事件代码</MudTh>
+                <MudTh>事件名称</MudTh>
+                <MudTh>总数</MudTh>
+                <MudTh>待处理</MudTh>
+                <MudTh>处理中</MudTh>
+                <MudTh>成功</MudTh>
+                <MudTh>失败</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.TranCode</MudTd>
+                <MudTd>@context.TranName</MudTd>
+                <MudTd>@context.Total</MudTd>
+                <MudTd>
+                    @if (context.Pending > 0)
+                    {
+                        <MudLink Href="@GetMessageLogUrl(MessageStatus.Pending, context.TranCode)" Color="Color.Warning" Underline="Underline.None">
+                            @context.Pending
+                        </MudLink>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Warning">0</MudText>
+                    }
+                </MudTd>
+                <MudTd><MudText Color="Color.Info">@context.Processing</MudText></MudTd>
+                <MudTd><MudText Color="Color.Success">@context.Success</MudText></MudTd>
+                <MudTd>
+                    @if (context.Failed > 0)
+                    {
+                        <MudLink Href="@GetMessageLogUrl(MessageStatus.Failed, context.TranCode)" Color="Color.Error" Underline="Underline.None">
+                            @context.Failed
+                        </MudLink>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Error">0</MudText>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </section>
+
+    <section class="home-panel">
+        <div class="home-panel-heading">
+            <div>
+                <MudText Typo="Typo.h6">最近接收消息</MudText>
+                <MudText Typo="Typo.body2" Class="home-panel-note">保留最近一批消息，便于快速回看接收与处理状态。</MudText>
+            </div>
+        </div>
+
+        <MudTable Items="_recentMessages" Dense="true" Hover="true" Bordered="false" Striped="false" Loading="_loading" Class="home-table">
+            <HeaderContent>
+                <MudTh>ID</MudTh>
+                <MudTh>事件代码</MudTh>
+                <MudTh>事件名称</MudTh>
+                <MudTh>MessageId</MudTh>
+                <MudTh>状态</MudTh>
+                <MudTh>接收时间</MudTh>
+                <MudTh>操作</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Id</MudTd>
+                <MudTd>@context.TranCode</MudTd>
+                <MudTd>@context.TranName</MudTd>
+                <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.MessageId</MudTd>
+                <MudTd>
+                    @switch (context.Status)
+                    {
+                        case MessageStatus.Pending:
+                            <MudChip T="string" Color="Color.Warning" Size="Size.Small">待处理</MudChip>
+                            break;
+                        case MessageStatus.Processing:
+                            <MudChip T="string" Color="Color.Info" Size="Size.Small">处理中</MudChip>
+                            break;
+                        case MessageStatus.Success:
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small">成功</MudChip>
+                            break;
+                        case MessageStatus.Failed:
+                            <MudChip T="string" Color="Color.Error" Size="Size.Small">失败</MudChip>
+                            break;
+                        case MessageStatus.Filtered:
+                            <MudChip T="string" Color="Color.Secondary" Size="Size.Small">已过滤</MudChip>
+                            break;
+                        case MessageStatus.Unmatched:
+                            <MudChip T="string" Color="Color.Default" Size="Size.Small">未匹配</MudChip>
+                            break;
+                        case MessageStatus.PartialSuccess:
+                            <MudChip T="string" Color="Color.Info" Size="Size.Small">部分成功</MudChip>
+                            break;
+                    }
+                </MudTd>
+                <MudTd>@context.CreatedAt.ToString("HH:mm:ss")</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                   OnClick="@(() => GoToDetail(context.Id))" />
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </section>
+</div>
+
+@code {
+    [Inject] private MessageQueryService QueryService { get; set; } = default!;
+
+    private TodaySummary _summary = new();
+    private List<TranCodeStat> _tranCodeStats = [];
+    private List<EsbMessage> _recentMessages = [];
+    private bool _loading = true;
+    private bool _autoRefresh;
+    private bool _databaseNeedsUpgrade;
+    private System.Threading.Timer? _refreshTimer;
+
+    protected override bool RequiresIntegrationProject => false;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await RefreshData();
+    }
+
+    private async Task RefreshData()
+    {
+        _loading = true;
+        try
+        {
+            _summary = await QueryService.GetTodaySummaryAsync();
+            _tranCodeStats = await QueryService.GetTodayTranCodeStatsAsync();
+            _recentMessages = await QueryService.GetRecentMessagesAsync();
+            _databaseNeedsUpgrade = false;
+        }
+        catch (Exception ex)
+        {
+            _databaseNeedsUpgrade = true;
+            inj_snackbar.Add($"加载数据失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnAutoRefreshChanged(bool toggled)
+    {
+        _autoRefresh = toggled;
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+
+        if (_autoRefresh)
+        {
+            _refreshTimer = new System.Threading.Timer(async _ =>
+            {
+                await InvokeAsync(async () =>
+                {
+                    await RefreshData();
+                    StateHasChanged();
+                });
+            }, null, 10000, 10000);
+        }
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+    }
+
+    private void GoToDetail(long id)
+    {
+        inj_navigationManager.NavigateTo($"/messages/{id}");
+    }
+
+    private static string GetMessageLogUrl(MessageStatus status, string? tranCode = null)
+    {
+        var startTime = DateTime.Today;
+        var endTime = DateTime.Today.AddDays(1).AddMinutes(-1);
+        var query = new List<string>
+        {
+            $"status={Uri.EscapeDataString(status.ToString())}",
+            $"startDate={Uri.EscapeDataString(startTime.ToString("yyyy-MM-dd HH:mm"))}",
+            $"endDate={Uri.EscapeDataString(endTime.ToString("yyyy-MM-dd HH:mm"))}"
+        };
+
+        if (!string.IsNullOrWhiteSpace(tranCode))
+            query.Add($"tranCode={Uri.EscapeDataString(tranCode)}");
+
+        return $"/messages?{string.Join("&", query)}";
+    }
+}

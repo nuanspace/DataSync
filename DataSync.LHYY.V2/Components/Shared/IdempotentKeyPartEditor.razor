@@ -1,0 +1,168 @@
+﻿@using Newtonsoft.Json.Linq
+
+<div class="idempotent-key-part-editor">
+    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+        幂等键按当前列表顺序拼接。优先取源路径，其次固定值，最后回退默认值；适合在上游没有稳定消息号时补充去重。
+    </MudAlert>
+
+    @if (Parts.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-2">暂无幂等键规则</MudText>
+    }
+    else
+    {
+        @foreach (var (part, index) in Parts.Select((p, i) => (p, i)))
+        {
+            var idx = index;
+            <MudPaper Outlined="true" Class="pa-2 mb-2">
+                <MudGrid Spacing="1">
+                    <MudItem xs="12" sm="1" Class="d-flex align-center">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@($"#{idx + 1}")</MudChip>
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        @if (OnRequestPathPick.HasDelegate)
+                        {
+                            <PathPickTextField @bind-Value="part.SourcePath"
+                                               Label="源路径"
+                                               HelperText="可留空"
+                                               IsActive="@(ActivePickIndex == idx)"
+                                               OnActivated="@(() => OnRequestPathPick.InvokeAsync(idx))" />
+                        }
+                        else
+                        {
+                            <div class="d-flex align-center gap-1" style="position:relative;">
+                                <PathPickTextField @bind-Value="part.SourcePath"
+                                                   Label="源路径"
+                                                   HelperText="可留空"
+                                                   IsActive="@(_jsonPickerIndex == idx)"
+                                                   OnActivated="@(() => ActivateLocalJsonPicker(idx))"
+                                                   Style="flex:1;" />
+                                @if (!string.IsNullOrWhiteSpace(JsonText))
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.AccountTree" Size="Size.Small"
+                                                   Color="@(_jsonPickerIndex == idx ? Color.Warning : Color.Primary)"
+                                                   OnClick="@(() => ToggleJsonPicker(idx))" />
+                                    <MudPopover Open="@(_jsonPickerIndex == idx)" Fixed="true"
+                                                AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                        <MudPaper Outlined="true" Elevation="8" Class="pa-2"
+                                                  Style="width:400px;max-height:350px;overflow-y:auto;">
+                                            <div class="d-flex justify-space-between align-center mb-1">
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">点击节点选取路径</MudText>
+                                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                                               OnClick="CloseLocalJsonPicker" />
+                                            </div>
+                                            <JsonTreeViewer JsonText="@JsonText" UseArrayBrackets="true" PreferFirstArrayItemAsRoot="true"
+                                                            SelectedPath="@_localSelectedPath"
+                                                            SelectionVersion="@_localSelectedPathVersion"
+                                                            OnPathSelected="@(path => OnPickPath(idx, path))" />
+                                        </MudPaper>
+                                    </MudPopover>
+                                }
+                            </div>
+                        }
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="part.LiteralValue" Label="固定值" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="part.DefaultValue" Label="默认值" />
+                    </MudItem>
+                    <MudItem xs="6" sm="1" Class="d-flex align-center">
+                        <MudSwitch @bind-Value="part.IsEnabled" Color="Color.Primary" />
+                    </MudItem>
+                    <MudItem xs="12" sm="11">
+                        <MudTextField @bind-Value="part.Description" Label="说明" />
+                    </MudItem>
+                    <MudItem xs="12" sm="1" Class="d-flex align-center justify-end">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => RemovePart(idx))" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+    }
+
+    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+               StartIcon="@Icons.Material.Filled.Add" OnClick="AddPart">
+        添加幂等键片段
+    </MudButton>
+</div>
+
+@code {
+    [Parameter]
+    public List<EsbIdempotentKeyPart> Parts { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<List<EsbIdempotentKeyPart>> PartsChanged { get; set; }
+
+    [Parameter]
+    public string? JsonText { get; set; }
+
+    [Parameter]
+    public EventCallback<int> OnRequestPathPick { get; set; }
+
+    [Parameter]
+    public int ActivePickIndex { get; set; } = -1;
+
+    private int _jsonPickerIndex = -1;
+    private string? _localSelectedPath;
+    private int _localSelectedPathVersion;
+
+    private async Task AddPart()
+    {
+        Parts.Add(new EsbIdempotentKeyPart
+        {
+            IsEnabled = true,
+        });
+        await PartsChanged.InvokeAsync(Parts);
+    }
+
+    private async Task RemovePart(int index)
+    {
+        Parts.RemoveAt(index);
+        if (_jsonPickerIndex == index)
+            _jsonPickerIndex = -1;
+        else if (_jsonPickerIndex > index)
+            _jsonPickerIndex--;
+        await PartsChanged.InvokeAsync(Parts);
+    }
+
+    private void ToggleJsonPicker(int index)
+    {
+        if (_jsonPickerIndex == index)
+        {
+            _jsonPickerIndex = -1;
+            _localSelectedPath = null;
+            _localSelectedPathVersion++;
+            return;
+        }
+
+        ActivateLocalJsonPicker(index);
+    }
+
+    private void ActivateLocalJsonPicker(int index)
+    {
+        _jsonPickerIndex = index;
+        _localSelectedPath = index >= 0 && index < Parts.Count ? Parts[index].SourcePath : null;
+        _localSelectedPathVersion++;
+    }
+
+    private void CloseLocalJsonPicker()
+    {
+        _jsonPickerIndex = -1;
+        _localSelectedPath = null;
+        _localSelectedPathVersion++;
+    }
+
+    private async Task OnPickPath(int index, string path)
+    {
+        if (index >= Parts.Count)
+            return;
+
+        Parts[index].SourcePath = path;
+        _jsonPickerIndex = -1;
+        _localSelectedPath = null;
+        _localSelectedPathVersion++;
+        await PartsChanged.InvokeAsync(Parts);
+    }
+}

@@ -1,0 +1,44 @@
+/* 单条映射行 */
+::deep .mapping-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    flex-wrap: wrap;
+}
+
+::deep .mapping-item + .mapping-item {
+    border-top: 1px dashed var(--mud-palette-table-lines);
+}
+
+/* 源路径 & 字段名（monospace） */
+::deep .mapping-source {
+    font-family: monospace;
+    font-size: 12px;
+}
+
+/* 标签（字典/默认值/表达式/接口标识） */
+::deep .mapping-tag {
+    font-size: 11px;
+    color: var(--mud-palette-text-secondary);
+    background-color: var(--mud-palette-background-gray);
+    padding: 1px 6px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+/* 已禁用接口：灰色 + 删除线 */
+::deep .disabled-interface {
+    text-decoration: line-through;
+    color: var(--mud-palette-text-disabled);
+}
+
+/* 已禁用映射：整行灰色 */
+::deep .disabled-mapping {
+    opacity: 0.5;
+}
+
+/* 事件类型 Tab 内各区域间距 */
+::deep .event-type-section > .mud-text:not(:first-child) {
+    margin-top: 16px;
+}

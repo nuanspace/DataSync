@@ -1,0 +1,855 @@
+﻿@page "/backfill"
+@inherits BasePage
+@inject SyncOrchestrator inj_orchestrator
+
+<PageTitle>数据补录</PageTitle>
+
+<div class="backfill-page">
+    <div class="backfill-header">
+        <div>
+            <MudText Typo="Typo.h5" Class="backfill-title">数据补录</MudText>
+            <div class="backfill-subtitle">按时间、患者 ID 或就诊号定位对象</div>
+        </div>
+        <div class="backfill-header-meta">
+            <span>目标 @_tasks.Count</span>
+            <span>接口 @GetTopLevelInterfaceCount()</span>
+        </div>
+    </div>
+
+<MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="true" Class="backfill-tabs" PanelClass="backfill-tab-panel">
+    <!-- 按时间范围 -->
+    <MudTabPanel Text="按时间范围" Icon="@Icons.Material.Filled.DateRange">
+        <MudGrid Class="backfill-input-grid">
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="_startDate" Label="开始日期" Placeholder="请选择" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTimePicker @bind-Time="_startTime" Label="开始时间" Placeholder="00:00" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudDatePicker @bind-Date="_endDate" Label="结束日期" Placeholder="请选择" />
+            </MudItem>
+            <MudItem xs="12" sm="3">
+                <MudTimePicker @bind-Time="_endTime" Label="结束时间" Placeholder="23:59" />
+            </MudItem>
+        </MudGrid>
+        @TaskSelector
+        @SkipSyncedSwitch
+        <div class="backfill-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="ExecuteByTimeRange" Disabled="_executing">
+                @if (_executing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                执行补数据
+            </MudButton>
+            @if (_executing)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="CancelExecution">
+                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Class="mr-1" />
+                    取消
+                </MudButton>
+            }
+        </div>
+
+    </MudTabPanel>
+
+    <!-- 按患者ID -->
+    <MudTabPanel Text="按患者ID" Icon="@Icons.Material.Filled.Person">
+        <MudTextField @bind-Value="_patientIds" Label="HIS_PAT_ID" Placeholder="多个用逗号分隔"
+                      Variant="Variant.Outlined" Lines="3" Class="backfill-wide-input" />
+        @TaskSelector
+        @SkipSyncedSwitch
+        <div class="backfill-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="ExecuteByPatientId" Disabled="_executing">
+                @if (_executing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                执行补数据
+            </MudButton>
+            @if (_executing)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="CancelExecution">
+                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Class="mr-1" />
+                    取消
+                </MudButton>
+            }
+        </div>
+    </MudTabPanel>
+
+    <!-- 按就诊号 -->
+    <MudTabPanel Text="按就诊号" Icon="@Icons.Material.Filled.Badge">
+        <MudTextField @bind-Value="_visitSns" Label="就诊号" Placeholder="多个用逗号分隔"
+                      Variant="Variant.Outlined" Lines="3" Class="backfill-wide-input" />
+        @TaskSelector
+        @SkipSyncedSwitch
+        <div class="backfill-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       OnClick="ExecuteByVisitSn" Disabled="_executing">
+                @if (_executing)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                执行补数据
+            </MudButton>
+            @if (_executing)
+            {
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="CancelExecution">
+                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Class="mr-1" />
+                    取消
+                </MudButton>
+            }
+        </div>
+    </MudTabPanel>
+</MudTabs>
+
+<!-- 进度展示区域（多个Tab共享） -->
+@if (_progressList.Count > 0)
+{
+    <MudPaper Class="backfill-progress-panel" Elevation="0">
+        <div class="backfill-section-title">执行进度</div>
+        @foreach (var tp in _progressList)
+        {
+            <MudText Typo="Typo.subtitle1" Class="backfill-progress-heading">
+                <MudIcon Icon="@Icons.Material.Filled.Task" Size="Size.Small" Class="mr-1" />
+                @tp.TaskName
+                @if (tp.EndTime != null)
+                {
+                    <span class="elapsed-total">耗时 @FormatElapsed(tp.EndTime.Value - tp.StartTime)</span>
+                }
+            </MudText>
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                <!-- 采集步骤 -->
+                <MudTimelineItem Color="@GetPhaseColor(tp, BackfillPhase.Ingested)"
+                                 Icon="@GetPhaseIcon(tp, BackfillPhase.Ingested)"
+                                 Size="Size.Small">
+                    <MudText Typo="Typo.body2">
+                        采集数据
+                        @if (tp.IngestedCount != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">@tp.IngestedCount 条</MudChip>
+                            <span class="elapsed">@FormatElapsed(tp.IngestedTime!.Value - tp.StartTime)</span>
+                        }
+                        else if (tp.CurrentPhase == BackfillPhase.TaskStart)
+                        {
+                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" />
+                        }
+                    </MudText>
+                </MudTimelineItem>
+
+                <!-- 过滤步骤（按患者ID时跳过） -->
+                @if (!tp.SkipFilter)
+                {
+                    <MudTimelineItem Color="@GetPhaseColor(tp, BackfillPhase.Filtered)"
+                                     Icon="@GetPhaseIcon(tp, BackfillPhase.Filtered)"
+                                     Size="Size.Small">
+                        <MudText Typo="Typo.body2">
+                            过滤数据
+                            @if (tp.FilteredCount != null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Class="ml-2">@tp.FilteredCount 条</MudChip>
+                                <span class="elapsed">@FormatElapsed(tp.FilteredTime!.Value - tp.IngestedTime!.Value)</span>
+                            }
+                            else if (tp.CurrentPhase == BackfillPhase.Ingested)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="ml-2" />
+                            }
+                        </MudText>
+                    </MudTimelineItem>
+                }
+
+                <!-- 同步步骤 -->
+                <MudTimelineItem Color="@GetSyncStepColor(tp)"
+                                 Icon="@GetSyncStepIcon(tp)"
+                                 Size="Size.Small">
+                    <MudText Typo="Typo.body2" Class="mb-2">
+                        同步推送
+                        @if (tp.Skipped)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Default" Class="ml-2">无需推送</MudChip>
+                        }
+                        else if (tp.SyncTotal > 0)
+                        {
+                            <span class="ml-2">@tp.SyncCompleted / @tp.SyncTotal</span>
+                            @if (tp.CurrentPhase == BackfillPhase.TaskDone && tp.SyncStartTime != null)
+                            {
+                                <span class="elapsed">@FormatElapsed(tp.EndTime!.Value - tp.SyncStartTime.Value)</span>
+                            }
+                        }
+                    </MudText>
+                    @if (tp.SyncTotal > 0 && !tp.Skipped)
+                    {
+                        <MudProgressLinear Value="@GetSyncPercent(tp)" Color="Color.Primary"
+                                           Rounded="true" Size="Size.Medium" Class="mb-2" />
+                    }
+                    <!-- 患者详情列表 -->
+                    @if (tp.PatientResults.Count > 0)
+                    {
+                        <div class="patient-list">
+                            @foreach (var p in tp.PatientResults)
+                            {
+                                <div class="patient-item">
+                                    <MudIcon Icon="@GetPatientIcon(p)"
+                                             Color="@GetPatientColor(p)"
+                                             Size="Size.Small" Class="mr-1" />
+                                    <span class="patient-name">@(string.IsNullOrEmpty(p.PatName) ? p.HisPatId : p.PatName)(@p.HisPatId)</span>
+                                    @foreach (var iface in p.Interfaces)
+                                    {
+                                        @if (!string.IsNullOrWhiteSpace(iface.ErrorMessage))
+                                        {
+                                            <MudTooltip Arrow="true">
+                                                <TooltipContent>
+                                                    <div class="backfill-error-tooltip">@iface.ErrorMessage</div>
+                                                </TooltipContent>
+                                                <ChildContent>
+                                                    <MudChip T="string" Size="Size.Small"
+                                                             Color="@GetInterfaceColor(iface)"
+                                                             Class="ml-1">
+                                                        @GetInterfaceText(iface)
+                                                    </MudChip>
+                                                </ChildContent>
+                                            </MudTooltip>
+                                        }
+                                        else
+                                        {
+                                            <MudChip T="string" Size="Size.Small"
+                                                     Color="@GetInterfaceColor(iface)"
+                                                     Class="ml-1">
+                                                @GetInterfaceText(iface)
+                                            </MudChip>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </MudTimelineItem>
+
+                <!-- 完成步骤 -->
+                <MudTimelineItem Color="@GetDoneStepColor(tp)"
+                                 Icon="@GetDoneStepIcon(tp)"
+                                 Size="Size.Small">
+                    <MudText Typo="Typo.body2">
+                        @if (tp.Skipped)
+                        {
+                            @:完成（无匹配数据）
+                        }
+                        else if (tp.Cancelled)
+                        {
+                            @:已取消
+                        }
+                        else
+                        {
+                            @:完成
+                        }
+                    </MudText>
+                </MudTimelineItem>
+            </MudTimeline>
+        }
+
+        <!-- 汇总区域 -->
+        @if (_allDone || _cancelled)
+        {
+            @if (_cancelled)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                    补录已取消。已完成部分：成功 @(_result?.SuccessCount ?? 0), 失败 @(_result?.FailCount ?? 0), 跳过 @(_result?.SkipCount ?? 0)
+                    <span class="elapsed-total ml-2">总耗时 @FormatElapsed(DateTime.Now - _globalStartTime)</span>
+                </MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="@(_result?.FailCount > 0 ? Severity.Warning : Severity.Success)"
+                          Dense="true" Class="mt-3">
+                    全部补录完成！成功 @(_result?.SuccessCount ?? 0), 失败 @(_result?.FailCount ?? 0), 跳过 @(_result?.SkipCount ?? 0)
+                    <span class="elapsed-total ml-2">总耗时 @FormatElapsed(DateTime.Now - _globalStartTime)</span>
+                </MudAlert>
+            }
+
+            @if (_result?.FailCount > 0)
+            {
+                <MudSimpleTable Dense="true" Hover="true" Bordered="false" Class="backfill-fail-table">
+                    <thead>
+                        <tr>
+                            <th>患者ID</th>
+                            <th>姓名</th>
+                            <th>目标</th>
+                            <th>原因</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var detail in _result.FailDetails)
+                        {
+                            <tr>
+                                <td>@detail.HisPatId</td>
+                                <td>@detail.PatName</td>
+                                <td>@detail.TaskName</td>
+                                <td>@detail.ErrorMessage</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+        }
+    </MudPaper>
+}
+</div>
+
+@code {
+    private List<TaskSelection> _tasks = [];
+    private DateTime? _startDate;
+    private TimeSpan? _startTime;
+    private DateTime? _endDate;
+    private TimeSpan? _endTime;
+    private string _patientIds = "";
+    private string _visitSns = "";
+    private bool _excludeSynced;
+    private bool _executing;
+    private SyncResult? _result;
+    private List<TaskProgressState> _progressList = [];
+    private bool _allDone;
+    private bool _cancelled;
+    private CancellationTokenSource? _cts;
+    private DateTime _globalStartTime;
+
+    private RenderFragment TaskSelector => @<div class="backfill-selector">
+        <div class="backfill-selector-head">
+            <div class="backfill-section-title">目标系统与接口</div>
+            <span>@GetSelectionSummary()</span>
+        </div>
+        @foreach (var task in _tasks)
+        {
+            <div class="@GetTaskSelectorClass(task)">
+                <div class="backfill-task-header">
+                    <MudCheckBox @bind-Value="task.Selected" Label="@task.Task.Name" Color="Color.Primary" />
+                    <div class="backfill-task-meta">
+                        <span>@task.Interfaces.Count 个接口</span>
+                        @if (task.Task.EnableTriggerRecordPush)
+                        {
+                            <span>含触发记录</span>
+                        }
+                    </div>
+                </div>
+                @if (task.Selected)
+                {
+                    <div class="backfill-interface-list">
+                        @if (task.Task.EnableTriggerRecordPush)
+                        {
+                            <div class="backfill-interface-option backfill-interface-option-trigger">
+                                <MudCheckBox @bind-Value="task.TriggerRecordSelected"
+                                             Label="本地触发记录"
+                                             Color="Color.Secondary" />
+                            </div>
+                        }
+                        @foreach (var iface in task.Interfaces)
+                        {
+                            <div class="backfill-interface-option">
+                                <MudCheckBox @bind-Value="iface.Selected"
+                                             Label="@GetInterfaceLabel(iface.Interface)"
+                                             Color="Color.Primary" />
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>;
+
+    private RenderFragment SkipSyncedSwitch => @<div class="backfill-option-strip">
+        <MudSwitch @bind-Value="_excludeSynced" Label="跳过已成功对象" Color="Color.Primary" />
+        <span>
+            @(_excludeSynced ? "当前会按任务级成功记录跳过对象。" : "当前不跳过已成功对象，适合按接口补录。")
+        </span>
+    </div>;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        var logService = new SyncLogService(ContextFactory);
+        var enabledTasks = await logService.GetEnabledTasksAsync(CancellationToken);
+        _tasks = enabledTasks.Select(t => new TaskSelection
+        {
+            Task = t,
+            Selected = true,
+            TriggerRecordSelected = t.EnableTriggerRecordPush,
+            Interfaces = t.Interfaces
+                .Where(i => string.IsNullOrWhiteSpace(i.ParentInterfaceKey))
+                .OrderBy(i => i.SortOrder)
+                .ThenBy(i => i.DisplayName)
+                .Select(i => new InterfaceSelection { Interface = i, Selected = true })
+                .ToList()
+        }).ToList();
+    }
+
+    private void CancelExecution()
+    {
+        _cts?.Cancel();
+        _cancelled = true;
+        var now = DateTime.Now;
+        foreach (var progress in _progressList.Where(p => p.CurrentPhase != BackfillPhase.TaskDone))
+        {
+            progress.Cancelled = true;
+            progress.EndTime ??= now;
+        }
+        StateHasChanged();
+    }
+
+    private bool TryBuildExecutionSelection(
+        out List<string> taskCodes,
+        out Dictionary<string, List<int>> selectedInterfaceIdsByTask,
+        out Dictionary<string, bool> includeTriggerRecordByTask)
+    {
+        taskCodes = [];
+        selectedInterfaceIdsByTask = [];
+        includeTriggerRecordByTask = [];
+
+        var selectedTasks = _tasks.Where(t => t.Selected).ToList();
+        if (selectedTasks.Count == 0)
+        {
+            inj_snackbar.Add("请至少选择一个目标系统", Severity.Warning);
+            return false;
+        }
+
+        var emptyTasks = new List<string>();
+        foreach (var task in selectedTasks)
+        {
+            var selectedInterfaceIds = task.Interfaces
+                .Where(i => i.Selected)
+                .Select(i => i.Interface.Id)
+                .ToList();
+            var includeTriggerRecord = task.Task.EnableTriggerRecordPush && task.TriggerRecordSelected;
+
+            if (selectedInterfaceIds.Count == 0 && !includeTriggerRecord)
+            {
+                emptyTasks.Add(task.Task.Name);
+                continue;
+            }
+
+            taskCodes.Add(task.Task.Code);
+            selectedInterfaceIdsByTask[task.Task.Code] = selectedInterfaceIds;
+            includeTriggerRecordByTask[task.Task.Code] = includeTriggerRecord;
+        }
+
+        if (emptyTasks.Count > 0)
+        {
+            inj_snackbar.Add($"请为以下目标至少选择一个接口或本地触发记录：{string.Join("、", emptyTasks)}", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static List<string> SplitCommaValues(string value)
+        => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+    private int GetTopLevelInterfaceCount()
+        => _tasks.Sum(t => t.Interfaces.Count);
+
+    private string GetSelectionSummary()
+    {
+        var selectedTaskCount = _tasks.Count(t => t.Selected);
+        var selectedInterfaceCount = _tasks
+            .Where(t => t.Selected)
+            .Sum(t => t.Interfaces.Count(i => i.Selected));
+        var selectedTriggerCount = _tasks.Count(t => t.Selected && t.Task.EnableTriggerRecordPush && t.TriggerRecordSelected);
+        return $"已选 {selectedTaskCount} 个目标 / {selectedInterfaceCount + selectedTriggerCount} 个接口";
+    }
+
+    private static string GetTaskSelectorClass(TaskSelection task)
+        => task.Selected ? "backfill-task-selector is-selected" : "backfill-task-selector";
+
+    private async Task ExecuteByTimeRange()
+    {
+        if (_startDate == null || _endDate == null)
+        {
+            inj_snackbar.Add("请选择时间范围", Severity.Warning);
+            return;
+        }
+
+        if (!TryBuildExecutionSelection(out var codes, out var selectedInterfaceIdsByTask, out var includeTriggerRecordByTask))
+            return;
+
+        var from = _startDate.Value.Add(_startTime ?? TimeSpan.Zero);
+        var to = _endDate.Value.Add(_endTime ?? new TimeSpan(23, 59, 59));
+
+        _executing = true;
+        _result = null;
+        _progressList = [];
+        _allDone = false;
+        _cancelled = false;
+        _cts = new CancellationTokenSource();
+        _globalStartTime = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            _result = await inj_orchestrator.BackfillByTimeRangeAsync(
+                from, to, codes, _excludeSynced, _cts.Token,
+                onProgress: async evt =>
+                {
+                    HandleProgress(evt);
+                    await InvokeAsync(StateHasChanged);
+                },
+                selectedInterfaceIdsByTask: selectedInterfaceIdsByTask,
+                includeTriggerRecordByTask: includeTriggerRecordByTask);
+            inj_snackbar.Add("补数据执行完成", Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            _cancelled = true;
+            _result ??= new SyncResult();
+            inj_snackbar.Add("补数据已取消", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"执行出错: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _executing = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private async Task ExecuteByPatientId()
+    {
+        if (string.IsNullOrWhiteSpace(_patientIds))
+        {
+            inj_snackbar.Add("请输入患者ID", Severity.Warning);
+            return;
+        }
+
+        if (!TryBuildExecutionSelection(out var codes, out var selectedInterfaceIdsByTask, out var includeTriggerRecordByTask))
+            return;
+
+        var ids = SplitCommaValues(_patientIds);
+        if (ids.Count == 0)
+        {
+            inj_snackbar.Add("请输入有效患者ID", Severity.Warning);
+            return;
+        }
+
+        _executing = true;
+        _result = null;
+        _progressList = [];
+        _allDone = false;
+        _cancelled = false;
+        _cts = new CancellationTokenSource();
+        _globalStartTime = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            _result = await inj_orchestrator.BackfillByPatientIdAsync(
+                ids, codes, _excludeSynced, _cts.Token,
+                onProgress: async evt =>
+                {
+                    HandleProgress(evt);
+                    await InvokeAsync(StateHasChanged);
+                },
+                selectedInterfaceIdsByTask: selectedInterfaceIdsByTask,
+                includeTriggerRecordByTask: includeTriggerRecordByTask);
+            inj_snackbar.Add("补数据执行完成", Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            _cancelled = true;
+            _result ??= new SyncResult();
+            inj_snackbar.Add("补数据已取消", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"执行出错: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _executing = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private async Task ExecuteByVisitSn()
+    {
+        if (string.IsNullOrWhiteSpace(_visitSns))
+        {
+            inj_snackbar.Add("请输入就诊号", Severity.Warning);
+            return;
+        }
+
+        if (!TryBuildExecutionSelection(out var codes, out var selectedInterfaceIdsByTask, out var includeTriggerRecordByTask))
+            return;
+
+        var invalidTasks = _tasks
+            .Where(t => t.Selected && string.IsNullOrWhiteSpace(t.Task.VisitSnField))
+            .Select(t => t.Task.Name)
+            .ToList();
+        if (invalidTasks.Count > 0)
+        {
+            inj_snackbar.Add($"以下目标未配置就诊号字段：{string.Join("、", invalidTasks)}", Severity.Warning);
+            return;
+        }
+
+        var visitSns = SplitCommaValues(_visitSns);
+        if (visitSns.Count == 0)
+        {
+            inj_snackbar.Add("请输入有效就诊号", Severity.Warning);
+            return;
+        }
+
+        _executing = true;
+        _result = null;
+        _progressList = [];
+        _allDone = false;
+        _cancelled = false;
+        _cts = new CancellationTokenSource();
+        _globalStartTime = DateTime.Now;
+        StateHasChanged();
+
+        try
+        {
+            _result = await inj_orchestrator.BackfillByVisitSnAsync(
+                visitSns, codes, _excludeSynced, _cts.Token,
+                onProgress: async evt =>
+                {
+                    HandleProgress(evt);
+                    await InvokeAsync(StateHasChanged);
+                },
+                selectedInterfaceIdsByTask: selectedInterfaceIdsByTask,
+                includeTriggerRecordByTask: includeTriggerRecordByTask);
+            inj_snackbar.Add("补数据执行完成", Severity.Success);
+        }
+        catch (OperationCanceledException)
+        {
+            _cancelled = true;
+            _result ??= new SyncResult();
+            inj_snackbar.Add("补数据已取消", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"执行出错: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _executing = false;
+            _cts?.Dispose();
+            _cts = null;
+        }
+    }
+
+    private void HandleProgress(BackfillProgressEvent evt)
+    {
+        var now = DateTime.Now;
+        switch (evt.Phase)
+        {
+            case BackfillPhase.TaskStart:
+                _progressList.Add(new TaskProgressState
+                {
+                    TaskCode = evt.TaskCode,
+                    TaskName = evt.TaskName,
+                    CurrentPhase = BackfillPhase.TaskStart,
+                    StartTime = now,
+                    SkipFilter = evt.SkipFilter
+                });
+                break;
+
+            case BackfillPhase.Ingested:
+                var tpIngested = GetTaskState(evt.TaskCode);
+                if (tpIngested != null)
+                {
+                    tpIngested.IngestedCount = evt.Count;
+                    tpIngested.IngestedTime = now;
+                    tpIngested.CurrentPhase = BackfillPhase.Ingested;
+                    if (evt.SkipFilter)
+                        tpIngested.SkipFilter = true;
+                }
+                break;
+
+            case BackfillPhase.Filtered:
+                var tpFiltered = GetTaskState(evt.TaskCode);
+                if (tpFiltered != null)
+                {
+                    tpFiltered.FilteredCount = evt.Count;
+                    tpFiltered.FilteredTime = now;
+                    tpFiltered.CurrentPhase = BackfillPhase.Filtered;
+                    // 过滤为0时标记跳过
+                    if (evt.Count == 0)
+                        tpFiltered.Skipped = true;
+                }
+                break;
+
+            case BackfillPhase.SyncStart:
+                var tpSync = GetTaskState(evt.TaskCode);
+                if (tpSync != null)
+                {
+                    tpSync.SyncTotal = evt.Total ?? 0;
+                    tpSync.SyncStartTime = now;
+                    tpSync.CurrentPhase = BackfillPhase.SyncStart;
+                }
+                break;
+
+            case BackfillPhase.PatientDone:
+                var tpPatient = GetTaskState(evt.TaskCode);
+                if (tpPatient != null && evt.Patient != null)
+                {
+                    tpPatient.SyncCompleted = evt.Completed ?? tpPatient.SyncCompleted + 1;
+                    tpPatient.PatientResults.Add(evt.Patient);
+                }
+                break;
+
+            case BackfillPhase.TaskDone:
+                var tpDone = GetTaskState(evt.TaskCode);
+                if (tpDone != null)
+                {
+                    tpDone.CurrentPhase = BackfillPhase.TaskDone;
+                    tpDone.EndTime = now;
+                }
+                break;
+
+            case BackfillPhase.AllDone:
+                _allDone = true;
+                break;
+        }
+    }
+
+    private TaskProgressState? GetTaskState(string taskCode)
+        => _progressList.FirstOrDefault(t => t.TaskCode == taskCode);
+
+    /// <summary>
+    /// 采集/过滤步骤的颜色（不受跳过影响）
+    /// </summary>
+    private static Color GetPhaseColor(TaskProgressState tp, BackfillPhase targetPhase)
+    {
+        if (tp.CurrentPhase > targetPhase) return Color.Success;
+        if (tp.CurrentPhase == targetPhase) return Color.Primary;
+        return Color.Default;
+    }
+
+    private static string GetPhaseIcon(TaskProgressState tp, BackfillPhase targetPhase)
+    {
+        if (tp.CurrentPhase > targetPhase) return Icons.Material.Filled.CheckCircle;
+        if (tp.CurrentPhase == targetPhase) return Icons.Material.Filled.PlayCircle;
+        return Icons.Material.Filled.RadioButtonUnchecked;
+    }
+
+    /// <summary>
+    /// 同步步骤颜色：跳过时灰色，正常时按阶段判断
+    /// </summary>
+    private static Color GetSyncStepColor(TaskProgressState tp)
+    {
+        if (tp.Skipped) return Color.Default;
+        if (tp.Cancelled) return Color.Warning;
+        return GetPhaseColor(tp, BackfillPhase.SyncStart);
+    }
+
+    private static string GetSyncStepIcon(TaskProgressState tp)
+    {
+        if (tp.Skipped) return Icons.Material.Filled.SkipNext;
+        if (tp.Cancelled) return Icons.Material.Filled.Cancel;
+        return GetPhaseIcon(tp, BackfillPhase.SyncStart);
+    }
+
+    /// <summary>
+    /// 完成步骤颜色：跳过时灰色，取消时橙色，正常完成时绿色
+    /// </summary>
+    private static Color GetDoneStepColor(TaskProgressState tp)
+    {
+        if (tp.Cancelled) return Color.Warning;
+        if (tp.Skipped) return Color.Default;
+        if (tp.CurrentPhase == BackfillPhase.TaskDone) return Color.Success;
+        return Color.Default;
+    }
+
+    private static string GetDoneStepIcon(TaskProgressState tp)
+    {
+        if (tp.Cancelled) return Icons.Material.Filled.Cancel;
+        if (tp.Skipped) return Icons.Material.Filled.SkipNext;
+        if (tp.CurrentPhase == BackfillPhase.TaskDone) return Icons.Material.Filled.CheckCircle;
+        return Icons.Material.Filled.RadioButtonUnchecked;
+    }
+
+    private static double GetSyncPercent(TaskProgressState tp)
+        => tp.SyncTotal > 0 ? (double)tp.SyncCompleted / tp.SyncTotal * 100 : 0;
+
+    private static string GetInterfaceLabel(SyncTaskInterface iface)
+    {
+        var name = string.IsNullOrWhiteSpace(iface.DisplayName) ? iface.ServerCode : iface.DisplayName;
+        return string.Equals(name, iface.ServerCode, StringComparison.OrdinalIgnoreCase)
+            ? name
+            : $"{name}（{iface.ServerCode}）";
+    }
+
+    private static Color GetPatientColor(PatientSyncDetail patient)
+    {
+        if (!patient.Success) return Color.Error;
+        return patient.Skipped ? Color.Default : Color.Success;
+    }
+
+    private static string GetPatientIcon(PatientSyncDetail patient)
+    {
+        if (!patient.Success) return Icons.Material.Filled.Error;
+        return patient.Skipped ? Icons.Material.Filled.SkipNext : Icons.Material.Filled.CheckCircle;
+    }
+
+    private static Color GetInterfaceColor(InterfaceSyncDetail detail)
+    {
+        if (!detail.Success) return Color.Error;
+        return detail.Skipped ? Color.Default : Color.Success;
+    }
+
+    private static string GetInterfaceText(InterfaceSyncDetail detail)
+    {
+        var stage = string.IsNullOrWhiteSpace(detail.Stage)
+            ? detail.Success ? "成功" : "失败"
+            : detail.Stage;
+        return $"{detail.InterfaceName} {stage}";
+    }
+
+    private static string FormatElapsed(TimeSpan ts)
+    {
+        if (ts.TotalMinutes >= 1)
+            return $"{(int)ts.TotalMinutes}分{ts.Seconds}秒";
+        return $"{ts.TotalSeconds:F1}秒";
+    }
+
+    private class TaskSelection
+    {
+        public SyncTask Task { get; set; } = default!;
+        public bool Selected { get; set; }
+        public bool TriggerRecordSelected { get; set; }
+        public List<InterfaceSelection> Interfaces { get; set; } = [];
+    }
+
+    private class InterfaceSelection
+    {
+        public SyncTaskInterface Interface { get; set; } = default!;
+        public bool Selected { get; set; }
+    }
+
+    private class TaskProgressState
+    {
+        public string TaskCode = "";
+        public string TaskName = "";
+        public BackfillPhase CurrentPhase = BackfillPhase.TaskStart;
+        public int? IngestedCount;
+        public int? FilteredCount;
+        public int SyncTotal;
+        public int SyncCompleted;
+        public bool Skipped;
+        public bool Cancelled;
+        public bool SkipFilter;
+        public List<PatientSyncDetail> PatientResults = [];
+        // 时间戳
+        public DateTime StartTime;
+        public DateTime? IngestedTime;
+        public DateTime? FilteredTime;
+        public DateTime? SyncStartTime;
+        public DateTime? EndTime;
+    }
+}

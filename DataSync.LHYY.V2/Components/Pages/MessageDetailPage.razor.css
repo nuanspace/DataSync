@@ -1,0 +1,48 @@
+﻿.message-detail-break-all {
+    word-break: break-all;
+}
+
+.message-detail-json-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 8px;
+}
+
+.message-detail-json-preview textarea {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.message-detail-json-dialog {
+    max-height: 75vh;
+    overflow: auto;
+    padding: 8px;
+}
+
+.message-detail-json-dialog-tip {
+    display: block;
+    margin-bottom: 8px;
+}
+
+.message-detail-process-detail {
+    max-width: 400px;
+    white-space: normal;
+    word-break: break-all;
+}
+
+.message-detail-item-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 260px;
+}
+
+.message-detail-item-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.message-detail-item-step-text {
+    line-height: 1.35;
+}

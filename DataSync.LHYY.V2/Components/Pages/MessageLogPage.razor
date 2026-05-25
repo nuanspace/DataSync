@@ -1,0 +1,506 @@
+﻿@page "/messages"
+@inherits BasePage
+
+<PageTitle>消息日志 - LHYY V2</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">消息日志</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay"
+           OnClick="BatchRetry" Disabled="@(!CanBatchRetry)" Class="mb-2">
+    批量重试失败消息
+</MudButton>
+
+<MudPaper Class="pa-4 mb-4">
+    <MudGrid>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="string" Label="事件代码" Value="_filterTranCode" ValueChanged="OnTranCodeChanged"
+                       Clearable="true" Dense="true">
+                @foreach (var code in _tranCodes)
+                {
+                    <MudSelectItem Value="@(code)">@(code)</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect T="MessageStatus?" Label="状态" Value="_filterStatus" ValueChanged="OnStatusChanged"
+                       Clearable="true" Dense="true">
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Pending)">待处理</MudSelectItem>
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Processing)">处理中</MudSelectItem>
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Success)">成功</MudSelectItem>
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Failed)">失败</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudTextField T="string" Label="病案号" Value="_filterMrn" ValueChanged="OnMrnChanged"
+                          Clearable="true" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudGrid Spacing="1">
+                <MudItem xs="7">
+                    <MudDatePicker Label="接收开始" Date="_filterStartTime?.Date" DateChanged="OnStartDateChanged"
+                                   Clearable="true" />
+                </MudItem>
+                <MudItem xs="5">
+                    <MudTimePicker Label="时分" Time="_filterStartTime?.TimeOfDay" TimeChanged="OnStartClockTimeChanged"
+                                   AmPm="false" TimeFormat="HH:mm" MinuteSelectionStep="1"
+                                   Disabled="@(!_filterStartTime.HasValue)" />
+                </MudItem>
+            </MudGrid>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudGrid Spacing="1">
+                <MudItem xs="7">
+                    <MudDatePicker Label="接收结束" Date="_filterEndTime?.Date" DateChanged="OnEndDateChanged"
+                                   Clearable="true" />
+                </MudItem>
+                <MudItem xs="5">
+                    <MudTimePicker Label="时分" Time="_filterEndTime?.TimeOfDay" TimeChanged="OnEndClockTimeChanged"
+                                   AmPm="false" TimeFormat="HH:mm" MinuteSelectionStep="1"
+                                   Disabled="@(!_filterEndTime.HasValue)" />
+                </MudItem>
+            </MudGrid>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudGrid Spacing="1">
+                <MudItem xs="7">
+                    <MudDatePicker Label="事件开始起" Date="_filterEventStartTime?.Date" DateChanged="OnEventStartDateChanged"
+                                   Clearable="true" />
+                </MudItem>
+                <MudItem xs="5">
+                    <MudTimePicker Label="时分" Time="_filterEventStartTime?.TimeOfDay" TimeChanged="OnEventStartClockTimeChanged"
+                                   AmPm="false" TimeFormat="HH:mm" MinuteSelectionStep="1"
+                                   Disabled="@(!_filterEventStartTime.HasValue)" />
+                </MudItem>
+            </MudGrid>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <MudGrid Spacing="1">
+                <MudItem xs="7">
+                    <MudDatePicker Label="事件开始止" Date="_filterEventEndTime?.Date" DateChanged="OnEventEndDateChanged"
+                                   Clearable="true" />
+                </MudItem>
+                <MudItem xs="5">
+                    <MudTimePicker Label="时分" Time="_filterEventEndTime?.TimeOfDay" TimeChanged="OnEventEndClockTimeChanged"
+                                   AmPm="false" TimeFormat="HH:mm" MinuteSelectionStep="1"
+                                   Disabled="@(!_filterEventEndTime.HasValue)" />
+                </MudItem>
+            </MudGrid>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable ServerData="ServerReload" @ref="_table" Dense="true" Hover="true" Bordered="true" Striped="true"
+          Loading="_loading" RowsPerPage="20">
+    <HeaderContent>
+        <MudTh>ID</MudTh>
+        <MudTh>事件代码</MudTh>
+        <MudTh>事件名称</MudTh>
+        <MudTh>病案号</MudTh>
+        <MudTh>事件开始时间</MudTh>
+        <MudTh>MessageId</MudTh>
+        <MudTh>状态</MudTh>
+        @if (ShowFailureReasonColumn)
+        {
+            <MudTh>失败原因</MudTh>
+        }
+        <MudTh>重试</MudTh>
+        <MudTh>接收时间</MudTh>
+        <MudTh>操作</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.Id</MudTd>
+        <MudTd>@context.TranCode</MudTd>
+        <MudTd>@context.TranName</MudTd>
+        <MudTd>@(string.IsNullOrWhiteSpace(context.Mrn) ? "-" : context.Mrn)</MudTd>
+        <MudTd>@(context.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</MudTd>
+        <MudTd Style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">@context.MessageId</MudTd>
+        <MudTd>
+            @switch (context.Status)
+            {
+                case MessageStatus.Pending:
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">待处理</MudChip>
+                    break;
+                case MessageStatus.Processing:
+                    <MudChip T="string" Color="Color.Info" Size="Size.Small">处理中</MudChip>
+                    break;
+                case MessageStatus.Success:
+                    <MudChip T="string" Color="Color.Success" Size="Size.Small">成功</MudChip>
+                    break;
+                case MessageStatus.Failed:
+                    <MudChip T="string" Color="Color.Error" Size="Size.Small">失败</MudChip>
+                    break;
+                case MessageStatus.Filtered:
+                    <MudChip T="string" Color="Color.Secondary" Size="Size.Small">已过滤</MudChip>
+                    break;
+                case MessageStatus.Unmatched:
+                    <MudChip T="string" Color="Color.Default" Size="Size.Small">未匹配</MudChip>
+                    break;
+                case MessageStatus.PartialSuccess:
+                    <MudChip T="string" Color="Color.Info" Size="Size.Small">部分成功</MudChip>
+                    break;
+            }
+        </MudTd>
+        @if (ShowFailureReasonColumn)
+        {
+            <MudTd>@GetErrorSummary(context.ErrorMessage)</MudTd>
+        }
+        <MudTd>@context.RetryCount</MudTd>
+        <MudTd>@context.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                           OnClick="@(() => GoToDetail(context.Id))" />
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager />
+    </PagerContent>
+</MudTable>
+
+@code {
+    [Inject] private MessageQueryService QueryService { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "tranCode")] public string? QueryTranCode { get; set; }
+    [SupplyParameterFromQuery(Name = "status")] public string? QueryStatus { get; set; }
+    [SupplyParameterFromQuery(Name = "startDate")] public string? QueryStartDate { get; set; }
+    [SupplyParameterFromQuery(Name = "endDate")] public string? QueryEndDate { get; set; }
+    [SupplyParameterFromQuery(Name = "mrn")] public string? QueryMrn { get; set; }
+    [SupplyParameterFromQuery(Name = "eventStartDate")] public string? QueryEventStartDate { get; set; }
+    [SupplyParameterFromQuery(Name = "eventEndDate")] public string? QueryEventEndDate { get; set; }
+
+    private MudTable<EsbMessage>? _table;
+    private bool _loading;
+    private bool _batchRetrying;
+    private List<string> _tranCodes = [];
+
+    private string? _filterTranCode;
+    private MessageStatus? _filterStatus;
+    private string? _filterMrn;
+    private DateTime? _filterStartTime;
+    private DateTime? _filterEndTime;
+    private DateTime? _filterEventStartTime;
+    private DateTime? _filterEventEndTime;
+    private string? _lastQuerySignature;
+
+    private bool ShowFailureReasonColumn => _filterStatus == MessageStatus.Failed;
+    private bool CanBatchRetry => !_batchRetrying && (!_filterStatus.HasValue || _filterStatus == MessageStatus.Failed);
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _tranCodes = await QueryService.GetDistinctTranCodesAsync();
+        ApplyFiltersFromQuery();
+        _lastQuerySignature = GetQuerySignature();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ApplyFiltersFromQuery();
+
+        var querySignature = GetQuerySignature();
+        if (_lastQuerySignature == querySignature)
+            return;
+
+        _lastQuerySignature = querySignature;
+        if (_table != null)
+            await _table.ReloadServerData();
+    }
+
+    private async Task<TableData<EsbMessage>> ServerReload(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
+        {
+            var (items, totalCount) = await QueryService.GetMessagesPagedAsync(
+                state.Page,
+                state.PageSize,
+                _filterTranCode,
+                _filterStatus,
+                _filterStartTime,
+                _filterEndTime,
+                _filterMrn,
+                _filterEventStartTime,
+                _filterEventEndTime);
+
+            return new TableData<EsbMessage> { Items = items, TotalItems = totalCount };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task OnTranCodeChanged(string? value)
+    {
+        _filterTranCode = value;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStatusChanged(MessageStatus? value)
+    {
+        _filterStatus = value;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnMrnChanged(string? value)
+    {
+        _filterMrn = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStartDateChanged(DateTime? value)
+    {
+        _filterStartTime = value.HasValue
+            ? value.Value.Date.Add(_filterStartTime?.TimeOfDay ?? TimeSpan.Zero)
+            : null;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnStartClockTimeChanged(TimeSpan? value)
+    {
+        if (_filterStartTime.HasValue)
+            _filterStartTime = _filterStartTime.Value.Date.Add(value ?? TimeSpan.Zero);
+
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEndDateChanged(DateTime? value)
+    {
+        _filterEndTime = value.HasValue
+            ? value.Value.Date.Add(_filterEndTime?.TimeOfDay ?? new TimeSpan(23, 59, 0))
+            : null;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEndClockTimeChanged(TimeSpan? value)
+    {
+        if (_filterEndTime.HasValue)
+            _filterEndTime = _filterEndTime.Value.Date.Add(value ?? new TimeSpan(23, 59, 0));
+
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEventStartDateChanged(DateTime? value)
+    {
+        _filterEventStartTime = value.HasValue
+            ? value.Value.Date.Add(_filterEventStartTime?.TimeOfDay ?? TimeSpan.Zero)
+            : null;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEventStartClockTimeChanged(TimeSpan? value)
+    {
+        if (_filterEventStartTime.HasValue)
+            _filterEventStartTime = _filterEventStartTime.Value.Date.Add(value ?? TimeSpan.Zero);
+
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEventEndDateChanged(DateTime? value)
+    {
+        _filterEventEndTime = value.HasValue
+            ? value.Value.Date.Add(_filterEventEndTime?.TimeOfDay ?? new TimeSpan(23, 59, 0))
+            : null;
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private Task OnEventEndClockTimeChanged(TimeSpan? value)
+    {
+        if (_filterEventEndTime.HasValue)
+            _filterEventEndTime = _filterEventEndTime.Value.Date.Add(value ?? new TimeSpan(23, 59, 0));
+
+        UpdateFiltersInUrl();
+        return Task.CompletedTask;
+    }
+
+    private async Task BatchRetry()
+    {
+        if (!CanBatchRetry) return;
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "批量重试",
+            $"确定要将{GetBatchRetryScopeText()}重新提交处理吗？",
+            yesText: "确认重试",
+            cancelText: "取消");
+
+        if (confirmed != true) return;
+
+        _batchRetrying = true;
+        try
+        {
+            var count = await QueryService.BatchRetryAsync(
+                _filterTranCode,
+                _filterStatus,
+                _filterStartTime,
+                _filterEndTime,
+                _filterMrn,
+                _filterEventStartTime,
+                _filterEventEndTime);
+            inj_snackbar.Add(
+                count > 0
+                    ? $"已将 {count} 条失败消息重新提交处理"
+                    : "当前筛选范围内没有可重试的失败消息",
+                count > 0 ? Severity.Success : Severity.Info);
+
+            if (_table != null)
+                await _table.ReloadServerData();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"批量重试失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _batchRetrying = false;
+        }
+    }
+
+    private void GoToDetail(long id)
+    {
+        inj_navigationManager.NavigateTo(GetMessageDetailUrl(id));
+    }
+
+    private void ApplyFiltersFromQuery()
+    {
+        _filterTranCode = string.IsNullOrWhiteSpace(QueryTranCode) ? null : QueryTranCode;
+        _filterStatus = ParseStatus(QueryStatus);
+        _filterMrn = string.IsNullOrWhiteSpace(QueryMrn) ? null : QueryMrn.Trim();
+        _filterStartTime = ParseFilterTime(QueryStartDate, TimeSpan.Zero);
+        _filterEndTime = ParseFilterTime(QueryEndDate, new TimeSpan(23, 59, 0));
+        _filterEventStartTime = ParseFilterTime(QueryEventStartDate, TimeSpan.Zero);
+        _filterEventEndTime = ParseFilterTime(QueryEventEndDate, new TimeSpan(23, 59, 0));
+    }
+
+    private void UpdateFiltersInUrl()
+    {
+        var targetUrl = BuildMessageListUrl(
+            _filterTranCode,
+            _filterStatus,
+            _filterStartTime,
+            _filterEndTime,
+            _filterMrn,
+            _filterEventStartTime,
+            _filterEventEndTime);
+        var absoluteTargetUrl = inj_navigationManager.ToAbsoluteUri(targetUrl).ToString();
+        if (!string.Equals(inj_navigationManager.Uri, absoluteTargetUrl, StringComparison.OrdinalIgnoreCase))
+            inj_navigationManager.NavigateTo(targetUrl, replace: true);
+    }
+
+    private string GetQuerySignature() =>
+        $"{QueryTranCode}|{QueryStatus}|{QueryStartDate}|{QueryEndDate}|{QueryMrn}|{QueryEventStartDate}|{QueryEventEndDate}";
+
+    private string GetBatchRetryScopeText()
+    {
+        var scopes = new List<string>();
+
+        if (_filterStartTime.HasValue || _filterEndTime.HasValue)
+            scopes.Add($"{FormatDateTime(_filterStartTime)} 至 {FormatDateTime(_filterEndTime)} 的");
+
+        if (!string.IsNullOrWhiteSpace(_filterTranCode))
+            scopes.Add($"TranCode={_filterTranCode} 的");
+
+        if (!string.IsNullOrWhiteSpace(_filterMrn))
+            scopes.Add($"病案号={_filterMrn} 的");
+
+        if (_filterEventStartTime.HasValue || _filterEventEndTime.HasValue)
+            scopes.Add($"事件开始时间 {FormatDateTime(_filterEventStartTime)} 至 {FormatDateTime(_filterEventEndTime)} 的");
+
+        scopes.Add("当前筛选范围内的失败消息");
+        return string.Concat(scopes);
+    }
+
+    private string GetMessageDetailUrl(long id)
+    {
+        var listUrl = BuildMessageListUrl(
+            _filterTranCode,
+            _filterStatus,
+            _filterStartTime,
+            _filterEndTime,
+            _filterMrn,
+            _filterEventStartTime,
+            _filterEventEndTime);
+        return listUrl == "/messages"
+            ? $"/messages/{id}"
+            : $"/messages/{id}{listUrl["/messages".Length..]}";
+    }
+
+    private static string BuildMessageListUrl(
+        string? tranCode,
+        MessageStatus? status,
+        DateTime? startTime,
+        DateTime? endTime,
+        string? mrn,
+        DateTime? eventStartTime,
+        DateTime? eventEndTime)
+    {
+        var query = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(tranCode))
+            query.Add($"tranCode={Uri.EscapeDataString(tranCode)}");
+        if (status.HasValue)
+            query.Add($"status={Uri.EscapeDataString(status.Value.ToString())}");
+        if (startTime.HasValue)
+            query.Add($"startDate={Uri.EscapeDataString(startTime.Value.ToString("yyyy-MM-dd HH:mm"))}");
+        if (endTime.HasValue)
+            query.Add($"endDate={Uri.EscapeDataString(endTime.Value.ToString("yyyy-MM-dd HH:mm"))}");
+        if (!string.IsNullOrWhiteSpace(mrn))
+            query.Add($"mrn={Uri.EscapeDataString(mrn.Trim())}");
+        if (eventStartTime.HasValue)
+            query.Add($"eventStartDate={Uri.EscapeDataString(eventStartTime.Value.ToString("yyyy-MM-dd HH:mm"))}");
+        if (eventEndTime.HasValue)
+            query.Add($"eventEndDate={Uri.EscapeDataString(eventEndTime.Value.ToString("yyyy-MM-dd HH:mm"))}");
+
+        return query.Count == 0 ? "/messages" : $"/messages?{string.Join("&", query)}";
+    }
+
+    private static MessageStatus? ParseStatus(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return Enum.TryParse<MessageStatus>(value, true, out var status) ? status : null;
+    }
+
+    private static DateTime? ParseFilterTime(string? value, TimeSpan defaultTime)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        if (DateTime.TryParseExact(
+                value,
+                "yyyy-MM-dd HH:mm",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var dateTime))
+            return dateTime;
+
+        return DateTime.TryParseExact(
+                value,
+                "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var date)
+            ? date.Date.Add(defaultTime)
+            : null;
+    }
+
+    private static string FormatDateTime(DateTime? value) => value?.ToString("yyyy-MM-dd HH:mm") ?? "未设置";
+
+    private static string GetErrorSummary(string? errorMessage)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage))
+            return "-";
+
+        const int maxLength = 80;
+        return errorMessage.Length <= maxLength
+            ? errorMessage
+            : $"{errorMessage[..maxLength]}...";
+    }
+}

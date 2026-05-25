@@ -1,0 +1,152 @@
+﻿@page "/tasks"
+@inherits BasePage
+@inject TaskManagementService inj_taskManagementService
+@rendermode InteractiveServer
+
+<PageTitle>任务管理</PageTitle>
+
+<div class="task-list-toolbar">
+    <MudText Typo="Typo.h5">任务管理</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="@(() => inj_navigationManager.NavigateTo("/tasks/create"))">
+        新增任务
+    </MudButton>
+</div>
+
+<MudTable Items="_tasks" Hover="true" Striped="true" Loading="_loading" LoadingProgressColor="Color.Primary"
+          Dense="true" Class="mt-4">
+    <HeaderContent>
+        <MudTh>名称</MudTh>
+        <MudTh>编码</MudTh>
+        <MudTh>患者来源接口</MudTh>
+        <MudTh>推送方式</MudTh>
+        <MudTh>接口数</MudTh>
+        <MudTh>启用</MudTh>
+        <MudTh>操作</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="名称">@context.Name</MudTd>
+        <MudTd DataLabel="编码">
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Code</MudChip>
+        </MudTd>
+        <MudTd DataLabel="触发源">@context.TriggerServerCode</MudTd>
+        <MudTd DataLabel="推送方式">@context.PushType</MudTd>
+        <MudTd DataLabel="接口数">@context.Interfaces.Count</MudTd>
+        <MudTd DataLabel="启用">
+            <MudSwitch T="bool" Value="context.Enabled" Color="Color.Success"
+                       ValueChanged="@(v => ToggleEnabled(context, v))" />
+        </MudTd>
+        <MudTd DataLabel="操作">
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                           OnClick="@(() => inj_navigationManager.NavigateTo($"/tasks/edit/{context.Id}"))" />
+            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Info"
+                           OnClick="@(() => CopyTask(context))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="@(() => DeleteTask(context))" />
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>暂无任务</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+@code {
+    private List<SyncTask> _tasks = [];
+    private bool _loading = true;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadTasks();
+    }
+
+    private async Task LoadTasks()
+    {
+        _loading = true;
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _tasks = await db.SyncTasks
+            .Include(t => t.Interfaces)
+            .OrderBy(t => t.Id)
+            .ToListAsync(CancellationToken);
+        _loading = false;
+    }
+
+    private async Task ToggleEnabled(SyncTask task, bool enabled)
+    {
+        try
+        {
+            if (enabled)
+            {
+                var conflicts = await inj_taskManagementService.GetEnabledConflictsAsync(task, CancellationToken);
+                if (conflicts.Count > 0)
+                {
+                    var confirmed = await inj_dialogService.ShowMessageBox(
+                        "重复同步风险提示",
+                        TaskManagementService.BuildEnableConflictMessage(task, conflicts),
+                        yesText: "继续启用", cancelText: "取消");
+                    if (confirmed != true)
+                    {
+                        await InvokeAsync(StateHasChanged);
+                        return;
+                    }
+                }
+            }
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.SyncTasks.FindAsync([task.Id], CancellationToken);
+            if (entity is null) return;
+
+            entity.Enabled = enabled;
+            await db.SaveChangesAsync(CancellationToken);
+            task.Enabled = enabled;
+            inj_snackbar.Add($"已{(enabled ? "启用" : "禁用")}任务：{task.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task CopyTask(SyncTask task)
+    {
+        try
+        {
+            var result = await inj_taskManagementService.CopyTaskAsync(task.Id, CancellationToken);
+            await LoadTasks();
+            inj_snackbar.Add($"已复制任务：{result.TaskName}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"复制失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteTask(SyncTask task)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除任务「{task.Name}」及其所有关联接口吗？此操作不可撤销。",
+            yesText: "删除", cancelText: "取消");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.SyncTasks
+                .Include(t => t.Interfaces)
+                .FirstOrDefaultAsync(t => t.Id == task.Id, CancellationToken);
+            if (entity is null) return;
+
+            db.SyncTaskInterfaces.RemoveRange(entity.Interfaces);
+            db.SyncTasks.Remove(entity);
+            await db.SaveChangesAsync(CancellationToken);
+
+            _tasks.Remove(task);
+            inj_snackbar.Add($"已删除任务：{task.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+        }
+    }
+}

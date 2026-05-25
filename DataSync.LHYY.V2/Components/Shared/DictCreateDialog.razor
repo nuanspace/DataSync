@@ -1,0 +1,364 @@
+﻿@inherits BasePage
+
+<MudDialog>
+    <TitleContent>
+        <div class="dict-create-title">
+            <div>
+                <MudText Typo="Typo.caption" Class="dict-create-kicker">字典配置</MudText>
+                <MudText Typo="Typo.h6" Class="dict-create-heading">新建字典</MudText>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="Cancel" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <div class="dict-create-body">
+            <div class="dict-create-fields">
+                <MudTextField T="string" Value="_newDictCode" ValueChanged="v => _newDictCode = v"
+                              Label="DictCode（字典代码）" Required="true" Margin="Margin.Dense"
+                              Variant="Variant.Outlined" />
+                <MudSelect T="string" Value="_createScope" ValueChanged="v => _createScope = v"
+                           Label="保存范围" Margin="Margin.Dense" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@ProjectScopeKey">项目级（@CurrentIntegrationProjectCode）</MudSelectItem>
+                    <MudSelectItem Value="@GlobalScopeKey">全局级</MudSelectItem>
+                </MudSelect>
+            </div>
+
+            <div class="dict-create-entry-header">
+                <MudText Typo="Typo.subtitle2">字典条目</MudText>
+                <MudButton Variant="Variant.Text" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Add"
+                           OnClick="AddEntry">
+                    新增一行
+                </MudButton>
+            </div>
+
+            <div class="dict-create-table-wrap">
+                <MudSimpleTable Hover="true" Class="dict-create-table">
+                    <thead>
+                        <tr>
+                            <th class="dict-create-index-cell">序号</th>
+                            <th>目标选项</th>
+                            <th>命中条件</th>
+                            <th class="dict-create-action-cell">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var i = 0; i < _entries.Count; i++)
+                        {
+                            var idx = i;
+                            var entry = _entries[i];
+                            <tr>
+                                <td class="dict-create-index-cell">@(i + 1)</td>
+                                <td>
+                                    <MudTextField T="string" Value="entry.TargetValue" ValueChanged="v => entry.TargetValue = v"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" Lines="2"
+                                                  AutoGrow="true" MaxLines="6" Placeholder="选项值" Class="dict-create-cell-input" />
+                                </td>
+                                <td>
+                                    <div class="dict-create-condition-list">
+                                        @for (var conditionIndex = 0; conditionIndex < entry.Conditions.Count; conditionIndex++)
+                                        {
+                                            var condIndex = conditionIndex;
+                                            var condition = entry.Conditions[condIndex];
+                                            @if (condIndex > 0)
+                                            {
+                                                <div class="dict-create-condition-divider">或</div>
+                                            }
+                                            <div class="dict-create-condition">
+                                                <div class="dict-create-keyword-list">
+                                                    @for (var keywordIndex = 0; keywordIndex < condition.Keywords.Count; keywordIndex++)
+                                                    {
+                                                        var keyIndex = keywordIndex;
+                                                        @if (keyIndex == 0)
+                                                        {
+                                                            <div class="dict-create-keyword-row dict-create-keyword-row-main">
+                                                                <MudSelect T="string" Value="condition.MatchMode" ValueChanged="v => condition.MatchMode = v"
+                                                                           Variant="Variant.Outlined" Margin="Margin.Dense">
+                                                                    <MudSelectItem Value="@DictExpressionHelper.MatchModeAll">全部包含</MudSelectItem>
+                                                                    <MudSelectItem Value="@DictExpressionHelper.MatchModeAny">任一包含</MudSelectItem>
+                                                                </MudSelect>
+                                                                <MudTextField T="string" Value="@condition.Keywords[keyIndex]" ValueChanged="@((string? v) => condition.Keywords[keyIndex] = v)"
+                                                                              Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="关键词" Class="dict-create-cell-input" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                                               Color="Color.Error" Disabled="@(condition.Keywords.Count <= 1)"
+                                                                               OnClick="@(() => RemoveKeyword(condition, keyIndex))" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.DeleteForever" Size="Size.Small"
+                                                                               Color="Color.Error" Disabled="@(entry.Conditions.Count <= 1)"
+                                                                               OnClick="@(() => RemoveCondition(entry, condIndex))" />
+                                                            </div>
+                                                        }
+                                                        else
+                                                        {
+                                                            <div class="dict-create-keyword-row dict-create-keyword-row-sub">
+                                                                <span class="dict-create-keyword-operator">@GetKeywordJoinText(condition.MatchMode)</span>
+                                                                <MudTextField T="string" Value="@condition.Keywords[keyIndex]" ValueChanged="@((string? v) => condition.Keywords[keyIndex] = v)"
+                                                                              Variant="Variant.Outlined" Margin="Margin.Dense" Placeholder="关键词" Class="dict-create-cell-input" />
+                                                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                                               Color="Color.Error" OnClick="@(() => RemoveKeyword(condition, keyIndex))" />
+                                                            </div>
+                                                        }
+                                                    }
+                                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                                               OnClick="@(() => AddKeyword(condition))">
+                                                        新增关键词
+                                                    </MudButton>
+                                                </div>
+                                            </div>
+                                        }
+                                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                                   OnClick="@(() => AddCondition(entry))">
+                                            新增条件
+                                        </MudButton>
+                                    </div>
+                                </td>
+                                <td class="dict-create-action-cell">
+                                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Size="Size.Small"
+                                                   Disabled="@(idx == 0)" OnClick="@(() => MoveEntry(idx, -1))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Size="Size.Small"
+                                                   Disabled="@(idx >= _entries.Count - 1)" OnClick="@(() => MoveEntry(idx, 1))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                   Color="Color.Error" Disabled="@(_entries.Count <= 1)"
+                                                   OnClick="@(() => RemoveEntry(idx))" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </div>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="dict-create-hint">
+            一个目标值可以配置多组条件；每组条件会保存为一条字典匹配规则。
+        </MudText>
+        <MudButton OnClick="Cancel">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveDictAsync">保存并选中</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string ProjectScopeKey = "project";
+    private const string GlobalScopeKey = "global";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public string? InitialDictCode { get; set; }
+    [Parameter] public IEnumerable<string>? SuggestedSourceValues { get; set; }
+
+    private string? _newDictCode;
+    private string _createScope = ProjectScopeKey;
+    private List<DictEntryItem> _entries = [];
+
+    private sealed class DictEntryItem
+    {
+        public string? SourceValue { get; set; }
+        public List<DictConditionItem> Conditions { get; set; } = [new()];
+        public string? TargetValue { get; set; }
+    }
+
+    private sealed class DictConditionItem
+    {
+        public string MatchMode { get; set; } = DictExpressionHelper.MatchModeAll;
+        public List<string?> Keywords { get; set; } = [null];
+    }
+
+    protected override Task OnPageInitializedAsync()
+    {
+        _newDictCode = InitialDictCode?.Trim();
+        var suggestedEntries = SuggestedSourceValues?
+            .Where(v => !string.IsNullOrWhiteSpace(v))
+            .Select(v => v.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(v => new DictEntryItem
+            {
+                Conditions = [new DictConditionItem { Keywords = [v] }],
+                TargetValue = v
+            })
+            .ToList();
+
+        _entries = suggestedEntries is { Count: > 0 }
+            ? suggestedEntries
+            : [new DictEntryItem()];
+
+        return Task.CompletedTask;
+    }
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+
+    private void AddEntry()
+    {
+        _entries.Add(new DictEntryItem());
+    }
+
+    private static void AddCondition(DictEntryItem entry)
+    {
+        entry.Conditions.Add(new DictConditionItem());
+    }
+
+    private static void RemoveCondition(DictEntryItem entry, int index)
+    {
+        if (entry.Conditions.Count <= 1 || index < 0 || index >= entry.Conditions.Count)
+        {
+            return;
+        }
+
+        entry.Conditions.RemoveAt(index);
+    }
+
+    private static void AddKeyword(DictConditionItem condition)
+    {
+        condition.Keywords.Add(null);
+    }
+
+    private static void RemoveKeyword(DictConditionItem condition, int index)
+    {
+        if (condition.Keywords.Count <= 1 || index < 0 || index >= condition.Keywords.Count)
+        {
+            return;
+        }
+
+        condition.Keywords.RemoveAt(index);
+    }
+
+    private static string GetKeywordJoinText(string? matchMode) =>
+        DictExpressionHelper.NormalizeMatchMode(matchMode) == DictExpressionHelper.MatchModeAny ? "或" : "且";
+
+    private void MoveEntry(int index, int direction)
+    {
+        var targetIndex = index + direction;
+        if (index < 0 || index >= _entries.Count || targetIndex < 0 || targetIndex >= _entries.Count)
+        {
+            return;
+        }
+
+        var item = _entries[index];
+        _entries.RemoveAt(index);
+        _entries.Insert(targetIndex, item);
+    }
+
+    private void RemoveEntry(int index)
+    {
+        if (_entries.Count <= 1 || index < 0 || index >= _entries.Count)
+        {
+            return;
+        }
+
+        _entries.RemoveAt(index);
+    }
+
+    private async Task SaveDictAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newDictCode))
+        {
+            inj_snackbar.Add("请输入 DictCode。", Severity.Warning);
+            return;
+        }
+
+        var dictCode = _newDictCode.Trim();
+        var integrationProjectCode = _createScope == GlobalScopeKey ? null : CurrentIntegrationProjectCode;
+        var entries = BuildEntriesForSave();
+
+        if (entries.Count == 0)
+        {
+            inj_snackbar.Add("至少需要填写 1 条完整的字典条目。", Severity.Warning);
+            return;
+        }
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        var existingItems = await db.EsbDicts
+            .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == integrationProjectCode)
+            .ToListAsync();
+
+        var existingMap = existingItems.ToDictionary(d => d.SourceValue, d => d, StringComparer.OrdinalIgnoreCase);
+        var conflictEntries = entries
+            .Where(e => existingMap.ContainsKey(e.SourceValue!))
+            .ToList();
+
+        if (conflictEntries.Count > 0)
+        {
+            var conflictList = string.Join("、", conflictEntries.Select(e => e.SourceValue));
+            var result = await inj_dialogService.ShowMessageBox(
+                "存在冲突条目",
+                $"以下 SourceValue 在字典“{dictCode}”中已存在：{conflictList}",
+                yesText: "覆盖已存在的",
+                cancelText: "跳过已存在的");
+
+            if (result == true)
+            {
+                foreach (var entry in conflictEntries)
+                {
+                    if (entry.SourceValue != null && existingMap.TryGetValue(entry.SourceValue, out var item))
+                    {
+                        item.TargetValue = entry.TargetValue ?? "";
+                    }
+                }
+            }
+
+            entries = entries
+                .Where(e => e.SourceValue != null && !existingMap.ContainsKey(e.SourceValue))
+                .ToList();
+        }
+
+        var maxSort = existingItems.Count == 0 ? 0 : existingItems.Max(d => d.SortOrder);
+        foreach (var entry in entries)
+        {
+            maxSort++;
+            db.EsbDicts.Add(new EsbDict
+            {
+                DictCode = dictCode,
+                IntegrationProjectCode = integrationProjectCode,
+                SourceValue = entry.SourceValue ?? "",
+                TargetValue = entry.TargetValue ?? "",
+                SortOrder = maxSort
+            });
+        }
+
+        await db.SaveChangesAsync();
+        inj_dictService.ClearCache(dictCode, CurrentIntegrationProjectCode);
+
+        var message = $"字典“{dictCode}”已保存";
+        if (entries.Count > 0)
+        {
+            message += $"，新增 {entries.Count} 条";
+        }
+
+        if (conflictEntries.Count > 0)
+        {
+            message += $"，冲突 {conflictEntries.Count} 条";
+        }
+
+        inj_snackbar.Add(message, Severity.Success);
+        MudDialog.Close(dictCode);
+    }
+
+    private List<DictEntryItem> BuildEntriesForSave()
+    {
+        var entries = new List<DictEntryItem>();
+        foreach (var entry in _entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.TargetValue))
+            {
+                continue;
+            }
+
+            foreach (var condition in entry.Conditions)
+            {
+                var sourceValue = DictExpressionHelper.BuildSourceValue(condition.Keywords, condition.MatchMode);
+                if (string.IsNullOrWhiteSpace(sourceValue))
+                {
+                    continue;
+                }
+
+                entries.Add(new DictEntryItem
+                {
+                    SourceValue = sourceValue,
+                    TargetValue = entry.TargetValue.Trim()
+                });
+            }
+        }
+
+        return entries;
+    }
+}

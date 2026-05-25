@@ -1,0 +1,2 @@
+ALTER TABLE cyyy.ingestion_sources
+ADD COLUMN IF NOT EXISTS window_minutes INTEGER NOT NULL DEFAULT 120;

@@ -1,0 +1,828 @@
+﻿@* Card 级映射编辑对话框：为整张 SubCard 批量配置映射 *@
+@inherits BasePage
+
+<MudDialog Visible="Visible" VisibleChanged="OnVisibleChanged" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">Card 映射配置 — @Card?.Name</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid Style="min-height:75vh;">
+            @* 左侧 JSON 树 *@
+            <MudItem xs="12" md="5">
+                @if (_pickRowIndex >= 0 && _pickRowIndex < _rows.Count)
+                {
+                    var hint = _pickTarget == PickTarget.FilterRule
+                        ? $"正在为【{_rows[_pickRowIndex].QuestionTitle}】的过滤规则 #{_pickFilterRuleIndex + 1} 选取"
+                        : $"正在为【{_rows[_pickRowIndex].QuestionTitle}】选取源路径";
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@hint</MudAlert>
+                }
+                else if (_pickTarget == PickTarget.ArrayPath)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">正在为【容器路径】选取</MudAlert>
+                }
+                else
+                {
+                    <MudText Typo="Typo.subtitle2" Class="mb-2">点击右侧 SourcePath 输入框，再点击下方节点填入</MudText>
+                }
+                <MudPaper Outlined="true" Class="pa-2" Style="max-height:calc(75vh - 60px);overflow-y:auto;">
+                    @if (!string.IsNullOrWhiteSpace(_sampleJson))
+                    {
+                        <JsonTreeViewer JsonText="@_sampleJson" ShowSearch="true" UseArrayBrackets="true" PreferFirstArrayItemAsRoot="true" OnPathSelected="OnPathPicked" />
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">请先选择接口以加载 JSON</MudAlert>
+                    }
+                </MudPaper>
+            </MudItem>
+
+            @* 右侧配置区 *@
+            <MudItem xs="12" md="7">
+                <MudGrid Spacing="2" Class="mb-3">
+                    <MudItem xs="6">
+                        <MudSelect T="string" Value="_selectedTranCode" ValueChanged="OnTranCodeChanged"
+                                   Label="选择接口" Required="true"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @if (Tab != null)
+                            {
+                                @foreach (var iface in Tab.Interfaces)
+                                {
+                                    <MudSelectItem T="string" Value="@iface.TranCode">
+                                        @iface.TranCode (@iface.TranName)
+                                    </MudSelectItem>
+                                }
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="6">
+                        <PathPickTextField @bind-Value="_arrayPath" Label="容器路径（ArrayPath）"
+                                           HelperText="如: DiagnosisList 或 Request.Body.CommonOrder"
+                                           IsActive="@(_pickTarget == PickTarget.ArrayPath)"
+                                           OnActivated="OnArrayPathFocus" />
+                    </MudItem>
+                </MudGrid>
+
+                @* Question 映射表格 *@
+                <MudSimpleTable Dense="true" Hover="true" Style="max-height:calc(75vh - 120px);overflow-y:auto;">
+                    <thead>
+                        <tr>
+                            <th style="min-width:140px;">问题</th>
+                            <th style="min-width:180px;">SourcePath</th>
+                            <th style="min-width:80px;">DictCode</th>
+                            <th style="min-width:150px;">字典匹配</th>
+                            <th style="min-width:80px;">默认值</th>
+                            <th style="min-width:100px;">表达式</th>
+                            <th style="width:50px;">必填</th>
+                            <th style="width:50px;">过滤</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var (row, index) in _rows.Select((r, i) => (r, i)))
+                        {
+                            var idx = index;
+                            var isPickingThis = _pickTarget == PickTarget.SourcePath && _pickRowIndex == idx;
+                            <tr class="@(isPickingThis ? "card-mapping-row-active" : "")">
+                                <td>
+                                    <MudText Typo="Typo.body2">@row.QuestionTitle</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@row.DataType</MudText>
+                                </td>
+                                <td>
+                                    <PathPickTextField Value="@GetRowDisplaySourcePath(row)"
+                                                       ValueChanged="value => OnRowSourcePathChanged(row, value)"
+                                                       IsActive="@isPickingThis"
+                                                       OnActivated="@(() => OnSourcePathFocus(idx))"
+                                                       Style="min-width:100px;" />
+                                </td>
+                                <td>
+                                    <MudTextField @bind-Value="row.DictCode" Margin="Margin.Dense"
+                                                  Variant="Variant.Outlined" />
+                                </td>
+                                <td>
+                                    <MudSelect T="string" @bind-Value="row.DictMatchMode" Margin="Margin.Dense"
+                                               Variant="Variant.Outlined">
+                                        <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
+                                        <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">排除否定</MudSelectItem>
+                                    </MudSelect>
+                                </td>
+                                <td>
+                                    <MudTextField @bind-Value="row.DefaultValue" Margin="Margin.Dense"
+                                                  Variant="Variant.Outlined" />
+                                </td>
+                                <td>
+                                    <MudTextField @bind-Value="row.ValueExpression" Margin="Margin.Dense"
+                                                  Variant="Variant.Outlined" />
+                                </td>
+                                <td>
+                                    <MudCheckBox @bind-Value="row.IsRequired" Dense="true" />
+                                </td>
+                                <td>
+                                    <MudIconButton Icon="@(row.IsFilterExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.FilterAlt)"
+                                                   Size="Size.Small"
+                                                   Color="@(row.FilterRules.Count > 0 ? Color.Warning : Color.Default)"
+                                                   OnClick="@(() => row.IsFilterExpanded = !row.IsFilterExpanded)" />
+                                    @if (row.FilterRules.Count > 0)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">过滤 @row.FilterRules.Count</MudChip>
+                                    }
+                                </td>
+                            </tr>
+                            @if (row.IsFilterExpanded)
+                            {
+                                <tr>
+                                    <td colspan="8" class="card-mapping-filter-cell">
+                                        <FilterRuleEditor Rules="row.FilterRules"
+                                                          RulesChanged="v => row.FilterRules = v"
+                                                          ShowScope="false"
+                                                          OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, filterIdx => HandleFilterPathPick(idx, filterIdx)))"
+                                                          ActivePickIndex="@(_pickTarget == PickTarget.FilterRule && _pickRowIndex == idx ? _pickFilterRuleIndex : -1)" />
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="HandleCancel">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="HandleSave" Disabled="_saving">
+            @if (_saving) { <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" /> }
+            保存
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public CardNode? Card { get; set; }
+    [Parameter] public EventTypeTabData? Tab { get; set; }
+    [Parameter] public List<EsbFieldMapping> AllMappings { get; set; } = [];
+    [Parameter] public Dictionary<string, EsbInterfaceConfig> InterfaceDict { get; set; } = new();
+    [Parameter] public EventCallback OnSaved { get; set; }
+
+    // 内部状态
+    private List<CardMappingRow> _rows = [];
+    private string? _selectedTranCode;
+    private string? _arrayPath;
+    private string? _sampleJson;
+    private bool _saving;
+
+    // 路径选取
+    private enum PickTarget { None, SourcePath, ArrayPath, FilterRule }
+    private PickTarget _pickTarget = PickTarget.None;
+    private int _pickRowIndex = -1;
+    private int _pickFilterRuleIndex = -1;
+    private Guid? _loadedCardId;
+    private string? _loadedEventTypeName;
+
+    private static readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!Visible)
+        {
+            _rows = [];
+            _loadedCardId = null;
+            _loadedEventTypeName = null;
+            return;
+        }
+
+        if (Card == null || Tab == null)
+            return;
+
+        if (_loadedCardId != Card.CardId
+            || !string.Equals(_loadedEventTypeName, Tab.EventTypeName, StringComparison.OrdinalIgnoreCase))
+        {
+            _rows = [];
+            _loadedCardId = Card.CardId;
+            _loadedEventTypeName = Tab.EventTypeName;
+            await LoadData();
+        }
+    }
+
+    /// <summary>
+    /// 加载 Card 下所有 Question 并回填已有映射
+    /// </summary>
+    private async Task LoadData()
+    {
+        // 收集 Card 下所有 Question（含子卡片下的）
+        var questions = GetAllQuestionsFlat(Card!);
+        _rows = questions.Select(q => new CardMappingRow
+        {
+            QuestionId = q.Id,
+            QuestionTitle = q.Title ?? q.Id,
+            DataType = q.DataType ?? "",
+        }).ToList();
+
+        // 查找已有映射
+        var existingMappings = AllMappings
+            .Where(m => m.CardId == Card!.CardId
+                        && m.MappingTarget == MappingTarget.SubCard
+                        && !EsbFieldMapping.IsSubCardFilterMapping(m)
+                        && Tab!.TranCodes.Contains(m.TranCode))
+            .ToList();
+
+        if (existingMappings.Count > 0)
+        {
+            var first = existingMappings[0];
+            _selectedTranCode = first.TranCode;
+            _arrayPath = first.ArrayPath;
+            _sampleJson = InterfaceDict.TryGetValue(first.TranCode, out var ic) ? ic.SampleJson : null;
+
+            // 按 TargetField 回填
+            var mappingDict = existingMappings
+                .GroupBy(m => m.TargetField, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderBy(m => m.SortOrder).First(), StringComparer.OrdinalIgnoreCase);
+
+            // 批量加载过滤规则
+            var mappingIds = existingMappings.Select(m => m.Id).ToList();
+            Dictionary<int, List<EsbFilterRule>> filterDict = new();
+            if (mappingIds.Count > 0)
+            {
+                await using var db = await ContextFactory.CreateDbContextAsync();
+                var rules = await db.EsbFilterRules
+                    .Where(r => r.MappingId != null && mappingIds.Contains(r.MappingId.Value))
+                    .OrderBy(r => r.RuleGroup)
+                    .ThenBy(r => r.SortOrder)
+                    .ToListAsync();
+                filterDict = rules.GroupBy(r => r.MappingId!.Value)
+                    .ToDictionary(g => g.Key, g => g.ToList());
+            }
+
+            foreach (var row in _rows)
+            {
+                if (mappingDict.TryGetValue(row.QuestionId, out var m))
+                {
+                    row.SourcePath = m.SourcePath;
+                    row.DictCode = m.DictCode;
+                    row.DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(m.DictMatchMode);
+                    row.DefaultValue = m.DefaultValue;
+                    row.ValueExpression = m.ValueExpression;
+                    row.IsRequired = m.IsRequired;
+                    if (filterDict.TryGetValue(m.Id, out var fr))
+                        row.FilterRules = fr;
+                }
+            }
+        }
+        else
+        {
+            _selectedTranCode = null;
+            _arrayPath = null;
+            _sampleJson = null;
+        }
+    }
+
+    /// <summary>
+    /// 递归获取 Card 下所有 Question
+    /// </summary>
+    private static List<QuestionInfo> GetAllQuestionsFlat(CardNode card)
+    {
+        var result = new List<QuestionInfo>(card.Questions);
+        foreach (var sub in card.SubCards)
+            result.AddRange(GetAllQuestionsFlat(sub));
+        return result;
+    }
+
+    private void OnTranCodeChanged(string value)
+    {
+        _selectedTranCode = value;
+        _sampleJson = InterfaceDict.TryGetValue(value, out var ic) ? ic.SampleJson : null;
+    }
+
+    private string? GetMainRecordArrayPath()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedTranCode)
+            || !InterfaceDict.TryGetValue(_selectedTranCode, out var config))
+        {
+            return null;
+        }
+
+        var normalized = SubCardPathHelper.NormalizeArrayContainerPath(config.MainRecordArrayPath);
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private string GetRowDisplaySourcePath(CardMappingRow row)
+    {
+        var normalizedSource = row.SourcePath?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(normalizedSource))
+        {
+            return "";
+        }
+
+        return TryNormalizeMainRecordSourcePath(normalizedSource, out var mainScopedPath)
+               && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainScopedPath))
+            ? mainScopedPath
+            : SubCardPathHelper.BuildDisplayPath(GetSampleJsonRoot(), normalizedSource, _arrayPath, GetMainRecordArrayPath());
+    }
+
+    private bool TryNormalizeMainRecordSourcePath(string? sourcePath, out string normalizedPath) =>
+        MessageJsonHelper.TryNormalizeMainRecordSourcePath(sourcePath, GetMainRecordArrayPath(), out normalizedPath);
+
+    private JToken? GetSampleJsonRoot() =>
+        MessageJsonHelper.TryParseToken(_sampleJson ?? "", out var root, out _) ? root : null;
+
+    private string NormalizeArrayPathForEdit(string? path)
+    {
+        var normalized = SubCardPathHelper.NormalizeArrayContainerPath(path);
+        var mainRecordArrayPath = GetMainRecordArrayPath();
+        if (!string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalized, mainRecordArrayPath, out var relativePath))
+        {
+            return string.IsNullOrWhiteSpace(relativePath) ? SubCardPathHelper.MainRecordContainerPath : relativePath;
+        }
+
+        return normalized;
+    }
+
+    private string? ExpandArrayPathToRoot(string? arrayPath) =>
+        SubCardPathHelper.ExpandArrayPathToRoot(GetSampleJsonRoot(), arrayPath, GetMainRecordArrayPath());
+
+    private bool TryInferSubCardContainerPath(
+        string? sourcePath,
+        out string arrayPath,
+        out string relativePath,
+        bool allowMainRecordRoot = true)
+    {
+        arrayPath = "";
+        relativePath = "";
+        var root = GetSampleJsonRoot();
+        if (root == null)
+        {
+            return false;
+        }
+
+        var normalizedSource = SubCardPathHelper.NormalizeArrayPath(sourcePath);
+        var mainRecordArrayPath = GetMainRecordArrayPath();
+        var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, mainRecordArrayPath);
+        if (!string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalizedSource, mainRecordArrayPath, out var mainRelativePath)
+            && !string.IsNullOrWhiteSpace(mainRelativePath))
+        {
+            if (SubCardPathHelper.TrySplitWildcardPath(mainRelativePath, out var nestedArrayPath, out var nestedRelativePath)
+                && !string.IsNullOrWhiteSpace(nestedRelativePath))
+            {
+                arrayPath = NormalizeArrayPathForEdit(nestedArrayPath);
+                relativePath = nestedRelativePath;
+                return true;
+            }
+
+            if (SubCardPathHelper.TryInferObjectContainerPath(mainContext, mainRelativePath, out var objectPath, out var objectRelativePath))
+            {
+                arrayPath = NormalizeArrayPathForEdit(objectPath);
+                relativePath = objectRelativePath;
+                return true;
+            }
+
+            if (allowMainRecordRoot
+                && mainContext != null
+                && SubCardPathHelper.ResolveFirstToken(mainContext, mainRelativePath) != null)
+            {
+                arrayPath = SubCardPathHelper.MainRecordContainerPath;
+                relativePath = mainRelativePath;
+                return true;
+            }
+        }
+
+        if (SubCardPathHelper.TrySplitWildcardPath(normalizedSource, out var parsedArrayPath, out var parsedRelativePath)
+            && !string.IsNullOrWhiteSpace(parsedRelativePath)
+            && MessageJsonHelper.SelectSampleToken(root, parsedArrayPath) is JArray)
+        {
+            arrayPath = NormalizeArrayPathForEdit(parsedArrayPath);
+            relativePath = parsedRelativePath;
+            return true;
+        }
+
+        if (SubCardPathHelper.TryInferObjectContainerPath(root, normalizedSource, out var rootObjectPath, out var rootObjectRelativePath))
+        {
+            arrayPath = NormalizeArrayPathForEdit(rootObjectPath);
+            relativePath = rootObjectRelativePath;
+            return true;
+        }
+
+        if (allowMainRecordRoot
+            && !string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            && mainContext != null
+            && SubCardPathHelper.ResolveFirstToken(mainContext, normalizedSource) != null)
+        {
+            arrayPath = SubCardPathHelper.MainRecordContainerPath;
+            relativePath = normalizedSource;
+            return true;
+        }
+
+        return false;
+    }
+
+    private Task OnRowSourcePathChanged(CardMappingRow row, string? value)
+    {
+        row.SourcePath = value ?? "";
+        return Task.CompletedTask;
+    }
+
+    #region 路径选取
+
+    /// <summary>
+    /// SourcePath 输入框获得焦点时自动激活该行
+    /// </summary>
+    private void OnSourcePathFocus(int rowIndex)
+    {
+        _pickTarget = PickTarget.SourcePath;
+        _pickRowIndex = rowIndex;
+        _pickFilterRuleIndex = -1;
+    }
+
+    /// <summary>
+    /// ArrayPath 输入框获得焦点时激活
+    /// </summary>
+    private void OnArrayPathFocus()
+    {
+        _pickTarget = PickTarget.ArrayPath;
+        _pickRowIndex = -1;
+        _pickFilterRuleIndex = -1;
+    }
+
+    private void HandleFilterPathPick(int rowIndex, int filterRuleIndex)
+    {
+        _pickTarget = PickTarget.FilterRule;
+        _pickRowIndex = rowIndex;
+        _pickFilterRuleIndex = filterRuleIndex;
+    }
+
+    private async Task OnPathPicked(string path)
+    {
+        switch (_pickTarget)
+        {
+            case PickTarget.SourcePath:
+                if (_pickRowIndex >= 0 && _pickRowIndex < _rows.Count)
+                    _rows[_pickRowIndex].SourcePath = await NormalizePickedRowPathAsync(path, _rows[_pickRowIndex].SourcePath);
+                break;
+            case PickTarget.ArrayPath:
+                _arrayPath = NormalizeArrayPathForEdit(path);
+                break;
+            case PickTarget.FilterRule:
+                if (_pickRowIndex >= 0 && _pickRowIndex < _rows.Count)
+                {
+                    var rules = _rows[_pickRowIndex].FilterRules;
+                    if (_pickFilterRuleIndex >= 0 && _pickFilterRuleIndex < rules.Count)
+                        rules[_pickFilterRuleIndex].SourcePath = await NormalizePickedRowPathAsync(path, rules[_pickFilterRuleIndex].SourcePath);
+                }
+                break;
+        }
+    }
+
+    private async Task<string> NormalizePickedRowPathAsync(string path, string? currentPath)
+    {
+        var normalizedPath = SubCardPathHelper.NormalizeArrayPath(path);
+        var effectiveArrayPath = ExpandArrayPathToRoot(_arrayPath);
+        if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalizedPath, effectiveArrayPath, out var currentRelativePath))
+        {
+            if (string.IsNullOrWhiteSpace(currentRelativePath))
+            {
+                inj_snackbar.Add("子卡源路径必须选到容器内的具体字段。", Severity.Warning);
+                return currentPath ?? "";
+            }
+
+            return currentRelativePath;
+        }
+
+        if (TryInferSubCardContainerPath(
+                normalizedPath,
+                out var inferredArrayPath,
+                out var inferredRelativePath,
+                string.IsNullOrWhiteSpace(_arrayPath))
+            && !string.IsNullOrWhiteSpace(inferredRelativePath))
+        {
+            _arrayPath = inferredArrayPath;
+            return inferredRelativePath;
+        }
+
+        if (TryNormalizeMainRecordSourcePath(normalizedPath, out var mainScopedPath)
+            && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainScopedPath)))
+        {
+            return mainScopedPath;
+        }
+
+        if (!SubCardPathHelper.TrySplitWildcardPath(normalizedPath, out var pickedArrayPath, out var relativePath))
+        {
+            return normalizedPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            inj_snackbar.Add("子卡源路径必须选到数组项内的具体字段。", Severity.Warning);
+            return currentPath ?? "";
+        }
+
+        if (!await TryUpdateArrayPathAsync(pickedArrayPath))
+        {
+            return currentPath ?? "";
+        }
+
+        return relativePath;
+    }
+
+    private async Task<bool> TryUpdateArrayPathAsync(string pickedArrayPath)
+    {
+        pickedArrayPath = NormalizeArrayPathForEdit(pickedArrayPath);
+        if (!string.IsNullOrWhiteSpace(_arrayPath)
+            && !SubCardPathHelper.PathsEqual(_arrayPath, pickedArrayPath))
+        {
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "数组路径确认",
+                $"当前 ArrayPath 为：{_arrayPath}\n新选择的路径属于：{pickedArrayPath}\n是否更新为新数组路径？",
+                yesText: "更新",
+                cancelText: "取消");
+            if (confirmed != true)
+            {
+                return false;
+            }
+        }
+
+        _arrayPath = pickedArrayPath;
+        return true;
+    }
+
+    private void ResetPick()
+    {
+        _pickTarget = PickTarget.None;
+        _pickRowIndex = -1;
+        _pickFilterRuleIndex = -1;
+    }
+
+    private static bool HasValueSource(CardMappingRow row) =>
+        !string.IsNullOrWhiteSpace(row.SourcePath) || !string.IsNullOrWhiteSpace(row.DefaultValue);
+
+    private string? GetEffectiveArrayPathForSave()
+    {
+        if (!string.IsNullOrWhiteSpace(_arrayPath))
+        {
+            return _arrayPath.Trim();
+        }
+
+        foreach (var row in _rows)
+        {
+            if (SubCardPathHelper.TrySplitWildcardPath(row.SourcePath, out var pickedArrayPath, out _))
+            {
+                return pickedArrayPath;
+            }
+
+            foreach (var rule in row.FilterRules)
+            {
+                if (SubCardPathHelper.TrySplitWildcardPath(rule.SourcePath, out pickedArrayPath, out _))
+                {
+                    return pickedArrayPath;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private int CountPendingPathNormalization(IEnumerable<CardMappingRow> rows) =>
+        rows.Sum(row =>
+            (SubCardPathHelper.HasArrayWildcard(row.SourcePath) ? 1 : 0)
+            + row.FilterRules.Count(rule => SubCardPathHelper.HasArrayWildcard(rule.SourcePath)));
+
+    private async Task<bool> ConfirmPathNormalizationAsync(IEnumerable<CardMappingRow> rows)
+    {
+        var pendingCount = CountPendingPathNormalization(rows);
+        if (pendingCount == 0)
+        {
+            return true;
+        }
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "保存前确认",
+            $"检测到 {pendingCount} 处子卡完整路径，保存时会自动转换为数组项内相对路径。是否继续保存？",
+            yesText: "继续保存",
+            cancelText: "取消");
+        return confirmed == true;
+    }
+
+    private bool TryNormalizePathForSave(string? sourcePath, string? effectiveArrayPath, string pathLabel, out string normalizedPath, out string? error)
+    {
+        normalizedPath = sourcePath?.Trim() ?? "";
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+        {
+            return true;
+        }
+
+        var expandedArrayPath = ExpandArrayPathToRoot(effectiveArrayPath);
+        if (!string.IsNullOrWhiteSpace(expandedArrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(normalizedPath, expandedArrayPath, out var currentRelativePath))
+        {
+            if (string.IsNullOrWhiteSpace(currentRelativePath))
+            {
+                error = $"{pathLabel} 必须选到容器内的具体字段。";
+                return false;
+            }
+
+            normalizedPath = currentRelativePath;
+            return true;
+        }
+
+        if (TryInferSubCardContainerPath(
+                normalizedPath,
+                out var inferredArrayPath,
+                out var inferredRelativePath,
+                string.IsNullOrWhiteSpace(effectiveArrayPath)))
+        {
+            if (string.IsNullOrWhiteSpace(inferredRelativePath))
+            {
+                error = $"{pathLabel} 必须选到容器内的具体字段。";
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+                && !SubCardPathHelper.PathsEqual(effectiveArrayPath, inferredArrayPath))
+            {
+                error = $"{pathLabel} 与当前 ArrayPath 不一致，请先统一后再保存。";
+                return false;
+            }
+
+            normalizedPath = inferredRelativePath;
+            return true;
+        }
+
+        if (TryNormalizeMainRecordSourcePath(normalizedPath, out var mainScopedPath)
+            && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainScopedPath)))
+        {
+            normalizedPath = mainScopedPath;
+            return true;
+        }
+
+        if (!SubCardPathHelper.TrySplitWildcardPath(normalizedPath, out var pickedArrayPath, out var relativePath))
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            error = $"{pathLabel} 必须选到数组项内的具体字段。";
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+            && !SubCardPathHelper.PathsEqual(effectiveArrayPath, pickedArrayPath))
+        {
+            error = $"{pathLabel} 与当前 ArrayPath 不一致，请先统一后再保存。";
+            return false;
+        }
+
+        normalizedPath = relativePath;
+        return true;
+    }
+
+    #endregion
+
+    #region 保存
+
+    private async Task HandleSave()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedTranCode))
+        {
+            inj_snackbar.Add("请选择接口", Severity.Warning);
+            return;
+        }
+
+        var rowsToSave = _rows.Where(HasValueSource).ToList();
+        var effectiveArrayPath = GetEffectiveArrayPathForSave();
+        if (rowsToSave.Count > 0 && string.IsNullOrWhiteSpace(effectiveArrayPath))
+        {
+            inj_snackbar.Add("存在要保存的子卡映射时，容器路径不能为空", Severity.Warning);
+            return;
+        }
+
+        if (!await ConfirmPathNormalizationAsync(rowsToSave))
+        {
+            return;
+        }
+
+        _saving = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var integrationProjectCode = GetSelectedProjectCode();
+
+            // 删除旧映射及其过滤规则
+            var oldMappings = await db.EsbFieldMappings
+                .Where(m => m.CardId == Card!.CardId
+                            && m.TranCode == _selectedTranCode
+                            && m.MappingTarget == MappingTarget.SubCard
+                            && m.TargetField != EsbFieldMapping.SubCardFilterTargetField
+                            && m.IntegrationProjectCode == integrationProjectCode)
+                .ToListAsync();
+            if (oldMappings.Count > 0)
+            {
+                var oldIds = oldMappings.Select(m => m.Id).ToList();
+                var oldRules = await db.EsbFilterRules
+                    .Where(r => r.MappingId != null && oldIds.Contains(r.MappingId.Value))
+                    .ToListAsync();
+                db.EsbFilterRules.RemoveRange(oldRules);
+                db.EsbFieldMappings.RemoveRange(oldMappings);
+                await db.SaveChangesAsync();
+            }
+
+            // 插入新映射
+            var sortOrder = 0;
+            foreach (var row in rowsToSave)
+            {
+                if (!TryNormalizePathForSave(row.SourcePath, effectiveArrayPath, $"字段【{row.QuestionTitle}】的源路径", out var normalizedSourcePath, out var normalizeError))
+                {
+                    inj_snackbar.Add(normalizeError ?? "子卡源路径归一化失败。", Severity.Warning);
+                    return;
+                }
+
+                var mapping = new EsbFieldMapping
+                {
+                    TranCode = _selectedTranCode,
+                    MappingTarget = MappingTarget.SubCard,
+                    SourcePath = normalizedSourcePath,
+                    TargetField = row.QuestionId,
+                    CardId = Card!.CardId,
+                    ArrayPath = effectiveArrayPath,
+                    IntegrationProjectCode = integrationProjectCode,
+                    DictCode = row.DictCode,
+                    DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(row.DictMatchMode),
+                    DefaultValue = row.DefaultValue,
+                    ValueExpression = row.ValueExpression,
+                    IsRequired = row.IsRequired,
+                    IsEnabled = true,
+                    SortOrder = sortOrder++,
+                };
+                db.EsbFieldMappings.Add(mapping);
+                await db.SaveChangesAsync();
+
+                // 插入过滤规则
+                foreach (var rule in row.FilterRules)
+                {
+                    if (!TryNormalizePathForSave(rule.SourcePath, effectiveArrayPath, $"字段【{row.QuestionTitle}】的过滤路径", out var normalizedRulePath, out normalizeError))
+                    {
+                        inj_snackbar.Add(normalizeError ?? "子卡过滤路径归一化失败。", Severity.Warning);
+                        return;
+                    }
+
+                    db.EsbFilterRules.Add(new EsbFilterRule
+                    {
+                        TranCode = _selectedTranCode,
+                        IntegrationProjectCode = integrationProjectCode,
+                        MappingId = mapping.Id,
+                        SourcePath = normalizedRulePath,
+                        RuleGroup = Math.Max(1, rule.RuleGroup),
+                        Operator = rule.Operator,
+                        CompareValue = rule.CompareValue,
+                        FilterScope = rule.FilterScope,
+                        IsEnabled = rule.IsEnabled,
+                        Description = rule.Description,
+                        SortOrder = rule.SortOrder,
+                    });
+                }
+            }
+            await db.SaveChangesAsync();
+
+            _arrayPath = effectiveArrayPath;
+            inj_snackbar.Add("保存成功", Severity.Success);
+            await OnSaved.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    #endregion
+
+    private async Task HandleCancel()
+    {
+        ResetPick();
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    private async Task OnVisibleChanged(bool value)
+    {
+        if (!value)
+        {
+            _rows = [];
+            ResetPick();
+        }
+        await VisibleChanged.InvokeAsync(value);
+    }
+
+    private string? GetSelectedProjectCode()
+    {
+        if (!string.IsNullOrWhiteSpace(_selectedTranCode) && InterfaceDict.TryGetValue(_selectedTranCode, out var config))
+        {
+            return config.IntegrationProjectCode;
+        }
+
+        return CurrentIntegrationProjectCode;
+    }
+}

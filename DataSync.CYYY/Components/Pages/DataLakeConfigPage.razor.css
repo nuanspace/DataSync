@@ -1,0 +1,11 @@
+.datalake-config-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.datalake-config-actions {
+    display: flex;
+    align-items: center;
+    padding-bottom: 24px;
+}

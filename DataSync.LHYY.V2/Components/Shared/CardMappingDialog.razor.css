@@ -1,0 +1,10 @@
+﻿/* 当前选取行高亮 */
+::deep .card-mapping-row-active {
+    background-color: rgba(255, 152, 0, 0.08);
+}
+
+/* 过滤规则展开行内边距 */
+::deep .card-mapping-filter-cell {
+    padding: 8px 16px !important;
+    background-color: var(--mud-palette-background-gray);
+}

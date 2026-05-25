@@ -1,0 +1,644 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@inherits BasePage
+@inject TaskManagementService inj_taskManagementService
+
+<PageTitle>状态总览</PageTitle>
+
+<div class="dashboard-shell">
+<div class="home-toolbar">
+    <div class="toolbar-copy">
+        <span class="toolbar-kicker">控制台首页</span>
+        <MudText Typo="Typo.h5" Class="toolbar-title">同步状态工作台</MudText>
+    </div>
+    <div class="toolbar-actions">
+        @if (_lastLoadedAt != null)
+        {
+            <span class="toolbar-stamp">最近刷新 @_lastLoadedAt.Value.ToString("yyyy-MM-dd HH:mm:ss")</span>
+        }
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="ReloadAsync">
+            刷新数据
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudPaper Class="dashboard-loading" Elevation="1">
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-3" />
+        <MudText Typo="Typo.body2">正在加载状态总览...</MudText>
+    </MudPaper>
+}
+else if (!string.IsNullOrWhiteSpace(_loadError))
+{
+    <MudAlert Severity="Severity.Error">@_loadError</MudAlert>
+}
+else
+{
+    <section class="overview-stage">
+        <div class="overview-hero">
+            <div class="overview-intro">
+                <span class="overview-kicker">监控工作台</span>
+                <MudText Typo="Typo.h4" Class="overview-title">状态总览</MudText>
+                <div class="overview-meta">
+                    <span class="meta-pill">采集源 @_sources.Count</span>
+                    <span class="meta-pill">同步任务 @_tasks.Count</span>
+                    <span class="meta-pill">失败对象 @GetFailedCount().ToString("N0")</span>
+                </div>
+            </div>
+
+            <div class="overview-aside">
+                <div class="signal-block signal-block-primary">
+                    <span class="signal-label">当前焦点</span>
+                    <strong class="signal-value">@GetAttentionTaskCount().ToString("N0")</strong>
+                </div>
+            </div>
+        </div>
+
+        <MudGrid Class="summary-grid">
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">采集源</div>
+                    <div class="summary-value @(GetEnabledSourceCount() > 0 ? "is-good" : "is-muted")">@GetEnabledSourceCount() / @_sources.Count</div>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">同步任务</div>
+                    <div class="summary-value @(GetEnabledTaskCount() > 0 ? "is-good" : "is-muted")">@GetEnabledTaskCount() / @_tasks.Count</div>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">当前积压</div>
+                    <div class="summary-value @(GetBacklogCount() > 0 ? "is-warn" : "is-good")">@GetBacklogCount().ToString("N0")</div>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">失败对象</div>
+                    <div class="summary-value @(GetFailedCount() > 0 ? "is-danger" : "is-good")">@GetFailedCount().ToString("N0")</div>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">执行中</div>
+                    <div class="summary-value @(GetRunningCount() > 0 ? "is-info" : "is-muted")">@GetRunningCount().ToString("N0")</div>
+                </div>
+            </MudItem>
+            <MudItem xs="12" sm="6" lg="2">
+                <div class="summary-card">
+                    <div class="summary-label">需关注任务</div>
+                    <div class="summary-value @(GetAttentionTaskCount() > 0 ? "is-danger" : "is-good")">@GetAttentionTaskCount().ToString("N0")</div>
+                </div>
+            </MudItem>
+        </MudGrid>
+    </section>
+
+    <div class="section-header">
+        <div>
+            <div class="section-title-row">
+                <MudIcon Icon="@Icons.Material.Filled.CloudDownload" Class="section-icon" />
+                <MudText Typo="Typo.h6">采集源状态</MudText>
+            </div>
+        </div>
+        <MudButton Variant="Variant.Text" OnClick="OpenSourceList">采集源管理</MudButton>
+    </div>
+
+    @if (_sources.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">暂无采集源配置。</MudAlert>
+    }
+    else
+    {
+        <MudGrid Class="panel-grid source-grid">
+            @foreach (var source in GetOrderedSources())
+            {
+                var checkpoint = GetSourceCheckpoint(source);
+                var summary = GetSourceSummary(source, checkpoint);
+
+                <MudItem @key="source.Id" xs="12" lg="6">
+                    <MudPaper Class="@($"{GetOverviewCardClass(!source.Enabled)} overview-panel")"
+                              Elevation="0"
+                              data-overview-card-key="@($"source-{source.Id}")">
+                        <div class="overview-card-header">
+                            <div>
+                                <MudText Typo="Typo.h6">@source.Name</MudText>
+                                <MudText Typo="Typo.caption" Class="card-code">@source.ServerCode</MudText>
+                            </div>
+                            <div class="overview-card-actions">
+                                <span class="@($"status-badge {summary.CssClass}")">@summary.Text</span>
+                                <MudSwitch T="bool" Value="source.Enabled" Color="Color.Success"
+                                           ValueChanged="@(async (bool value) => await ToggleSourceEnabled(source, value))" />
+                            </div>
+                        </div>
+                        <div class="detail-list">
+                            <div class="detail-row"><span>本地记录</span><strong>@_localCounts.GetValueOrDefault(source.ServerCode, 0).ToString("N0")</strong></div>
+                            <div class="detail-row"><span>关联任务</span><strong>@_sourceTaskCounts.GetValueOrDefault(source.ServerCode, 0)</strong></div>
+                            <div class="detail-row"><span>轮询间隔</span><strong>@FormatInterval(source.PollingIntervalSeconds)</strong></div>
+                            <div class="detail-row"><span>采集窗口</span><strong>@FormatSourceWindow(source)</strong></div>
+                            <div class="detail-row detail-row-full"><span>上次采集</span><strong>@FormatDateTimeWithAgo(checkpoint?.LastSuccessTime, "尚未采集")</strong></div>
+                        </div>
+
+                        <div class="card-actions">
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => OpenSourceEdit(source.Id))">编辑采集源</MudButton>
+                        </div>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+
+    <div class="section-header">
+        <div>
+            <div class="section-title-row">
+                <MudIcon Icon="@Icons.Material.Filled.Sync" Class="section-icon" />
+                <MudText Typo="Typo.h6">同步任务状态</MudText>
+            </div>
+        </div>
+        <MudButton Variant="Variant.Text" OnClick="OpenTaskList">任务管理</MudButton>
+    </div>
+
+    @if (_tasks.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">暂无同步任务配置。</MudAlert>
+    }
+    else
+    {
+        <MudGrid Class="panel-grid task-grid">
+            @foreach (var task in GetOrderedTasks())
+            {
+                var checkpoint = GetTaskCheckpoint(task);
+                var stats = GetTaskPendingStats(task.Code);
+                var summary = GetTaskSummary(task, stats, checkpoint);
+                var badges = GetTaskBadges(stats);
+
+                <MudItem @key="task.Id" xs="12" lg="6">
+                    <MudPaper Class="@($"{GetOverviewCardClass(!task.Enabled)} overview-panel")"
+                              Elevation="0"
+                              data-overview-card-key="@($"task-{task.Id}")">
+                        <div class="overview-card-header">
+                            <div>
+                                <MudText Typo="Typo.h6">@task.Name</MudText>
+                                <MudText Typo="Typo.caption" Class="card-code">@task.Code</MudText>
+                            </div>
+                            <div class="overview-card-actions">
+                                <span class="@($"status-badge {summary.CssClass}")">@summary.Text</span>
+                                <MudSwitch T="bool" Value="task.Enabled" Color="Color.Success"
+                                           ValueChanged="@(async (bool value) => await ToggleTaskEnabled(task, value))" />
+                            </div>
+                        </div>
+                        <div class="task-state-wrap">
+                            @if (badges.Count > 0)
+                            {
+                                @foreach (var badge in badges)
+                                {
+                                    <span class="@($"task-state-chip {badge.CssClass}")">@badge.Label @badge.Count</span>
+                                }
+                            }
+                            else
+                            {
+                                <span class="task-state-chip skipped">当前没有待处理对象</span>
+                            }
+                        </div>
+
+                        <div class="detail-list">
+                            <div class="detail-row"><span>当前积压</span><strong>@GetTaskBacklog(stats)</strong></div>
+                            <div class="detail-row"><span>执行中</span><strong>@stats.RunningCount</strong></div>
+                            <div class="detail-row"><span>接口启用</span><strong>@GetEnabledInterfaceCount(task) / @task.Interfaces.Count</strong></div>
+                            <div class="detail-row"><span>推送方式</span><strong>@task.PushType</strong></div>
+                            <div class="detail-row"><span>触发源</span><strong>@task.TriggerServerCode</strong></div>
+                            <div class="detail-row"><span>轮询间隔</span><strong>@FormatInterval(task.PollingIntervalSeconds)</strong></div>
+                            <div class="detail-row detail-row-full"><span>最近轮询</span><strong>@FormatPollText(checkpoint)</strong></div>
+                            <div class="detail-row detail-row-full"><span>最近推送</span><strong>@FormatPushText(checkpoint)</strong></div>
+                            <div class="detail-row detail-row-full"><span>对象清单更新</span><strong>@FormatDateTimeWithAgo(stats.LastUpdatedAt, "暂无变更")</strong></div>
+                        </div>
+
+                        <div class="card-actions">
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => OpenPendingPage(task.Code))">查看待同步</MudButton>
+                            @if (stats.FailedCount > 0)
+                            {
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => OpenPendingPage(task.Code, PendingSyncStatuses.Failed))">
+                                    仅看失败
+                                </MudButton>
+                            }
+                            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => OpenTaskEdit(task.Id))">编辑任务</MudButton>
+                        </div>
+                    </MudPaper>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+}
+</div>
+
+@code {
+    private readonly record struct OverviewSummary(string Text, string CssClass, bool NeedsAttention);
+    private readonly record struct StatusBadge(string Label, int Count, string CssClass);
+
+    private List<IngestionSource> _sources = [];
+    private List<SyncTask> _tasks = [];
+    private Dictionary<string, SyncCheckpoint> _checkpoints = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, int> _localCounts = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, int> _sourceTaskCounts = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, TaskPendingStats> _pendingStats = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, OverviewCardBounds>? _pendingSourceLayoutSnapshot;
+    private Dictionary<string, OverviewCardBounds>? _pendingTaskLayoutSnapshot;
+    private bool _loading = true;
+    private string? _loadError;
+    private DateTime? _lastLoadedAt;
+
+    private sealed class OverviewCardBounds
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("left")]
+        public double Left { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("top")]
+        public double Top { get; set; }
+    }
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadDashboardAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var sourceSnapshot = _pendingSourceLayoutSnapshot;
+        var taskSnapshot = _pendingTaskLayoutSnapshot;
+        _pendingSourceLayoutSnapshot = null;
+        _pendingTaskLayoutSnapshot = null;
+
+        await AnimatePendingLayoutAsync(".source-grid", sourceSnapshot);
+        await AnimatePendingLayoutAsync(".task-grid", taskSnapshot);
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        StateHasChanged();
+        await LoadDashboardAsync();
+    }
+
+    private async Task LoadDashboardAsync()
+    {
+        try
+        {
+            var logService = new SyncLogService(ContextFactory);
+            var sourcesTask = logService.GetAllSourcesAsync(CancellationToken);
+            var tasksTask = GetAllTasksAsync();
+            var checkpointsTask = logService.GetAllCheckpointsAsync(CancellationToken);
+            var pendingStatsTask = logService.GetPendingStatsByTaskAsync(CancellationToken);
+
+            await Task.WhenAll(sourcesTask, tasksTask, checkpointsTask, pendingStatsTask);
+
+            _sources = sourcesTask.Result;
+            _tasks = tasksTask.Result;
+            _checkpoints = checkpointsTask.Result.ToDictionary(item => item.TaskCode, StringComparer.OrdinalIgnoreCase);
+            _pendingStats = pendingStatsTask.Result.ToDictionary(item => item.TaskCode, StringComparer.OrdinalIgnoreCase);
+            _sourceTaskCounts = _tasks
+                .GroupBy(task => task.TriggerServerCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+
+            var countTasks = _sources.Select(async source =>
+            {
+                try
+                {
+                    var count = await logService.GetLocalCountAsync(source.ServerCode, CancellationToken);
+                    return (source.ServerCode, Count: count);
+                }
+                catch
+                {
+                    return (source.ServerCode, Count: 0);
+                }
+            });
+
+            var countResults = await Task.WhenAll(countTasks);
+            _localCounts = countResults.ToDictionary(item => item.ServerCode, item => item.Count, StringComparer.OrdinalIgnoreCase);
+            _lastLoadedAt = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private IEnumerable<IngestionSource> GetOrderedSources()
+        => _sources.OrderBy(GetSourceSortWeight).ThenBy(source => source.Name);
+
+    private IEnumerable<SyncTask> GetOrderedTasks()
+        => _tasks.OrderBy(GetTaskSortWeight).ThenByDescending(task => GetTaskPendingStats(task.Code).FailedCount).ThenBy(task => task.Name);
+
+    private int GetEnabledSourceCount()
+        => _sources.Count(source => source.Enabled);
+
+    private int GetEnabledTaskCount()
+        => _tasks.Count(task => task.Enabled);
+
+    private int GetFailedCount()
+        => _tasks.Sum(task => GetTaskPendingStats(task.Code).FailedCount);
+
+    private int GetBacklogCount()
+        => _tasks.Sum(task => GetTaskBacklog(GetTaskPendingStats(task.Code)));
+
+    private int GetRunningCount()
+        => _tasks.Sum(task => GetTaskPendingStats(task.Code).RunningCount);
+
+    private int GetAttentionTaskCount()
+        => _tasks.Count(task => GetTaskSummary(task, GetTaskPendingStats(task.Code), GetTaskCheckpoint(task)).NeedsAttention);
+
+    private SyncCheckpoint? GetSourceCheckpoint(IngestionSource source)
+        => _checkpoints.GetValueOrDefault($"INGEST_{source.ServerCode}");
+
+    private SyncCheckpoint? GetTaskCheckpoint(SyncTask task)
+        => _checkpoints.GetValueOrDefault(task.Code);
+
+    private TaskPendingStats GetTaskPendingStats(string taskCode)
+        => _pendingStats.TryGetValue(taskCode, out var stats)
+            ? stats
+            : new TaskPendingStats { TaskCode = taskCode };
+
+    private static int GetTaskBacklog(TaskPendingStats stats)
+        => stats.PendingCount + stats.WaitingCount;
+
+    private int GetSourceSortWeight(IngestionSource source)
+    {
+        var summary = GetSourceSummary(source, GetSourceCheckpoint(source));
+        if (!source.Enabled) return 90;
+        if (summary.CssClass == "is-danger") return 0;
+        if (summary.Text == "尚未采集") return 10;
+        if (summary.Text == "未被使用") return 20;
+        return 30;
+    }
+
+    private int GetTaskSortWeight(SyncTask task)
+    {
+        var summary = GetTaskSummary(task, GetTaskPendingStats(task.Code), GetTaskCheckpoint(task));
+        if (!task.Enabled) return 90;
+        return summary.CssClass switch
+        {
+            "is-danger" => 0,
+            "is-warn" => 10,
+            "is-info" => 20,
+            _ => 30
+        };
+    }
+
+    private OverviewSummary GetSourceSummary(IngestionSource source, SyncCheckpoint? checkpoint)
+    {
+        if (!source.Enabled)
+            return new("已停用", "is-muted", false);
+
+        if (checkpoint == null)
+            return new("尚未采集", "is-warn", true);
+
+        if (IsLagging(source.PollingIntervalSeconds, checkpoint.LastSuccessTime))
+            return new("轮询滞后", "is-danger", true);
+
+        if (_sourceTaskCounts.GetValueOrDefault(source.ServerCode, 0) == 0)
+            return new("未被使用", "is-warn", true);
+
+        return new("运行正常", "is-good", false);
+    }
+
+    private OverviewSummary GetTaskSummary(SyncTask task, TaskPendingStats stats, SyncCheckpoint? checkpoint)
+    {
+        if (!task.Enabled)
+            return new("已停用", "is-muted", false);
+
+        if (GetEnabledInterfaceCount(task) == 0)
+            return new("配置待补全", "is-danger", true);
+
+        if (stats.FailedCount > 0)
+            return new("异常待处理", "is-danger", true);
+
+        if (checkpoint == null)
+            return new("尚未轮询", "is-warn", true);
+
+        if (IsLagging(task.PollingIntervalSeconds, checkpoint.LastSuccessTime) && GetTaskBacklog(stats) > 0)
+            return new("轮询滞后", "is-danger", true);
+
+        if (GetTaskBacklog(stats) > 0)
+            return new("存在积压", "is-warn", true);
+
+        if (stats.RunningCount > 0)
+            return new("执行中", "is-info", false);
+
+        if (IsLagging(task.PollingIntervalSeconds, checkpoint.LastSuccessTime))
+            return new("轮询滞后", "is-warn", true);
+
+        return new("运行正常", "is-good", false);
+    }
+
+    private static List<StatusBadge> GetTaskBadges(TaskPendingStats stats)
+    {
+        var badges = new List<StatusBadge>();
+        AddBadge(badges, "待执行", stats.PendingCount, "pending");
+        AddBadge(badges, "等待条件", stats.WaitingCount, "waiting");
+        AddBadge(badges, "失败", stats.FailedCount, "failed");
+        AddBadge(badges, "执行中", stats.RunningCount, "running");
+        AddBadge(badges, "成功", stats.SuccessCount, "success");
+        AddBadge(badges, "跳过", stats.SkippedCount, "skipped");
+        return badges;
+    }
+
+    private static void AddBadge(List<StatusBadge> badges, string label, int count, string cssClass)
+    {
+        if (count > 0)
+            badges.Add(new StatusBadge(label, count, cssClass));
+    }
+
+    private static bool IsLagging(int pollingIntervalSeconds, DateTime lastTime)
+        => lastTime < DateTime.Now.AddSeconds(-Math.Max(pollingIntervalSeconds * 2, 120));
+
+    private static string GetOverviewCardClass(bool disabled)
+        => disabled ? "overview-card is-disabled" : "overview-card";
+
+    private static int GetEnabledInterfaceCount(SyncTask task)
+        => task.Interfaces.Count(item => item.Enabled);
+
+    private static string FormatInterval(int seconds)
+    {
+        if (seconds < 60) return $"{seconds} 秒";
+        if (seconds % 60 == 0) return $"{seconds / 60} 分钟";
+        return $"{seconds / 60} 分 {seconds % 60} 秒";
+    }
+
+    private static string FormatSourceWindow(IngestionSource source)
+        => $"{FormatOffset(source.StartOffsetMinutes)} ~ {FormatOffset(source.EndOffsetMinutes)}";
+
+    private static string FormatOffset(int minutes)
+        => minutes == 0 ? "当前" : $"当前 - {minutes} 分钟";
+
+    private static string FormatDateTimeWithAgo(DateTime? value, string emptyText)
+    {
+        if (!value.HasValue) return emptyText;
+        return $"{value.Value:yyyy-MM-dd HH:mm:ss}（{FormatAgo(value.Value)}）";
+    }
+
+    private static string FormatPollText(SyncCheckpoint? checkpoint)
+    {
+        if (checkpoint == null) return "尚未轮询";
+        return $"{checkpoint.LastSuccessTime:yyyy-MM-dd HH:mm:ss}（{FormatAgo(checkpoint.LastSuccessTime)}，本次 {checkpoint.LastPollCount} 条）";
+    }
+
+    private static string FormatPushText(SyncCheckpoint? checkpoint)
+    {
+        if (checkpoint?.LastPushTime == null) return "尚未推送";
+        return $"{checkpoint.LastPushTime.Value:yyyy-MM-dd HH:mm:ss}（{FormatAgo(checkpoint.LastPushTime.Value)}，成功 {checkpoint.LastPushSuccess} / 失败 {checkpoint.LastPushFail}）";
+    }
+
+    private static string FormatAgo(DateTime time)
+    {
+        var span = DateTime.Now - time;
+        if (span.TotalSeconds < 10) return "刚刚";
+        if (span.TotalMinutes < 1) return $"{Math.Max(1, (int)span.TotalSeconds)} 秒前";
+        if (span.TotalHours < 1) return $"{Math.Max(1, (int)span.TotalMinutes)} 分钟前";
+        if (span.TotalDays < 1) return $"{Math.Max(1, (int)span.TotalHours)} 小时前";
+        return $"{Math.Max(1, (int)span.TotalDays)} 天前";
+    }
+
+    private void OpenPendingPage(string taskCode, string? status = null)
+    {
+        var url = $"/pending-sync?task={Uri.EscapeDataString(taskCode)}";
+        if (!string.IsNullOrWhiteSpace(status))
+            url += $"&status={Uri.EscapeDataString(status)}";
+        inj_navigationManager.NavigateTo(url);
+    }
+
+    private void OpenTaskList()
+        => inj_navigationManager.NavigateTo("/tasks");
+
+    private void OpenSourceList()
+        => inj_navigationManager.NavigateTo("/ingestion");
+
+    private void OpenTaskEdit(int id)
+        => inj_navigationManager.NavigateTo($"/tasks/edit/{id}");
+
+    private void OpenSourceEdit(int id)
+        => inj_navigationManager.NavigateTo($"/ingestion/edit/{id}");
+
+    private async Task<List<SyncTask>> GetAllTasksAsync()
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        return await db.SyncTasks
+            .AsNoTracking()
+            .Include(task => task.Interfaces)
+            .OrderBy(task => task.Id)
+            .ToListAsync(CancellationToken);
+    }
+
+    private async Task ToggleSourceEnabled(IngestionSource source, bool enabled)
+    {
+        if (!enabled)
+        {
+            var relatedTasks = _tasks.Where(task => task.TriggerServerCode == source.ServerCode).ToList();
+            if (relatedTasks.Count > 0)
+            {
+                var taskNames = string.Join("、", relatedTasks.Select(task => task.Name));
+                var confirmed = await inj_dialogService.ShowMessageBox(
+                    "确认禁用",
+                    $"该采集源关联了 {relatedTasks.Count} 个同步任务（{taskNames}），禁用后这些任务将无法获取新数据，确定要禁用吗？",
+                    yesText: "确定", cancelText: "取消");
+                if (confirmed != true) return;
+            }
+        }
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.IngestionSources.FindAsync([source.Id], CancellationToken);
+            if (entity is null) return;
+
+            entity.Enabled = enabled;
+            await db.SaveChangesAsync(CancellationToken);
+            var layoutSnapshot = await CaptureOverviewLayoutAsync(".source-grid");
+            source.Enabled = enabled;
+            _pendingSourceLayoutSnapshot = layoutSnapshot;
+            inj_snackbar.Add($"已{(enabled ? "启用" : "禁用")}采集源：{source.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ToggleTaskEnabled(SyncTask task, bool enabled)
+    {
+        try
+        {
+            if (enabled)
+            {
+                var conflicts = await inj_taskManagementService.GetEnabledConflictsAsync(task, CancellationToken);
+                if (conflicts.Count > 0)
+                {
+                    var confirmed = await inj_dialogService.ShowMessageBox(
+                        "重复同步风险提示",
+                        TaskManagementService.BuildEnableConflictMessage(task, conflicts),
+                        yesText: "继续启用", cancelText: "取消");
+                    if (confirmed != true)
+                    {
+                        await InvokeAsync(StateHasChanged);
+                        return;
+                    }
+                }
+            }
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.SyncTasks.FindAsync([task.Id], CancellationToken);
+            if (entity is null) return;
+
+            entity.Enabled = enabled;
+            await db.SaveChangesAsync(CancellationToken);
+            var layoutSnapshot = await CaptureOverviewLayoutAsync(".task-grid");
+            task.Enabled = enabled;
+            _pendingTaskLayoutSnapshot = layoutSnapshot;
+            inj_snackbar.Add($"已{(enabled ? "启用" : "禁用")}任务：{task.Name}", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task<Dictionary<string, OverviewCardBounds>?> CaptureOverviewLayoutAsync(string gridSelector)
+    {
+        try
+        {
+            return await inj_jsRuntime.InvokeAsync<Dictionary<string, OverviewCardBounds>>(
+                "dashboardOverview.capture",
+                gridSelector);
+        }
+        catch (JSException)
+        {
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private async Task AnimatePendingLayoutAsync(string gridSelector, Dictionary<string, OverviewCardBounds>? snapshot)
+    {
+        if (snapshot is not { Count: > 0 })
+            return;
+
+        try
+        {
+            await inj_jsRuntime.InvokeVoidAsync("dashboardOverview.animate", gridSelector, snapshot);
+        }
+        catch (JSException)
+        {
+        }
+        catch (InvalidOperationException)
+        {
+        }
+    }
+}

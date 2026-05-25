@@ -1,0 +1,624 @@
+﻿@page "/form-browser"
+@inherits BasePage
+
+<PageTitle>表单浏览器 - LHYY V2</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">产品表单浏览器</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    按医院、项目、事件类型浏览 Bio.Core 中的 FormSet 和 Question 信息
+</MudText>
+
+<MudGrid>
+    <MudItem xs="12" sm="6" md="3">
+        <MudAutocomplete T="HospitalInfo" Label="医院" Value="_selectedHospital" ValueChanged="OnHospitalChanged"
+                         SearchFunc="SearchHospitals" ToStringFunc="@(h => h?.Name ?? string.Empty)"
+                         Clearable="true" CoerceText="false" CoerceValue="false" Strict="true" MaxItems="50" />
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudSelect T="string" Label="项目" Value="_selectedProjectId" ValueChanged="OnProjectChanged" Clearable="true"
+                   Disabled="@(_projects.Count == 0)">
+            @foreach (var project in _projects)
+            {
+                <MudSelectItem Value="@project.Id.ToString()">@FormatProjectName(project)</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudSelect T="string" Label="事件类型" Value="_selectedEventTypeId" ValueChanged="OnEventTypeChanged" Clearable="true"
+                   Disabled="@(_eventTypes.Count == 0)">
+            @foreach (var eventType in _eventTypes)
+            {
+                <MudSelectItem Value="@eventType.Id.ToString()">@FormatEventTypeName(eventType)</MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="6" md="3">
+        <MudTextField @bind-Value="_searchText" Label="搜索问题" Adornment="Adornment.End"
+                      AdornmentIcon="@Icons.Material.Filled.Search" OnKeyUp="OnSearchKeyUp" Clearable="true" />
+    </MudItem>
+</MudGrid>
+
+@if (!string.IsNullOrEmpty(_selectedProjectId) && _eventTypes.Count == 0 && !_loading)
+{
+    <MudAlert Severity="Severity.Info" Class="mt-4">当前项目没有配置有效事件类型。</MudAlert>
+}
+
+@* FormSet 信息 *@
+@if (_selectedFormSetInfo != null)
+{
+    <MudCard Class="mt-4 mb-4">
+        <MudCardContent>
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">FormSet ID</MudText>
+                    <MudText Style="font-family:monospace;font-size:12px;">@_selectedFormSetInfo.Id</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">Hospital ID</MudText>
+                    <MudText Style="font-family:monospace;font-size:12px;">@_selectedFormSetInfo.HospitalId</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">Project ID</MudText>
+                    <MudText Style="font-family:monospace;font-size:12px;">@_selectedFormSetInfo.ProjectId</MudText>
+                </MudItem>
+            </MudGrid>
+        </MudCardContent>
+    </MudCard>
+}
+
+@* 生成字典对话框 *@
+@if (_dictDialogVisible)
+{
+    <MudOverlay Visible="true" DarkBackground="true" ZIndex="9999" />
+    <MudPaper Elevation="8" Style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;width:500px;max-width:90vw;padding:24px;">
+        <MudText Typo="Typo.h6" Class="mb-4">生成字典条目</MudText>
+        <MudTextField @bind-Value="_dictCode" Label="DictCode（字典代码）" Required="true" Class="mb-4" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">选项预览</MudText>
+        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true">
+            <thead>
+                <tr>
+                    <th>序号</th>
+                    <th>SourceValue</th>
+                    <th>TargetValue</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < _dictEntries.Count; i++)
+                {
+                    var entry = _dictEntries[i];
+                    <tr>
+                        <td>@(i + 1)</td>
+                        <td><MudTextField @bind-Value="entry.SourceValue" Variant="Variant.Text" Margin="Margin.Dense" Style="margin:0;" /></td>
+                        <td>@entry.TargetValue</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+        <div class="d-flex justify-end gap-2 mt-4">
+            <MudButton OnClick="@(() => _dictDialogVisible = false)">取消</MudButton>
+            <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="GenerateDict">生成</MudButton>
+        </div>
+    </MudPaper>
+}
+
+@* 树形视图：左侧 Form 列表 + 右侧卡片/问题树 *@
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Class="mt-4" />
+}
+else if (_formNodes.Count > 0)
+{
+    <MudGrid Class="mt-4" Spacing="2" Style="height:calc(100vh - 300px);min-height:400px;">
+        @* 左侧 Form 列表 *@
+        <MudItem xs="12" sm="3" Style="height:100%;">
+            <MudPaper Outlined="true" Style="height:100%;overflow-y:auto;">
+                <MudList T="string" @bind-SelectedValue="_selectedFormId" Color="Color.Primary" Dense="true">
+                    @foreach (var form in _formNodes)
+                    {
+                        <MudListItem Value="@form.Id" Icon="@Icons.Material.Filled.Description">
+                            <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                                <MudText Typo="Typo.body2">@form.Name</MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@form.QuestionCount</MudChip>
+                            </div>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
+        </MudItem>
+        @* 右侧卡片/问题树 *@
+        <MudItem xs="12" sm="9" Style="height:100%;">
+            <MudPaper Outlined="true" Class="pa-2" Style="height:100%;overflow-y:auto;">
+                @{
+                    var activeForm = _formNodes.FirstOrDefault(f => f.Id == _selectedFormId) ?? _formNodes.FirstOrDefault();
+                }
+                @if (activeForm != null)
+                {
+                    <MudTreeView T="string" Dense="true" Hover="true" ExpandOnClick="true">
+                        @foreach (var child in FormBrowserHelper.GetOrderedChildren(activeForm))
+                        {
+                            if (child.Card != null)
+                            {
+                                @RenderCard(child.Card)
+                            }
+                            else if (child.Question != null)
+                            {
+                                @RenderQuestion(child.Question)
+                            }
+                        }
+                    </MudTreeView>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+    <MudText Typo="Typo.caption" Class="mt-2">共 @_totalQuestionCount 个问题</MudText>
+}
+
+@code {
+    [Inject] private BioCoreIntegrationService BioCoreService { get; set; } = default!;
+
+    private List<HospitalInfo> _hospitals = [];
+    private List<ProductProjectInfo> _projects = [];
+    private List<ProductEventTypeInfo> _eventTypes = [];
+    private FormSetInfo? _selectedFormSetInfo;
+    private List<FormNode> _formNodes = [];
+    private int _totalQuestionCount;
+
+    private HospitalInfo? _selectedHospital;
+    private string? _selectedProjectId;
+    private string? _selectedEventTypeId;
+    private string? _selectedFormId;
+    private string? _searchText;
+    private bool _loading;
+
+    // 生成字典对话框状态
+    private bool _dictDialogVisible;
+    private string? _dictCode;
+    private List<DictEntry> _dictEntries = [];
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _hospitals = await BioCoreService.GetHospitalsAsync();
+    }
+
+    private Task<IEnumerable<HospitalInfo>> SearchHospitals(string? search, CancellationToken ct)
+    {
+        var items = _hospitals.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            items = items.Where(h => h.Name.Contains(search, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(items.Take(50));
+    }
+
+    private async Task OnHospitalChanged(HospitalInfo? value)
+    {
+        _selectedHospital = value;
+        _selectedProjectId = null;
+        _selectedEventTypeId = null;
+        _selectedFormSetInfo = null;
+        _selectedFormId = null;
+        _projects = [];
+        _eventTypes = [];
+        _formNodes = [];
+        _totalQuestionCount = 0;
+
+        if (value == null)
+            return;
+
+        _projects = await BioCoreService.GetProjectsByHospitalAsync(value.Id);
+    }
+
+    private async Task OnProjectChanged(string? value)
+    {
+        _selectedProjectId = value;
+        _selectedEventTypeId = null;
+        _selectedFormSetInfo = null;
+        _selectedFormId = null;
+        _eventTypes = [];
+        _formNodes = [];
+        _totalQuestionCount = 0;
+
+        if (string.IsNullOrEmpty(value) || !Guid.TryParse(value, out var projectId))
+            return;
+
+        _eventTypes = await BioCoreService.GetEventTypesByProjectAsync(projectId);
+    }
+
+    private async Task OnEventTypeChanged(string? value)
+    {
+        _selectedEventTypeId = value;
+        _selectedFormId = null;
+        _formNodes = [];
+        _totalQuestionCount = 0;
+
+        var eventType = _eventTypes.FirstOrDefault(e => e.Id.ToString() == value);
+        if (eventType == null)
+        {
+            _selectedFormSetInfo = null;
+            return;
+        }
+
+        _selectedFormSetInfo = new FormSetInfo
+        {
+            Id = eventType.FormSetId.ToString(),
+            Name = eventType.FormSetName,
+            HospitalId = _selectedHospital?.Id.ToString() ?? "",
+            ProjectId = _selectedProjectId ?? "",
+            EventTypes = eventType.Name,
+        };
+
+        await LoadFormSetAsync(eventType.FormSetId);
+    }
+
+    private async Task LoadFormSetAsync(Guid formSetId)
+    {
+        _formNodes = [];
+        _totalQuestionCount = 0;
+
+        _loading = true;
+        try
+        {
+            // 构建问题列表
+            var questionDict = await BioCoreService.GetFormQuestionDictByFormSetAsync(formSetId);
+            var questions = questionDict.Values
+                .Select(q => BuildQuestionInfo(q))
+                .ToList();
+
+            // 按 form_set_id 查询所有卡片信息
+            var cardDict = await BioCoreService.GetAllCardListByFormSetAsync(formSetId);
+            var formDict = await BioCoreService.GetFormListByFormSetAsync(formSetId);
+
+            // 按 Form 分组，构建树
+            _formNodes = FormBrowserHelper.BuildTree(questions, cardDict, formDict);
+            _selectedFormId = _formNodes.FirstOrDefault()?.Id;
+            _totalQuestionCount = questions.Count;
+
+            ApplyFilter();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private static string FormatProjectName(ProductProjectInfo project)
+    {
+        var suffix = project.EventTypeCount > 0 ? $"{project.EventTypeCount} 个事件" : "无事件";
+        if (!string.IsNullOrWhiteSpace(project.LicenseCodes))
+            suffix += $"，授权码：{project.LicenseCodes}";
+
+        return $"{project.Name}（{suffix}）";
+    }
+
+    private static string FormatEventTypeName(ProductEventTypeInfo eventType)
+    {
+        var group = string.IsNullOrWhiteSpace(eventType.Group) ? "" : $"{eventType.Group} / ";
+        return $"{group}{eventType.Name}（{eventType.FormSetName}）";
+    }
+
+    /// <summary>
+    /// 递归渲染卡片节点
+    /// </summary>
+    private RenderFragment RenderCard(CardNode card) => __builder =>
+    {
+        var isSubCard = card.CardType is "multiple" or "table";
+        var cardIcon = card.CardType switch
+        {
+            "multiple" => Icons.Material.Filled.DynamicFeed,
+            "table" => Icons.Material.Filled.TableChart,
+            _ => Icons.Material.Filled.CreditCard,
+        };
+        var typeLabel = card.CardType switch
+        {
+            "multiple" => "SubCard",
+            "table" => "表格",
+            _ => (string?)null,
+        };
+
+        <MudTreeViewItem T="string" Value="@card.CardId.ToString()" @bind-Expanded="@card.IsExpanded"
+                         Icon="@cardIcon">
+            <BodyContent>
+                <MudTooltip Text="@($"点击复制: {card.CardId}")">
+                    <MudText Typo="Typo.body2" Style="cursor:pointer;font-weight:600;"
+                             @onclick="@(() => CopyToClipboard(card.CardId.ToString()))">
+                        @card.Name
+                    </MudText>
+                </MudTooltip>
+                @if (typeLabel != null)
+                {
+                    var chipColor = card.CardType == "multiple" ? Color.Warning : Color.Info;
+                    <MudChip T="string" Size="Size.Small" Color="chipColor" Variant="Variant.Outlined"
+                             Style="height:20px;font-size:11px;" Class="ml-1">@typeLabel</MudChip>
+                }
+                @{ var qCount = CountQuestions(card); }
+                <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="ml-1">@qCount 个问题</MudText>
+            </BodyContent>
+            <ChildContent>
+                @if (isSubCard && card.SubCards.Count == 0 && card.Questions.Count > 0)
+                {
+                    @* SubCard / 表格卡片：用表格展示 *@
+                    <MudTreeViewItem T="string" Value="@($"table-{card.CardId}")" CanExpand="false">
+                        <BodyContent>
+                            <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true"
+                                            Style="width:100%;">
+                                <thead>
+                                    <tr>
+                                        <th>Question ID</th>
+                                        <th>标题</th>
+                                        <th style="width:80px;">类型</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var row in card.Questions)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <MudTooltip Text="点击复制">
+                                                    <MudText Style="font-family:monospace;font-size:12px;cursor:pointer;color:var(--mud-palette-text-secondary);"
+                                                             @onclick="@(() => CopyToClipboard(row.Id))">
+                                                        @row.Id
+                                                    </MudText>
+                                                </MudTooltip>
+                                            </td>
+                                            <td>
+                                                <div style="font-weight:500;">@row.Title</div>
+                                                @if (!string.IsNullOrEmpty(row.SelectInfo))
+                                                {
+                                                    <div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap;">
+                                                        <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary);">@row.SelectInfo</MudText>
+                                                        @if (row.Options.Count > 0)
+                                                        {
+                                                            <MudTooltip Text="生成字典">
+                                                                <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small"
+                                                                               Color="Color.Default"
+                                                                               OnClick="@(() => OpenDictDialog(row))" />
+                                                            </MudTooltip>
+                                                        }
+                                                    </div>
+                                                }
+                                            </td>
+                                            <td>@row.DataType</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        </BodyContent>
+                    </MudTreeViewItem>
+                }
+                else
+                {
+                    @foreach (var child in FormBrowserHelper.GetOrderedChildren(card))
+                    {
+                        if (child.Card != null)
+                        {
+                            @RenderCard(child.Card)
+                        }
+                        else if (child.Question != null)
+                        {
+                            @RenderQuestion(child.Question)
+                        }
+                    }
+                }
+            </ChildContent>
+        </MudTreeViewItem>
+    };
+
+    /// <summary>
+    /// 渲染问题叶子节点
+    /// </summary>
+    private RenderFragment RenderQuestion(QuestionInfo q) => __builder =>
+    {
+        <MudTreeViewItem T="string" Value="@q.Id">
+            <BodyContent>
+                <div style="padding:3px 0;">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <MudText Typo="Typo.body2" Style="font-weight:500;">@q.Title</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default"
+                                 Style="height:18px;font-size:10px;">@q.DataType</MudChip>
+                    </div>
+                    <MudTooltip Text="点击复制">
+                        <MudText Style="font-family:monospace;font-size:12px;cursor:pointer;color:var(--mud-palette-text-secondary);"
+                                 @onclick="@(() => CopyToClipboard(q.Id))">
+                            @q.Id
+                        </MudText>
+                    </MudTooltip>
+                    @if (!string.IsNullOrEmpty(q.SelectInfo))
+                    {
+                        <div style="display:flex;align-items:center;gap:4px;margin-top:2px;flex-wrap:wrap;">
+                            <MudText Typo="Typo.body2" Style="color:var(--mud-palette-text-secondary);">@q.SelectInfo</MudText>
+                            @if (q.Options.Count > 0)
+                            {
+                                <MudTooltip Text="生成字典">
+                                    <MudIconButton Icon="@Icons.Material.Filled.BookmarkAdd" Size="Size.Small"
+                                                   Color="Color.Default"
+                                                   OnClick="@(() => OpenDictDialog(q))" />
+                                </MudTooltip>
+                            }
+                        </div>
+                    }
+                </div>
+            </BodyContent>
+        </MudTreeViewItem>
+    };
+
+    private int CountQuestions(CardNode card)
+    {
+        return card.Questions.Count + card.SubCards.Sum(c => CountQuestions(c));
+    }
+
+    private void OnSearchKeyUp(KeyboardEventArgs e)
+    {
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        if (string.IsNullOrEmpty(_searchText))
+        {
+            // 展开所有 Form，收起卡片
+            foreach (var f in _formNodes)
+            {
+                f.IsExpanded = true;
+                SetCardExpanded(f.Cards, false);
+            }
+            return;
+        }
+
+        var search = _searchText.ToLower();
+        // 展开包含匹配问题的节点
+        foreach (var f in _formNodes)
+        {
+            var formHasMatch = false;
+            foreach (var card in GetAllCards(f.Cards))
+            {
+                var cardHasMatch = card.Questions.Any(q => MatchesSearch(q, search));
+                card.IsExpanded = cardHasMatch;
+                if (cardHasMatch) formHasMatch = true;
+            }
+            if (f.OrphanQuestions.Any(q => MatchesSearch(q, search)))
+                formHasMatch = true;
+            f.IsExpanded = formHasMatch;
+        }
+    }
+
+    private static bool MatchesSearch(QuestionInfo q, string search)
+    {
+        return (q.Title?.ToLower().Contains(search) == true) ||
+               q.Id.Contains(search) ||
+               (q.DataType?.ToLower().Contains(search) == true);
+    }
+
+    private static IEnumerable<CardNode> GetAllCards(List<CardNode> cards)
+    {
+        foreach (var card in cards)
+        {
+            yield return card;
+            foreach (var sub in GetAllCards(card.SubCards))
+                yield return sub;
+        }
+    }
+
+    private static void SetCardExpanded(List<CardNode> cards, bool expanded)
+    {
+        foreach (var card in cards)
+        {
+            card.IsExpanded = expanded;
+            SetCardExpanded(card.SubCards, expanded);
+        }
+    }
+
+    private async Task CopyToClipboard(string text)
+    {
+        try
+        {
+            await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            inj_snackbar.Add($"已复制: {text[..Math.Min(36, text.Length)]}", Severity.Info);
+        }
+        catch
+        {
+            inj_snackbar.Add("复制失败，请手动复制", Severity.Warning);
+        }
+    }
+
+    private static QuestionInfo BuildQuestionInfo(object q) => FormBrowserHelper.BuildQuestionInfo(q);
+
+    private void OpenDictDialog(QuestionInfo q)
+    {
+        _dictCode = null;
+        _dictEntries = q.Options.Select(o => new DictEntry { SourceValue = o, TargetValue = o }).ToList();
+        _dictDialogVisible = true;
+    }
+
+    private async Task GenerateDict()
+    {
+        if (string.IsNullOrWhiteSpace(_dictCode))
+        {
+            inj_snackbar.Add("请输入 DictCode", Severity.Warning);
+            return;
+        }
+
+        var dictCode = _dictCode.Trim();
+        var integrationProjectCode = CurrentIntegrationProjectCode;
+        await using var db = await ContextFactory.CreateDbContextAsync();
+
+        // 过滤掉 SourceValue 为空的条目
+        var entries = _dictEntries.Where(e => !string.IsNullOrWhiteSpace(e.SourceValue)).ToList();
+        if (entries.Count == 0)
+        {
+            inj_snackbar.Add("没有有效的条目", Severity.Warning);
+            return;
+        }
+
+        // 查询已有条目
+        var existing = await db.EsbDicts
+            .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == integrationProjectCode)
+            .Select(d => d.SourceValue)
+            .ToListAsync();
+        var existingSet = new HashSet<string>(existing);
+
+        var newEntries = entries.Where(e => !existingSet.Contains(e.SourceValue)).ToList();
+        var conflictEntries = entries.Where(e => existingSet.Contains(e.SourceValue)).ToList();
+
+        // 处理冲突项
+        if (conflictEntries.Count > 0)
+        {
+            var conflictList = string.Join("、", conflictEntries.Select(e => e.SourceValue));
+            var result = await inj_dialogService.ShowMessageBox(
+                "存在冲突条目",
+                $"以下 SourceValue 在 DictCode「{dictCode}」中已存在：{conflictList}",
+                yesText: "覆盖已存在的", cancelText: "跳过已存在的");
+
+            if (result == true)
+            {
+                var conflictSourceValues = conflictEntries.Select(e => e.SourceValue).ToList();
+                var toUpdate = await db.EsbDicts
+                    .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == integrationProjectCode && conflictSourceValues.Contains(d.SourceValue))
+                    .ToListAsync();
+                // 用对话框中编辑后的值覆盖
+                var entryMap = conflictEntries.ToDictionary(e => e.SourceValue, e => e.TargetValue);
+                foreach (var item in toUpdate)
+                {
+                    if (entryMap.TryGetValue(item.SourceValue, out var newTarget))
+                        item.TargetValue = newTarget;
+                }
+            }
+        }
+
+        // 插入新条目
+        var maxSort = existing.Count > 0
+            ? await db.EsbDicts.Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == integrationProjectCode).MaxAsync(d => d.SortOrder)
+            : 0;
+
+        foreach (var entry in newEntries)
+        {
+            maxSort++;
+            db.EsbDicts.Add(new Models.Entities.EsbDict
+            {
+                DictCode = dictCode,
+                IntegrationProjectCode = integrationProjectCode,
+                SourceValue = entry.SourceValue,
+                TargetValue = entry.TargetValue,
+                SortOrder = maxSort,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        _dictDialogVisible = false;
+
+        var msg = $"完成：新增 {newEntries.Count} 条";
+        if (conflictEntries.Count > 0)
+            msg += $"，冲突 {conflictEntries.Count} 条";
+        inj_snackbar.Add(msg, Severity.Success);
+    }
+
+    #region 数据模型
+
+    private class DictEntry
+    {
+        public string SourceValue { get; set; } = "";
+        public string TargetValue { get; set; } = "";
+    }
+
+    #endregion
+}

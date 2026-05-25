@@ -1,0 +1,85 @@
+﻿@inherits BasePage
+
+<div class="dict-code-editor-shell">
+    <MudAutocomplete T="string" Value="Value" ValueChanged="OnValueChanged"
+                     Label="@Label" Margin="@Margin" Variant="@Variant"
+                     SearchFunc="SearchDictCodes" Clearable="true"
+                     CoerceText="false" CoerceValue="false" Strict="true" MaxItems="50"
+                     HelperText="@HelperText" />
+    <div class="dict-code-editor-actions">
+        <MudButton Variant="Variant.Text" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.AddCircleOutline"
+                   OnClick="OpenCreateDialog">
+            新建字典
+        </MudButton>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public IEnumerable<string>? SuggestedSourceValues { get; set; }
+    [Parameter] public string Label { get; set; } = "字典代码";
+    [Parameter] public string HelperText { get; set; } = "搜索并选择当前项目或全局字典代码；如无可选项，可直接新建。";
+    [Parameter] public Margin Margin { get; set; } = Margin.Dense;
+    [Parameter] public Variant Variant { get; set; } = Variant.Outlined;
+
+    private List<string> _dictCodes = [];
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadDictCodesAsync();
+    }
+
+    private async Task LoadDictCodesAsync()
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        _dictCodes = await db.EsbDicts
+            .Where(d => d.IntegrationProjectCode == CurrentIntegrationProjectCode || d.IntegrationProjectCode == null)
+            .Select(d => d.DictCode)
+            .Distinct()
+            .OrderBy(c => c)
+            .ToListAsync();
+    }
+
+    private Task<IEnumerable<string>> SearchDictCodes(string? search, CancellationToken ct)
+    {
+        var items = _dictCodes.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            items = items.Where(code => code.Contains(search, StringComparison.OrdinalIgnoreCase));
+        }
+
+        return Task.FromResult(items);
+    }
+
+    private Task OnValueChanged(string? value)
+    {
+        Value = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var parameters = new DialogParameters
+        {
+            ["InitialDictCode"] = Value?.Trim(),
+            ["SuggestedSourceValues"] = SuggestedSourceValues?.ToList()
+        };
+
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseOnEscapeKey = true
+        };
+
+        var dialog = await inj_dialogService.ShowAsync<DictCreateDialog>("新建字典", parameters, options);
+        var result = await dialog.Result;
+        if (result is { Canceled: false, Data: string dictCode })
+        {
+            await LoadDictCodesAsync();
+            await OnValueChanged(dictCode);
+        }
+    }
+}

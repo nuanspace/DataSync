@@ -1,0 +1,4 @@
+﻿cmd
+d:
+cd D:\Github\DotnetTools\NTCare.APIHub
+docker build -t ntcareapi_0.2.717_20250718 .

@@ -1,0 +1,202 @@
+﻿::deep .shell-layout {
+    min-height: 100vh;
+}
+
+::deep .shell-appbar {
+    background: linear-gradient(135deg, #07385f 0%, #08759a 62%, #0f9f9b 100%);
+    min-height: 60px;
+    color: #f4fbff;
+    border-bottom: 1px solid rgba(88, 229, 219, 0.42);
+    box-shadow: 0 8px 20px rgba(7, 56, 95, 0.22);
+    animation: shell-appbar-enter 260ms ease-out;
+}
+
+::deep .shell-menu-button {
+    margin-right: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.26);
+    border-radius: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    transition: transform 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+}
+
+::deep .shell-menu-button:hover {
+    transform: translateY(-1px);
+    background-color: rgba(255, 255, 255, 0.18);
+    border-color: rgba(255, 255, 255, 0.42);
+}
+
+::deep .shell-brand {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 2px;
+    max-width: min(620px, calc(100vw - 112px));
+    min-width: 0;
+    overflow: hidden;
+    animation: shell-brand-enter 320ms ease-out;
+}
+
+::deep .shell-brand-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+::deep .shell-brand-title {
+    color: #ffffff;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+::deep .shell-brand-subtitle {
+    color: rgba(225, 251, 255, 0.82);
+    font-size: 0.72rem;
+    line-height: 1.1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+::deep .shell-project-chip {
+    flex: 0 0 auto;
+    border-color: rgba(208, 250, 255, 0.58);
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+::deep .shell-drawer {
+    border-right: 1px solid rgba(15, 107, 125, 0.08);
+    background: linear-gradient(180deg, rgba(240, 247, 250, 0.92) 0%, rgba(249, 251, 253, 0.98) 100%);
+}
+
+::deep .shell-drawer-header {
+    padding: 20px 18px 14px;
+}
+
+::deep .shell-drawer-brand {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+::deep .shell-drawer-kicker {
+    color: #6a8194;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+::deep .shell-drawer-title {
+    font-weight: 700;
+    color: #11314a;
+    line-height: 1.25;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+::deep .shell-drawer-subtitle {
+    color: #688094;
+    line-height: 1.5;
+}
+
+::deep .shell-drawer .mud-navmenu {
+    padding: 0 10px 14px;
+}
+
+::deep .shell-drawer .mud-nav-link,
+::deep .shell-drawer .mud-nav-group .mud-nav-link {
+    margin: 4px 0;
+    border-radius: 8px;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+::deep .shell-drawer .mud-nav-link:hover,
+::deep .shell-drawer .mud-nav-group .mud-nav-link:hover {
+    transform: translateX(3px);
+    background-color: rgba(15, 107, 125, 0.08);
+}
+
+::deep .shell-drawer .mud-nav-link.active,
+::deep .shell-drawer .mud-nav-group .mud-nav-link.active {
+    color: #0f5267;
+    font-weight: 700;
+    background: linear-gradient(135deg, rgba(14, 58, 91, 0.08), rgba(15, 107, 125, 0.12));
+}
+
+::deep .shell-drawer .mud-nav-group {
+    margin-top: 8px;
+}
+
+::deep .shell-main {
+    padding-top: 14px;
+    background:
+        radial-gradient(circle at top right, rgba(14, 107, 125, 0.08), transparent 26%),
+        radial-gradient(circle at left top, rgba(14, 58, 91, 0.06), transparent 24%),
+        #f3f7fa;
+}
+
+::deep .shell-content {
+    padding: 40px 24px 32px;
+}
+
+.shell-page-frame {
+    margin-top: 24px;
+}
+
+@keyframes shell-appbar-enter {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes shell-brand-enter {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 959.98px) {
+    ::deep .shell-brand {
+        max-width: calc(100vw - 88px);
+        gap: 0;
+    }
+
+    ::deep .shell-brand-subtitle,
+    ::deep .shell-project-chip {
+        display: none;
+    }
+
+    ::deep .shell-main {
+        padding-top: 10px;
+    }
+
+    ::deep .shell-content {
+        padding: 28px 14px 24px;
+    }
+
+    .shell-page-frame {
+        margin-top: 18px;
+    }
+}

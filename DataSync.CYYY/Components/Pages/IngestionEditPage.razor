@@ -1,0 +1,398 @@
+﻿@page "/ingestion/create"
+@page "/ingestion/edit/{Id:int}"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>@(_isEdit ? $"编辑采集源 - {_source.Name}" : "新增采集源")</PageTitle>
+
+<div class="ingestion-edit-toolbar">
+    <MudText Typo="Typo.h5">@(_isEdit ? $"编辑采集源 - {_source.Name}" : "新增采集源")</MudText>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+               OnClick="@(() => inj_navigationManager.NavigateTo("/ingestion"))">
+        返回列表
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+}
+else
+{
+    <!-- 基本信息 -->
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-3">基本信息</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_source.Name" Label="名称" Required="true" Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_source.ServerCode" Label="ServerCode" Required="true"
+                              Variant="Variant.Outlined" HelperText="数据湖接口编码，如 JHIDS-BAS-OAP-028" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField Value="@_localTableName" Label="本地表名（自动生成）" ReadOnly="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6" Class="d-flex align-center">
+                <MudSwitch @bind-Value="_source.Enabled" Label="启用" Color="Color.Success" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <!-- 采集配置 -->
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-3">采集配置</MudText>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_source.TimeField" Label="时间字段" Required="true"
+                              Variant="Variant.Outlined" HelperText="增量查询的时间字段名" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_source.PollingIntervalSeconds" Label="轮询间隔(秒)"
+                                 Variant="Variant.Outlined" Min="10" />
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField @bind-Value="_startDisplayValue" Label="开始偏移"
+                                 Variant="Variant.Outlined" Min="1"
+                                 HelperText="开始时间 = 当前时间 - 该值" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudSelect @bind-Value="_startUnit" Label="单位" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
+                    <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="4">
+                <MudNumericField @bind-Value="_endDisplayValue" Label="结束偏移"
+                                 Variant="Variant.Outlined" Min="0"
+                                 HelperText="结束时间 = 当前时间 - 该值，0 表示当前时间" />
+            </MudItem>
+            <MudItem xs="12" sm="2">
+                <MudSelect @bind-Value="_endUnit" Label="单位" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
+                    <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+
+            <!-- 主键字段 -->
+            <MudItem xs="12">
+                <div class="pk-section">
+                    <div class="pk-input-row">
+                        <MudTextField @bind-Value="_pkInput" Label="主键字段 *" Variant="Variant.Outlined"
+                                      Margin="Margin.Dense" OnKeyUp="OnPkKeyUp"
+                                      HelperText="输入字段名后按回车添加，支持联合主键" Class="pk-input" />
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddPrimaryKey" Class="ml-2 pk-add-btn">添加</MudButton>
+                    </div>
+                    @if (_primaryKeys.Count > 0)
+                    {
+                        <div class="pk-chips">
+                            @foreach (var pk in _primaryKeys)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                         OnClose="@(() => _primaryKeys.Remove(pk))">@pk</MudChip>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.caption" Style="color: var(--mud-palette-error)">
+                            请至少配置一个主键字段
+                        </MudText>
+                    }
+                </div>
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <!-- 额外查询条件 -->
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <div class="section-header">
+            <MudText Typo="Typo.h6">额外查询条件</MudText>
+            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                       OnClick="AddCondition">
+                添加条件
+            </MudButton>
+        </div>
+
+        @if (_conditions.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--mud-palette-text-secondary)">
+                暂无额外条件，采集时仅按时间范围查询
+            </MudText>
+        }
+        else
+        {
+            @for (var i = 0; i < _conditions.Count; i++)
+            {
+                var index = i;
+                <MudGrid Class="mt-2" Spacing="2">
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="_conditions[index].Column" Label="字段名"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudSelect @bind-Value="_conditions[index].Type" Label="操作类型"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense">
+                            @foreach (var op in _conditionTypes)
+                            {
+                                <MudSelectItem Value="@op.Key">@op.Value</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="_conditions[index].Value" Label="值"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      Disabled="@IsValueDisabled(_conditions[index].Type)" />
+                    </MudItem>
+                    <MudItem xs="12" sm="1" Class="d-flex align-center">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => _conditions.RemoveAt(index))" />
+                    </MudItem>
+                </MudGrid>
+            }
+        }
+    </MudPaper>
+
+    <div class="ingestion-edit-actions mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Save" Disabled="_saving">
+            @(_saving ? "保存中..." : "保存")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Class="ml-2"
+                   OnClick="@(() => inj_navigationManager.NavigateTo("/ingestion"))">
+            取消
+        </MudButton>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private IngestionSource _source = new();
+    private bool _isEdit;
+    private bool _loading = true;
+    private bool _saving;
+    private List<ConditionItem> _conditions = [];
+    private List<string> _primaryKeys = [];
+    private string _pkInput = "";
+
+    private const string UnitMinutes = "minutes";
+    private const string UnitHours = "hours";
+
+    // 单位切换相关（偏移量数值始终按分钟存库，单位单独保存）
+    private int _startDisplayValue = 2;
+    private string _startUnit = UnitHours;
+    private int _endDisplayValue;
+    private string _endUnit = UnitHours;
+
+    /// <summary>
+    /// 条件编辑用临时模型
+    /// </summary>
+    private class ConditionItem
+    {
+        public string Column { get; set; } = "";
+        public string Type { get; set; } = "eq";
+        public string Value { get; set; } = "";
+    }
+
+    /// <summary>
+    /// 操作类型下拉选项
+    /// </summary>
+    private static readonly Dictionary<string, string> _conditionTypes = new()
+    {
+        ["eq"] = "eq (等于)",
+        ["ne"] = "ne (不等于)",
+        ["lt"] = "lt (小于)",
+        ["le"] = "le (小于等于)",
+        ["gt"] = "gt (大于)",
+        ["ge"] = "ge (大于等于)",
+        ["likeright"] = "likeright (右模糊)",
+        ["in"] = "in (包含)",
+        ["notin"] = "notin (不包含)",
+        ["isnull"] = "isnull (为空)",
+        ["isnotnull"] = "isnotnull (不为空)"
+    };
+
+    private static bool IsValueDisabled(string type) => type is "isnull" or "isnotnull";
+
+    private void AddCondition() => _conditions.Add(new ConditionItem());
+
+    private void AddPrimaryKey()
+    {
+        var pk = _pkInput?.Trim();
+        if (!string.IsNullOrWhiteSpace(pk) && !_primaryKeys.Contains(pk, StringComparer.OrdinalIgnoreCase))
+            _primaryKeys.Add(pk);
+        _pkInput = "";
+    }
+
+    private void OnPkKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+            AddPrimaryKey();
+    }
+
+    private string _localTableName => string.IsNullOrWhiteSpace(_source.ServerCode)
+        ? "" : IngestionService.GetLocalTableName(_source.ServerCode);
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _isEdit = Id > 0;
+
+        if (_isEdit)
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var source = await db.IngestionSources.FindAsync([Id], CancellationToken);
+
+            if (source is null)
+            {
+                inj_snackbar.Add("采集源不存在", Severity.Error);
+                inj_navigationManager.NavigateTo("/ingestion");
+                return;
+            }
+
+            _source = source;
+        }
+        else
+        {
+            _source = new IngestionSource();
+        }
+
+        // 加载主键配置
+        _primaryKeys = _source.PrimaryKeyArray.ToList();
+
+        // 初始化偏移量显示值，优先使用数据库保存的单位
+        InitOffsetDisplay(_source.StartOffsetMinutes, _source.StartOffsetUnit, out _startDisplayValue, out _startUnit);
+        InitOffsetDisplay(_source.EndOffsetMinutes, _source.EndOffsetUnit, out _endDisplayValue, out _endUnit);
+
+        // 反序列化已有条件
+        if (!string.IsNullOrWhiteSpace(_source.Conditions))
+        {
+            var parsed = JsonSerializer.Deserialize<List<ConditionItem>>(_source.Conditions,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (parsed != null)
+                _conditions = parsed;
+        }
+
+        _loading = false;
+    }
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_source.Name) ||
+            string.IsNullOrWhiteSpace(_source.ServerCode) ||
+            string.IsNullOrWhiteSpace(_source.TimeField))
+        {
+            inj_snackbar.Add("请填写所有必填字段", Severity.Warning);
+            return;
+        }
+
+        if (_primaryKeys.Count == 0)
+        {
+            inj_snackbar.Add("请至少配置一个主键字段", Severity.Warning);
+            return;
+        }
+        _source.PrimaryKeys = string.Join(",", _primaryKeys);
+
+        _startUnit = NormalizeUnit(_startUnit, _startDisplayValue);
+        _endUnit = NormalizeUnit(_endUnit, _endDisplayValue);
+
+        // 将显示值换算回分钟
+        _source.StartOffsetMinutes = _startUnit == UnitHours ? _startDisplayValue * 60 : _startDisplayValue;
+        _source.EndOffsetMinutes = _endUnit == UnitHours ? _endDisplayValue * 60 : _endDisplayValue;
+        _source.StartOffsetUnit = _startUnit;
+        _source.EndOffsetUnit = _endUnit;
+
+        if (_source.StartOffsetMinutes <= _source.EndOffsetMinutes)
+        {
+            inj_snackbar.Add("开始偏移必须大于结束偏移", Severity.Warning);
+            return;
+        }
+
+        _saving = true;
+
+        // 序列化条件（过滤掉字段名为空的无效行）
+        var validConditions = _conditions.Where(c => !string.IsNullOrWhiteSpace(c.Column)).ToList();
+        _source.Conditions = validConditions.Count > 0
+            ? JsonSerializer.Serialize(validConditions.Select(c => new
+            {
+                column = c.Column,
+                type = c.Type,
+                value = IsValueDisabled(c.Type) ? "" : c.Value
+            }))
+            : null;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+
+            // ServerCode 唯一性校验
+            var codeExists = await db.IngestionSources
+                .AnyAsync(s => s.ServerCode == _source.ServerCode && s.Id != _source.Id, CancellationToken);
+            if (codeExists)
+            {
+                inj_snackbar.Add($"ServerCode「{_source.ServerCode}」已存在", Severity.Warning);
+                return;
+            }
+
+            if (_isEdit)
+            {
+                var entity = await db.IngestionSources.FindAsync([Id], CancellationToken);
+                if (entity is null) return;
+
+                entity.Name = _source.Name;
+                entity.ServerCode = _source.ServerCode;
+                entity.TimeField = _source.TimeField;
+                entity.PollingIntervalSeconds = _source.PollingIntervalSeconds;
+                entity.StartOffsetMinutes = _source.StartOffsetMinutes;
+                entity.EndOffsetMinutes = _source.EndOffsetMinutes;
+                entity.StartOffsetUnit = _source.StartOffsetUnit;
+                entity.EndOffsetUnit = _source.EndOffsetUnit;
+                entity.Enabled = _source.Enabled;
+                entity.PrimaryKeys = _source.PrimaryKeys;
+                entity.Conditions = _source.Conditions;
+            }
+            else
+            {
+                db.IngestionSources.Add(_source);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add(_isEdit ? "采集源更新成功" : "采集源创建成功", Severity.Success);
+            inj_navigationManager.NavigateTo("/ingestion");
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    /// <summary>
+    /// 根据分钟数和已保存单位初始化显示值。
+    /// </summary>
+    private static void InitOffsetDisplay(int minutes, string? savedUnit, out int displayValue, out string unit)
+    {
+        unit = NormalizeUnit(savedUnit, minutes);
+        if (unit == UnitHours && minutes % 60 == 0)
+        {
+            displayValue = minutes / 60;
+            return;
+        }
+
+        displayValue = minutes;
+        unit = UnitMinutes;
+    }
+
+    private static string NormalizeUnit(string? unit, int minutes)
+        => unit is UnitHours or UnitMinutes ? unit : GuessUnit(minutes);
+
+    private static string GuessUnit(int minutes)
+        => minutes % 60 == 0 ? UnitHours : UnitMinutes;
+
+}

@@ -1,0 +1,10 @@
+﻿.dict-code-editor-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.dict-code-editor-actions {
+    display: flex;
+    justify-content: flex-end;
+}

@@ -1,0 +1,168 @@
+﻿@using Newtonsoft.Json.Linq
+
+@inject MappingPreviewService PreviewService
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+
+@if (!string.IsNullOrWhiteSpace(_errorMessage))
+{
+    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_errorMessage</MudAlert>
+}
+
+@if (_results.Count > 0)
+{
+    <div class="d-flex align-center gap-2 mb-2">
+        <MudText Typo="Typo.subtitle2">预览结果（@_results.Count 条）</MudText>
+        <MudToggleGroup T="string" Value="_filterMode" ValueChanged="v => { _filterMode = v; StateHasChanged(); }"
+                        SelectionMode="SelectionMode.SingleSelection"
+                        Color="Color.Primary" CheckMark="true" FixedContent="true">
+            <MudToggleItem Value="@("all")" Text="全部" />
+            <MudToggleItem Value="@("error")" Text="仅异常" />
+        </MudToggleGroup>
+    </div>
+
+    <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true" Style="font-size:13px;">
+        <thead>
+            <tr>
+                <th style="width:30px;">#</th>
+                <th>目标</th>
+                <th>源路径</th>
+                <th>目标字段</th>
+                <th>原始值</th>
+                <th>转换后</th>
+                <th>最终值</th>
+                <th style="width:50px;">状态</th>
+            </tr>
+        </thead>
+        <tbody>
+            @{ var idx = 0; }
+            @foreach (var r in FilteredResults)
+            {
+                idx++;
+                var rowStyle = (r.IsRequired && r.IsMissing) ? "background-color:rgba(244,67,54,0.08);" : "";
+                <tr style="@rowStyle">
+                    <td>@idx</td>
+                    <td><MudChip T="string" Size="Size.Small" Color="GetTargetColor(r.MappingTarget)">@r.MappingTarget</MudChip></td>
+                    <td style="font-family:monospace;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;">@r.SourcePath</td>
+                    <td style="font-family:monospace;font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;">@r.TargetField</td>
+                    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;">@(r.RawValue ?? "-")</td>
+                    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;">@(r.DictTranslatedValue ?? "-")</td>
+                    <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;font-weight:600;">@(r.FinalValue ?? "-")</td>
+                    <td>
+                        @if (r.IsRequired && r.IsMissing)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                        }
+                        else if (r.IsMissing)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" />
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@code {
+    /// <summary>
+    /// JSON 文本
+    /// </summary>
+    [Parameter]
+    public string? JsonText { get; set; }
+
+    [Parameter]
+    public string? MainRecordArrayPath { get; set; }
+
+    /// <summary>
+    /// 映射规则列表
+    /// </summary>
+    [Parameter]
+    public List<EsbFieldMapping> Mappings { get; set; } = [];
+
+    private List<MappingPreviewResult> _results = [];
+    private string _filterMode = "all";
+    private string? _errorMessage;
+    private bool _loading;
+
+    private string? _lastJsonText;
+    private int _lastMappingHash;
+
+    private IEnumerable<MappingPreviewResult> FilteredResults =>
+        _filterMode == "error" ? _results.Where(r => r.IsMissing) : _results;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // 仅当 JSON 或映射变化时重新执行预览
+        var mappingHash = ComputeMappingHash();
+        if (_lastJsonText == JsonText && _lastMappingHash == mappingHash) return;
+        _lastJsonText = JsonText;
+        _lastMappingHash = mappingHash;
+
+        await ExecutePreviewAsync();
+    }
+
+    private async Task ExecutePreviewAsync()
+    {
+        _results = [];
+        _errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(JsonText) || Mappings.Count == 0) return;
+
+        _loading = true;
+        try
+        {
+            var body = JToken.Parse(JsonText);
+            _results = await PreviewService.PreviewAllAsync(body, Mappings, MainRecordArrayPath);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"预览失败: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private int ComputeMappingHash()
+    {
+        var hash = new HashCode();
+        hash.Add(Mappings.Count);
+
+        foreach (var mapping in Mappings)
+        {
+            hash.Add(mapping.MappingTarget);
+            hash.Add(mapping.TargetField);
+            hash.Add(mapping.SourcePath);
+            hash.Add(mapping.DictCode);
+            hash.Add(mapping.DictMatchMode);
+            hash.Add(mapping.DefaultValue);
+            hash.Add(mapping.ValueExpression);
+            hash.Add(mapping.IsEnabled);
+            hash.Add(mapping.IsRequired);
+            hash.Add(mapping.CardId);
+            hash.Add(mapping.ArrayPath);
+        }
+
+        hash.Add(MainRecordArrayPath);
+
+        return hash.ToHashCode();
+    }
+
+    private static Color GetTargetColor(MappingTarget target) => target switch
+    {
+        MappingTarget.Patient => Color.Primary,
+        MappingTarget.Event => Color.Info,
+        MappingTarget.Question => Color.Success,
+        MappingTarget.SubCard => Color.Warning,
+        _ => Color.Default
+    };
+}

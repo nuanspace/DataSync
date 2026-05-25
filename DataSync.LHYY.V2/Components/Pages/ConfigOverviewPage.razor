@@ -1,0 +1,1143 @@
+﻿@page "/config/overview"
+@inherits BasePage
+@inject BioCoreIntegrationService BioCoreService
+@inject ConfigService ConfigSvc
+
+<PageTitle>配置总览 - LHYY V2</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-2">配置总览</MudText>
+
+@* 概要信息 *@
+<MudPaper Class="pa-3 mb-4">
+    <MudStack Row="true" Spacing="4">
+        <MudText><b>当前项目 LicenseCode:</b> @(_defaultLicenseCode ?? "未配置")</MudText>
+        <MudText><b>已注册接口:</b> @_interfaces.Count 个</MudText>
+    </MudStack>
+</MudPaper>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" />
+}
+else
+{
+    <MudTabs Elevation="2" Rounded="true" ApplyEffectsToContainer="true" PanelClass="pa-4">
+
+        @* ========== Patient 模块（共享） ========== *@
+        <MudTabPanel Text="Patient（患者）" Icon="@Icons.Material.Filled.Person">
+            <MudText Class="mb-2 mud-text-secondary">
+                @PatientFields.Count 个字段，@GetMappedCount(MappingTarget.Patient, PatientFields.Select(f => f.Name)) 个已映射
+            </MudText>
+            <MudSimpleTable Dense="true" Hover="true" Striped="true">
+                <thead>
+                    <tr>
+                        <th>字段名</th>
+                        <th>中文名</th>
+                        <th>映射来源</th>
+                        <th style="width:60px">操作</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var (name, label) in PatientFields)
+                    {
+                        var mappings = GetMappingsForField(MappingTarget.Patient, name);
+                        <tr>
+                            <td class="mapping-source">@name</td>
+                            <td>@label</td>
+                            <td>
+                                @if (mappings.Count == 0)
+                                {
+                                    <MudButton StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                               Color="Color.Primary" Variant="Variant.Text"
+                                               OnClick="@(() => OpenAddMapping(MappingTarget.Patient, name))">
+                                        添加映射
+                                    </MudButton>
+                                }
+                                else
+                                {
+                                    @foreach (var m in mappings)
+                                    {
+                                        @RenderMappingItem(m)
+                                    }
+                                }
+                            </td>
+                            <td>
+                                @if (mappings.Count > 0)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                                   Color="Color.Primary"
+                                                   OnClick="@(() => OpenAddMapping(MappingTarget.Patient, name))" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudTabPanel>
+
+        @* ========== 按事件类型动态生成 Tab ========== *@
+        @if (_eventTypeTabs.Count == 0)
+        {
+            <MudTabPanel Text="事件类型" Icon="@Icons.Material.Filled.Event">
+                <MudAlert Severity="Severity.Info" Dense="true">产品库暂无有效事件类型</MudAlert>
+            </MudTabPanel>
+        }
+        else
+        {
+            @foreach (var tab in _eventTypeTabs)
+            {
+                <MudTabPanel Text="@GetEventTypeTabText(tab)" Icon="@Icons.Material.Filled.Event">
+                    <div class="event-type-section">
+                        @if (tab.Interfaces.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">该事件类型暂无已注册接口，仅展示产品库表单。</MudAlert>
+                        }
+                        @* Event 字段映射 *@
+                        <MudText Typo="Typo.subtitle1" Class="mb-2">
+                            <b>Event 字段映射</b>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-2" Style="display:inline;">
+                                @EventFields.Count 个字段，@GetMappedCountForEventType(tab) 个已映射
+                            </MudText>
+                        </MudText>
+                        <MudSimpleTable Dense="true" Hover="true" Striped="true" Class="mb-4">
+                            <thead>
+                                <tr>
+                                    <th>字段名</th>
+                                    <th>中文名</th>
+                                    <th>映射来源</th>
+                                    <th style="width:60px">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var (name, label) in EventFields)
+                                {
+                                    var mappings = GetMappingsForFieldByEventType(MappingTarget.Event, name, tab);
+                                    <tr>
+                                        <td class="mapping-source">@name</td>
+                                        <td>@label</td>
+                                        <td>
+                                            @if (mappings.Count == 0)
+                                            {
+                                                if (tab.Interfaces.Count == 0)
+                                                {
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">暂无接口</MudText>
+                                                }
+                                                else
+                                                {
+                                                    <MudButton StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                                               Color="Color.Primary" Variant="Variant.Text"
+                                                               OnClick="@(() => OpenAddMappingForEventType(MappingTarget.Event, name, tab))">
+                                                        添加映射
+                                                    </MudButton>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                @foreach (var m in mappings)
+                                                {
+                                                    @RenderMappingItem(m)
+                                                }
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (mappings.Count > 0)
+                                            {
+                                                <MudIconButton Icon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                                               Color="Color.Primary"
+                                                               OnClick="@(() => OpenAddMappingForEventType(MappingTarget.Event, name, tab))" />
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </MudSimpleTable>
+
+                        @* 问卷映射 *@
+                        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>问卷映射</b></MudText>
+                        @if (string.IsNullOrEmpty(tab.EffectiveLicenseCode))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true">未配置 LicenseCode，无法加载问卷</MudAlert>
+                        }
+                        else if (tab.FormSetId == null)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">未找到事件类型 "@tab.EventTypeName" 对应的 FormSet</MudAlert>
+                        }
+                        else if (tab.FormNodes.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">该 FormSet 下无表单问题</MudAlert>
+                        }
+                        else
+                        {
+                            var (totalQ, totalMapped) = CountAllMappedForEventType(tab);
+                            <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2" Spacing="3">
+                                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                    共 @totalQ 个问题，@totalMapped 个已映射
+                                </MudText>
+                                <MudSpacer />
+                                <MudTextField @bind-Value="tab.SearchText" Label="搜索问题" Adornment="Adornment.End"
+                                              AdornmentIcon="@Icons.Material.Filled.Search"
+                                              OnKeyUp="@(() => ApplyFilterForTab(tab))"
+                                              Clearable="true" Style="max-width:300px;" Margin="Margin.Dense" />
+                            </MudStack>
+                            <MudGrid Spacing="2" Style="height:calc(100vh - 360px);min-height:500px;">
+                                @* 左侧 Form 列表 *@
+                                <MudItem xs="2" Style="height:100%;">
+                                    <MudPaper Outlined="true" Style="height:100%;overflow-y:auto;">
+                                        <MudList T="string" @bind-SelectedValue="tab.SelectedFormId" Color="Color.Primary" Dense="true">
+                                            @foreach (var form in tab.FormNodes)
+                                            {
+                                                var (fMapped, fTotal) = CountFormMappedForEventType(form, tab);
+                                                <MudListItem Value="@form.Id" Icon="@Icons.Material.Filled.Description">
+                                                    <div style="display:flex;justify-content:space-between;align-items:center;width:100%;">
+                                                        <MudText Typo="Typo.body2">@form.Name</MudText>
+                                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                                                 Color="@(fMapped == fTotal && fTotal > 0 ? Color.Success : Color.Default)">
+                                                            @fMapped/@fTotal
+                                                        </MudChip>
+                                                    </div>
+                                                </MudListItem>
+                                            }
+                                        </MudList>
+                                    </MudPaper>
+                                </MudItem>
+                                @* 右侧 Card > Question 树 *@
+                                <MudItem xs="10" Style="height:100%;">
+                                    <MudPaper Outlined="true" Class="pa-2" Style="height:100%;overflow-y:auto;">
+                                        @{
+                                            var activeForm = tab.FormNodes.FirstOrDefault(f => f.Id == tab.SelectedFormId) ?? tab.FormNodes.FirstOrDefault();
+                                        }
+                                        @if (activeForm != null)
+                                        {
+                                            <MudTreeView T="string" Dense="true" Hover="true" ExpandOnClick="true">
+                                                @foreach (var child in FormBrowserHelper.GetOrderedChildren(activeForm))
+                                                {
+                                                    if (child.Card != null)
+                                                    {
+                                                        @RenderCardWithMapping(child.Card, null, tab)
+                                                    }
+                                                    else if (child.Question != null)
+                                                    {
+                                                        @RenderQuestionWithMapping(child.Question, null, tab)
+                                                    }
+                                                }
+                                            </MudTreeView>
+                                        }
+                                    </MudPaper>
+                                </MudItem>
+                            </MudGrid>
+                        }
+                    </div>
+                </MudTabPanel>
+            }
+        }
+
+    </MudTabs>
+}
+
+@* ========== 映射编辑对话框 ========== *@
+<MappingEditDialog EditItem="_editItem"
+                   @bind-Visible="_dialogVisible"
+                   Title="@(_isEditMode ? "编辑映射" : "添加映射")"
+                   JsonText="@_editSampleJson"
+                   MainRecordArrayPath="@GetDialogMainRecordArrayPath()"
+                   JsonTreeLayout="JsonTreeLayout.SidePanel"
+                   DialogMaxWidth="MaxWidth.ExtraLarge"
+                   MappingTargetEditable="false"
+                   UseTargetFieldSelector="false"
+                   LicenseCode="@_defaultLicenseCode"
+                   TargetFieldFormatter="FormatTargetField"
+                   ShowTranCode="true"
+                   TranCodeReadOnly="_isEditMode"
+                   TranCodeDisplayText="@GetInterfaceLabel(_editItem.TranCode)"
+                   TranCodeOptions="@(_dialogInterfaceScope ?? _interfaces)"
+                   TranCodeChanged="OnDialogTranCodeChanged"
+                   ShowFilterRules="true"
+                   FilterRules="_editFilterRules"
+                   FilterRulesChanged="v => _editFilterRules = v"
+                   OnSave="SaveMapping" />
+
+@* ========== Card 级映射对话框 ========== *@
+<CardMappingDialog @bind-Visible="_cardDialogVisible"
+                   Card="_cardDialogCard"
+                   Tab="_cardDialogTab"
+                   AllMappings="_allMappings"
+                   InterfaceDict="_interfaceDict"
+                   OnSaved="OnCardMappingSaved" />
+
+@code {
+    // 患者字段定义（与数据库 patient 表业务字段一致）
+    private static readonly List<(string Name, string Label)> PatientFields =
+        PatientFieldCatalog.Definitions.Select(f => (f.Name, f.Label)).ToList();
+
+    private static readonly List<(string Name, string Label)> EventFields =
+    [
+        ("event_start_time", "事件开始时间"),
+        ("event_end_time", "事件结束时间"),
+    ];
+
+    // 页面状态
+    private bool _loading = true;
+    private string? _defaultLicenseCode;
+    private List<EsbInterfaceConfig> _interfaces = [];
+    private List<EsbFieldMapping> _allMappings = [];
+    private List<EventTypeTabData> _eventTypeTabs = [];
+
+    // 按字段分组的映射缓存
+    private Dictionary<(MappingTarget, string, Guid?), List<EsbFieldMapping>> _mappingsByField = new();
+    private Dictionary<int, int> _mappingFilterCounts = [];
+    // 按 TranCode 快速查找接口
+    private Dictionary<string, EsbInterfaceConfig> _interfaceDict = new();
+
+    // 对话框
+    private bool _dialogVisible;
+    private bool _isEditMode;
+    private EsbFieldMapping _editItem = new();
+    private List<EsbFilterRule> _editFilterRules = [];
+    private List<EsbInterfaceConfig>? _dialogInterfaceScope;
+    // 对话框中的 JSON 树选取
+    private string? _editSampleJson;
+
+    // Card 级映射对话框
+    private bool _cardDialogVisible;
+    private CardNode? _cardDialogCard;
+    private EventTypeTabData? _cardDialogTab;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadAllDataAsync();
+    }
+
+    private async Task LoadAllDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+
+            // 当前项目配置
+            _defaultLicenseCode = await ConfigSvc.GetDefaultLicenseCodeAsync(CurrentIntegrationProjectCode);
+            var defaultProjectId = await ConfigSvc.GetDefaultProjectIdAsync(CurrentIntegrationProjectCode);
+
+            // 接口列表
+            _interfaces = await ApplyCurrentProjectScope(db.EsbInterfaceConfigs, false)
+                .OrderBy(c => c.SortOrder)
+                .ThenBy(c => c.TranCode)
+                .ToListAsync();
+
+            // 所有映射
+            _allMappings = (await ApplyCurrentProjectScope(db.EsbFieldMappings, false)
+                .OrderBy(m => m.SortOrder)
+                .ToListAsync())
+                .Where(m => !EsbFieldMapping.IsSubCardFilterMapping(m))
+                .ToList();
+
+            var mappingIds = _allMappings.Select(m => m.Id).ToList();
+            _mappingFilterCounts = mappingIds.Count == 0
+                ? []
+                : await db.EsbFilterRules
+                    .Where(r => r.MappingId != null && mappingIds.Contains(r.MappingId.Value))
+                    .GroupBy(r => r.MappingId!.Value)
+                    .ToDictionaryAsync(g => g.Key, g => g.Count());
+
+            // 建立映射字典
+            _mappingsByField = _allMappings
+                .GroupBy(m => (m.MappingTarget, m.TargetField, m.CardId))
+                .ToDictionary(g => g.Key, g => g.ToList());
+
+            _interfaceDict = _interfaces.ToDictionary(i => i.TranCode);
+
+            // 从当前接入项目对应的产品项目构建 Tab，接口配置只用于显示映射关系
+            _eventTypeTabs = [];
+            var formNodesByFormSet = new Dictionary<Guid, List<FormNode>>();
+            var interfacesByEventType = _interfaces
+                .Where(i => !string.IsNullOrWhiteSpace(i.EventTypeName))
+                .GroupBy(i => i.EventTypeName!.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.OrderBy(i => i.SortOrder).ThenBy(i => i.TranCode).ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+            var productEventTypes = (await LoadCurrentProjectEventTypesAsync(defaultProjectId))
+                .Where(e => IsVisibleProductEventType(e.Name))
+                .ToList();
+
+            foreach (var eventType in productEventTypes)
+            {
+                var matchingInterfaces = interfacesByEventType.TryGetValue(eventType.Name, out var items)
+                    ? items
+                    : [];
+                var effectiveLicenseCode = matchingInterfaces
+                    .Select(i => i.LicenseCode)
+                    .FirstOrDefault(code => !string.IsNullOrWhiteSpace(code))
+                    ?? _defaultLicenseCode;
+
+                var tab = new EventTypeTabData
+                {
+                    EventTypeName = eventType.Name,
+                    DisplayName = BuildProductEventTypeTabText(eventType),
+                    Interfaces = matchingInterfaces,
+                    TranCodes = new HashSet<string>(matchingInterfaces.Select(i => i.TranCode), StringComparer.OrdinalIgnoreCase),
+                    EffectiveLicenseCode = effectiveLicenseCode,
+                    FormSetId = eventType.FormSetId,
+                };
+
+                tab.FormNodes = await LoadFormNodesByFormSetAsync(eventType.FormSetId, formNodesByFormSet);
+                tab.SelectedFormId = tab.FormNodes.FirstOrDefault()?.Id;
+
+                _eventTypeTabs.Add(tab);
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task<List<FormNode>> LoadFormNodesByFormSetAsync(Guid formSetId, Dictionary<Guid, List<FormNode>> cache)
+    {
+        if (cache.TryGetValue(formSetId, out var nodes))
+            return CloneFormNodes(nodes);
+
+        var questionDict = await BioCoreService.GetFormQuestionDictByFormSetAsync(formSetId);
+        var questions = questionDict.Values
+            .Select(FormBrowserHelper.BuildQuestionInfo)
+            .ToList();
+        var cards = await BioCoreService.GetAllCardListByFormSetAsync(formSetId);
+        var formInfo = await BioCoreService.GetFormListByFormSetAsync(formSetId);
+        nodes = FormBrowserHelper.BuildTree(questions, cards, formInfo);
+        cache[formSetId] = nodes;
+        return CloneFormNodes(nodes);
+    }
+
+    private async Task<List<ProductEventTypeInfo>> LoadCurrentProjectEventTypesAsync(string? defaultProjectId)
+    {
+        var result = new List<ProductEventTypeInfo>();
+        var seen = new HashSet<(string Name, Guid FormSetId)>();
+
+        if (Guid.TryParse(defaultProjectId, out var projectId))
+        {
+            AddUniqueEventTypes(result, seen, await BioCoreService.GetEventTypesByProjectAsync(projectId));
+        }
+
+        var licenseCodes = _interfaces
+            .Select(i => i.LicenseCode)
+            .Append(_defaultLicenseCode)
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var licenseCode in licenseCodes)
+        {
+            AddUniqueEventTypes(result, seen, await BioCoreService.GetProductEventTypesByLicenseAsync(licenseCode));
+        }
+
+        return result
+            .OrderBy(e => e.ProjectName)
+            .ThenBy(e => e.Group)
+            .ThenBy(e => e.Name)
+            .ThenBy(e => e.FormSetName)
+            .ToList();
+    }
+
+    private static void AddUniqueEventTypes(
+        List<ProductEventTypeInfo> result,
+        HashSet<(string Name, Guid FormSetId)> seen,
+        IEnumerable<ProductEventTypeInfo> items)
+    {
+        foreach (var item in items)
+        {
+            if (seen.Add((item.Name, item.FormSetId)))
+                result.Add(item);
+        }
+    }
+
+    private static List<FormNode> CloneFormNodes(List<FormNode> nodes) =>
+        nodes.Select(CloneFormNode).ToList();
+
+    private static FormNode CloneFormNode(FormNode source) => new()
+    {
+        Id = source.Id,
+        Name = source.Name,
+        SortIndex = source.SortIndex,
+        IsExpanded = source.IsExpanded,
+        QuestionCount = source.QuestionCount,
+        Cards = source.Cards.Select(CloneCardNode).ToList(),
+        OrphanQuestions = source.OrphanQuestions.ToList(),
+    };
+
+    private static CardNode CloneCardNode(CardNode source) => new()
+    {
+        CardId = source.CardId,
+        Name = source.Name,
+        CardType = source.CardType,
+        PreUid = source.PreUid,
+        IsExpanded = source.IsExpanded,
+        SubCards = source.SubCards.Select(CloneCardNode).ToList(),
+        Questions = source.Questions.ToList(),
+    };
+
+    private static string BuildProductEventTypeTabText(ProductEventTypeInfo eventType) => eventType.Name;
+
+    private static string GetEventTypeTabText(EventTypeTabData tab) =>
+        string.IsNullOrWhiteSpace(tab.DisplayName) ? tab.EventTypeName : tab.DisplayName;
+
+    private static bool IsVisibleProductEventType(string eventTypeName) =>
+        eventTypeName is "住院" or "手术";
+
+    #region 公共映射条目渲染
+
+    /// <summary>
+    /// 渲染单条映射条目（标签+SourcePath+操作按钮），Patient/Event/问卷 Tab 复用
+    /// </summary>
+    private RenderFragment RenderMappingItem(EsbFieldMapping m) => __builder =>
+    {
+        <div class="mapping-item @(m.IsEnabled ? "" : "disabled-mapping")">
+            <span class="mapping-tag @(IsInterfaceEnabled(m.TranCode) ? "" : "disabled-interface")">
+                @GetInterfaceLabel(m.TranCode)
+            </span>
+            <span class="mapping-source">@GetMappingSourceText(m)</span>
+            @if (!string.IsNullOrEmpty(m.DictCode))
+            {
+                <span class="mapping-tag">字典: @m.DictCode</span>
+                @if (EsbFieldMapping.NormalizeDictMatchMode(m.DictMatchMode) == EsbFieldMapping.DictMatchModeContainsExcludeNegation)
+                {
+                    <span class="mapping-tag">排除否定</span>
+                }
+            }
+            @if (!string.IsNullOrEmpty(m.DefaultValue))
+            {
+                <span class="mapping-tag">默认: @m.DefaultValue</span>
+            }
+            @if (!string.IsNullOrEmpty(m.ValueExpression))
+            {
+                <span class="mapping-tag">表达式: @m.ValueExpression</span>
+            }
+            @if (GetMappingFilterCount(m) > 0)
+            {
+                <span class="mapping-tag">过滤: @GetMappingFilterCount(m)</span>
+            }
+            @if (!m.IsEnabled)
+            {
+                <span class="mapping-tag">已禁用</span>
+            }
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                           OnClick="@(() => OpenEditMapping(m))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                           Color="Color.Error" OnClick="@(() => DeleteMapping(m))" />
+        </div>
+    };
+
+    #endregion
+
+    #region 字段映射查询
+
+    private List<EsbFieldMapping> GetMappingsForField(MappingTarget target, string field, Guid? cardId = null)
+    {
+        return _mappingsByField.TryGetValue((target, field, cardId), out var list) ? list : [];
+    }
+
+    /// <summary>
+    /// 按事件类型过滤映射：仅返回该事件类型下接口的映射
+    /// </summary>
+    private List<EsbFieldMapping> GetMappingsForFieldByEventType(MappingTarget target, string field, EventTypeTabData tab, Guid? cardId = null)
+    {
+        return GetMappingsForField(target, field, cardId)
+            .Where(m => tab.TranCodes.Contains(m.TranCode))
+            .ToList();
+    }
+
+    private int GetMappedCount(MappingTarget target, IEnumerable<string> fields, Guid? cardId = null)
+    {
+        return fields.Count(f => GetMappingsForField(target, f, cardId).Count > 0);
+    }
+
+    private int GetMappedCountForEventType(EventTypeTabData tab)
+    {
+        return EventFields.Count(f => GetMappingsForFieldByEventType(MappingTarget.Event, f.Name, tab).Count > 0);
+    }
+
+    private string GetInterfaceLabel(string tranCode)
+    {
+        return _interfaceDict.TryGetValue(tranCode, out var iface)
+            ? $"{tranCode} ({iface.TranName})"
+            : tranCode;
+    }
+
+    private bool IsInterfaceEnabled(string tranCode)
+    {
+        return !_interfaceDict.TryGetValue(tranCode, out var iface) || iface.IsEnabled;
+    }
+
+    private static bool HasValueSource(EsbFieldMapping mapping) =>
+        !string.IsNullOrWhiteSpace(mapping.SourcePath) || !string.IsNullOrWhiteSpace(mapping.DefaultValue);
+
+    private int GetMappingFilterCount(EsbFieldMapping mapping) =>
+        _mappingFilterCounts.GetValueOrDefault(mapping.Id);
+
+    private string GetMappingSourceText(EsbFieldMapping mapping)
+    {
+        if (string.IsNullOrWhiteSpace(mapping.SourcePath))
+        {
+            return "（默认值）";
+        }
+
+        _interfaceDict.TryGetValue(mapping.TranCode, out var config);
+        var mainRecordArrayPath = config?.MainRecordArrayPath;
+        if (mapping.MappingTarget != MappingTarget.SubCard
+            && MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(mapping.SourcePath, mainRecordArrayPath, out var mainRelativePath))
+        {
+            return mainRelativePath;
+        }
+
+        if (MessageJsonHelper.TryNormalizeMainRecordSourcePath(mapping.SourcePath, mainRecordArrayPath, out var mainScopedPath)
+            && (mapping.MappingTarget != MappingTarget.SubCard
+                || !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(mainScopedPath))))
+        {
+            return mainScopedPath;
+        }
+
+        return mapping.MappingTarget == MappingTarget.SubCard
+            ? SubCardPathHelper.BuildDisplayPath(TryParseSampleJson(config?.SampleJson), mapping.SourcePath, mapping.ArrayPath, mainRecordArrayPath)
+            : mapping.SourcePath;
+    }
+
+    private string? GetDialogMainRecordArrayPath() =>
+        _interfaceDict.TryGetValue(_editItem?.TranCode ?? "", out var config)
+            ? config.MainRecordArrayPath
+            : null;
+
+    private static JToken? TryParseSampleJson(string? sampleJson) =>
+        MessageJsonHelper.TryParseToken(sampleJson ?? "", out var root, out _) ? root : null;
+
+    #endregion
+
+    #region 映射操作
+
+    private void OpenAddMapping(MappingTarget target, string targetField, Guid? cardId = null)
+    {
+        _isEditMode = false;
+        _dialogInterfaceScope = null;
+        _editFilterRules = [];
+        _editSampleJson = null;
+        _editItem = new EsbFieldMapping
+        {
+            MappingTarget = target,
+            TargetField = targetField,
+            CardId = cardId,
+            IsEnabled = true,
+        };
+        _dialogVisible = true;
+    }
+
+    /// <summary>
+    /// 事件类型 Tab 内添加映射，限定接口范围
+    /// </summary>
+    private void OpenAddMappingForEventType(MappingTarget target, string targetField, EventTypeTabData tab, Guid? cardId = null)
+    {
+        if (tab.Interfaces.Count == 0)
+        {
+            inj_snackbar.Add("该事件类型暂无已注册接口，不能添加映射", Severity.Warning);
+            return;
+        }
+
+        _isEditMode = false;
+        _dialogInterfaceScope = tab.Interfaces;
+        _editFilterRules = [];
+        _editSampleJson = null;
+        _editItem = new EsbFieldMapping
+        {
+            MappingTarget = target,
+            TargetField = targetField,
+            CardId = cardId,
+            IsEnabled = true,
+        };
+        _dialogVisible = true;
+    }
+
+    private async Task OpenEditMapping(EsbFieldMapping mapping)
+    {
+        _isEditMode = true;
+        _dialogInterfaceScope = null;
+        _editSampleJson = _interfaceDict.TryGetValue(mapping.TranCode, out var ic) ? ic.SampleJson : null;
+
+        // 加载映射级过滤规则
+        await using var db2 = await ContextFactory.CreateDbContextAsync();
+        _editFilterRules = await db2.EsbFilterRules
+            .Where(r => r.MappingId == mapping.Id)
+            .OrderBy(r => r.RuleGroup)
+            .ThenBy(r => r.SortOrder)
+            .ToListAsync();
+
+        _editItem = new EsbFieldMapping
+        {
+            Id = mapping.Id,
+            TranCode = mapping.TranCode,
+            MappingTarget = mapping.MappingTarget,
+            TargetField = mapping.TargetField,
+            CardId = mapping.CardId,
+            SourcePath = mapping.SourcePath,
+            ArrayPath = mapping.ArrayPath,
+            DictCode = mapping.DictCode,
+            DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(mapping.DictMatchMode),
+            DefaultValue = mapping.DefaultValue,
+            ValueExpression = mapping.ValueExpression,
+            IsRequired = mapping.IsRequired,
+            IsEnabled = mapping.IsEnabled,
+            SortOrder = mapping.SortOrder,
+            Description = mapping.Description,
+            IntegrationProjectCode = mapping.IntegrationProjectCode,
+        };
+        _dialogVisible = true;
+    }
+
+    private async Task DeleteMapping(EsbFieldMapping mapping)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除 {GetInterfaceLabel(mapping.TranCode)} → {mapping.TargetField} 的映射吗？",
+            yesText: "删除", cancelText: "取消");
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var entity = await db.EsbFieldMappings.FindAsync(mapping.Id);
+            if (entity != null)
+            {
+                var rules = await db.EsbFilterRules
+                    .Where(r => r.MappingId == mapping.Id)
+                    .ToListAsync();
+                db.EsbFilterRules.RemoveRange(rules);
+                db.EsbFieldMappings.Remove(entity);
+                await db.SaveChangesAsync();
+                inj_snackbar.Add("删除成功", Severity.Success);
+                await LoadAllDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task SaveMapping()
+    {
+        if (string.IsNullOrWhiteSpace(_editItem.TranCode))
+        {
+            inj_snackbar.Add("请选择接口", Severity.Warning);
+            return;
+        }
+        if (!HasValueSource(_editItem))
+        {
+            inj_snackbar.Add("源路径和默认值不能同时为空", Severity.Warning);
+            return;
+        }
+
+        if (_editItem.MappingTarget != MappingTarget.SubCard)
+        {
+            if (MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(_editItem.SourcePath, GetDialogMainRecordArrayPath(), out var normalizedSourcePath))
+            {
+                _editItem.SourcePath = normalizedSourcePath;
+            }
+
+            foreach (var rule in _editFilterRules)
+            {
+                if (MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(rule.SourcePath, GetDialogMainRecordArrayPath(), out var normalizedRulePath))
+                {
+                    rule.SourcePath = normalizedRulePath;
+                }
+            }
+        }
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            if (_isEditMode)
+            {
+                var entity = await db.EsbFieldMappings.FindAsync(_editItem.Id);
+                if (entity != null)
+                {
+                    entity.SourcePath = _editItem.SourcePath;
+                    entity.ArrayPath = _editItem.ArrayPath;
+                    entity.DictCode = _editItem.DictCode;
+                    entity.DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(_editItem.DictMatchMode);
+                    entity.DefaultValue = _editItem.DefaultValue;
+                    entity.ValueExpression = _editItem.ValueExpression;
+                    entity.IsEnabled = _editItem.IsEnabled;
+                    entity.IsRequired = _editItem.IsRequired;
+                    entity.SortOrder = _editItem.SortOrder;
+                    entity.Description = _editItem.Description;
+                    entity.IntegrationProjectCode = _editItem.IntegrationProjectCode;
+                    await db.SaveChangesAsync();
+                }
+            }
+            else
+            {
+                _editItem.IntegrationProjectCode = GetTranCodeProjectCode(_editItem.TranCode);
+                db.EsbFieldMappings.Add(_editItem);
+                await db.SaveChangesAsync();
+            }
+
+            // 同步映射级过滤规则
+            var oldRules = await db.EsbFilterRules
+                .Where(r => r.MappingId == _editItem.Id)
+                .ToListAsync();
+            db.EsbFilterRules.RemoveRange(oldRules);
+            foreach (var rule in _editFilterRules)
+            {
+                rule.Id = 0;
+                rule.TranCode = _editItem.TranCode;
+                rule.MappingId = _editItem.Id;
+                rule.IntegrationProjectCode = _editItem.IntegrationProjectCode;
+                rule.RuleGroup = Math.Max(1, rule.RuleGroup);
+                db.EsbFilterRules.Add(rule);
+            }
+            await db.SaveChangesAsync();
+            _dialogVisible = false;
+            inj_snackbar.Add("保存成功", Severity.Success);
+            await LoadAllDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void OnDialogTranCodeChanged(string value)
+    {
+        _editItem.TranCode = value;
+        _editSampleJson = _interfaceDict.TryGetValue(value, out var ic) ? ic.SampleJson : null;
+    }
+
+    private void OpenCardMappingDialog(CardNode card, EventTypeTabData tab)
+    {
+        _cardDialogCard = card;
+        _cardDialogTab = tab;
+        _cardDialogVisible = true;
+    }
+
+    private async Task OnCardMappingSaved()
+    {
+        _cardDialogVisible = false;
+        await LoadAllDataAsync();
+    }
+
+    private string FormatTargetField(EsbFieldMapping item)
+    {
+        if (item.MappingTarget is MappingTarget.Patient or MappingTarget.Event)
+            return item.TargetField;
+
+        // 在所有事件类型 Tab 的 FormNodes 中搜索
+        var allFormNodes = _eventTypeTabs.SelectMany(t => t.FormNodes);
+        var q = allFormNodes
+            .SelectMany(f => f.OrphanQuestions.Concat(GetAllCardsFlat(f.Cards).SelectMany(c => c.Questions)))
+            .FirstOrDefault(q => q.Id == item.TargetField);
+        return q?.Title ?? item.TargetField ?? "";
+    }
+
+    private string? GetTranCodeProjectCode(string? tranCode)
+    {
+        if (string.IsNullOrWhiteSpace(tranCode))
+        {
+            return CurrentIntegrationProjectCode;
+        }
+
+        return _interfaceDict.TryGetValue(tranCode, out var config)
+            ? config.IntegrationProjectCode
+            : CurrentIntegrationProjectCode;
+    }
+
+    #endregion
+
+    #region 树形渲染
+
+    /// <summary>
+    /// 递归渲染卡片节点（带映射信息），支持事件类型过滤
+    /// </summary>
+    private RenderFragment RenderCardWithMapping(CardNode card, CardNode? subCardAncestor, EventTypeTabData tab) => __builder =>
+    {
+        var isSubCard = card.CardType is "multiple" or "table";
+        var currentSubCard = isSubCard ? card : subCardAncestor;
+        var cardIcon = card.CardType switch
+        {
+            "multiple" => Icons.Material.Filled.DynamicFeed,
+            "table" => Icons.Material.Filled.TableChart,
+            _ => Icons.Material.Filled.CreditCard,
+        };
+        var typeLabel = card.CardType switch
+        {
+            "multiple" => "SubCard",
+            "table" => "表格",
+            _ => (string?)null,
+        };
+        var (cMapped, cTotal) = CountCardMappedForEventType(card, subCardAncestor, tab);
+
+        <MudTreeViewItem T="string" Value="@card.CardId.ToString()" @bind-Expanded="@card.IsExpanded"
+                         Icon="@cardIcon">
+            <BodyContent>
+                <MudText Typo="Typo.body2" Style="font-weight:600;">@card.Name</MudText>
+                @if (typeLabel != null)
+                {
+                    var chipColor = card.CardType == "multiple" ? Color.Warning : Color.Info;
+                    <MudChip T="string" Size="Size.Small" Color="chipColor" Variant="Variant.Outlined"
+                             Style="height:20px;font-size:11px;" Class="ml-1">@typeLabel</MudChip>
+                }
+                <MudText Typo="Typo.caption" Color="Color.Tertiary" Class="ml-1">@cMapped/@cTotal</MudText>
+                @if (isSubCard && tab.Interfaces.Count > 0)
+                {
+                    <MudButton StartIcon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                               Color="Color.Primary" Variant="Variant.Text" Class="ml-2"
+                               OnClick="@(() => OpenCardMappingDialog(card, tab))">
+                        配置映射
+                    </MudButton>
+                }
+            </BodyContent>
+            <ChildContent>
+                @foreach (var child in FormBrowserHelper.GetOrderedChildren(card))
+                {
+                    if (child.Card != null)
+                    {
+                        @RenderCardWithMapping(child.Card, currentSubCard, tab)
+                    }
+                    else if (child.Question != null)
+                    {
+                        @RenderQuestionWithMapping(child.Question, currentSubCard, tab)
+                    }
+                }
+            </ChildContent>
+        </MudTreeViewItem>
+    };
+
+    /// <summary>
+    /// 渲染问题节点 + 映射信息 + CRUD 按钮，支持事件类型过滤
+    /// </summary>
+    private RenderFragment RenderQuestionWithMapping(QuestionInfo q, CardNode? subCardContext, EventTypeTabData tab) => __builder =>
+    {
+        var target = subCardContext != null ? MappingTarget.SubCard : MappingTarget.Question;
+        var cardId = subCardContext?.CardId;
+        var mappings = GetMappingsForFieldByEventType(target, q.Id, tab, cardId);
+        var hasMappings = mappings.Count > 0;
+
+        <MudTreeViewItem T="string" Value="@q.Id">
+            <BodyContent>
+                <div style="padding:3px 0;">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        <MudIcon Icon="@Icons.Material.Filled.Circle" Size="Size.Small"
+                                 Color="@(hasMappings ? Color.Success : Color.Default)"
+                                 Style="font-size:10px;" />
+                        <MudText Typo="Typo.body2" Style="font-weight:500;">@q.Title</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default"
+                                 Style="height:18px;font-size:10px;">@q.DataType</MudChip>
+                        @if (subCardContext != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
+                                     Style="height:18px;font-size:10px;">SubCard</MudChip>
+                        }
+                    </div>
+                    @* 映射条目 *@
+                    @if (subCardContext != null)
+                    {
+                        @* SubCard 下 Question 只读展示 *@
+                        @if (hasMappings)
+                        {
+                            @foreach (var m in mappings)
+                            {
+                                <div style="margin-left:16px;">
+                                    <span class="mapping-tag @(IsInterfaceEnabled(m.TranCode) ? "" : "disabled-interface")">
+                                        @GetInterfaceLabel(m.TranCode)
+                                    </span>
+                                    <span class="mapping-source">@GetMappingSourceText(m)</span>
+                                    @if (GetMappingFilterCount(m) > 0)
+                                    {
+                                        <span class="mapping-tag">过滤: @GetMappingFilterCount(m)</span>
+                                    }
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            <div style="margin-left:16px;">
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">未映射</MudText>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        @* 非 SubCard 的 Question 保持原有 CRUD *@
+                        @foreach (var m in mappings)
+                        {
+                            <div style="margin-left:16px;">
+                                @RenderMappingItem(m)
+                            </div>
+                        }
+                        @if (tab.Interfaces.Count > 0)
+                        {
+                            <div style="margin-left:16px;">
+                                <MudButton StartIcon="@Icons.Material.Filled.Add" Size="Size.Small"
+                                           Color="Color.Primary" Variant="Variant.Text"
+                                           OnClick="@(() => OpenAddMappingForEventType(target, q.Id, tab, cardId))">
+                                    添加映射
+                                </MudButton>
+                            </div>
+                        }
+                    }
+                </div>
+            </BodyContent>
+        </MudTreeViewItem>
+    };
+
+    #endregion
+
+    #region 统计与搜索
+
+    /// <summary>
+    /// 事件类型 Tab 内统计全部已映射问题数
+    /// </summary>
+    private (int Total, int Mapped) CountAllMappedForEventType(EventTypeTabData tab)
+    {
+        int total = 0, mapped = 0;
+        foreach (var form in tab.FormNodes)
+        {
+            var (fm, ft) = CountFormMappedForEventType(form, tab);
+            mapped += fm;
+            total += ft;
+        }
+        return (total, mapped);
+    }
+
+    private (int Mapped, int Total) CountFormMappedForEventType(FormNode form, EventTypeTabData tab)
+    {
+        int total = 0, mapped = 0;
+        foreach (var card in GetAllCardsFlat(form.Cards))
+        {
+            foreach (var q in card.Questions)
+            {
+                total++;
+                var isSubCard = FindSubCardAncestor(card, form.Cards) != null;
+                var target = isSubCard ? MappingTarget.SubCard : MappingTarget.Question;
+                var cardId = isSubCard ? FindSubCardAncestor(card, form.Cards)?.CardId : null;
+                if (GetMappingsForFieldByEventType(target, q.Id, tab, cardId).Count > 0) mapped++;
+            }
+        }
+        foreach (var q in form.OrphanQuestions)
+        {
+            total++;
+            if (GetMappingsForFieldByEventType(MappingTarget.Question, q.Id, tab).Count > 0) mapped++;
+        }
+        return (mapped, total);
+    }
+
+    private (int Mapped, int Total) CountCardMappedForEventType(CardNode card, CardNode? subCardAncestor, EventTypeTabData tab)
+    {
+        var isSubCard = card.CardType is "multiple" or "table";
+        var currentSubCard = isSubCard ? card : subCardAncestor;
+        int total = 0, mapped = 0;
+
+        foreach (var q in card.Questions)
+        {
+            total++;
+            var target = currentSubCard != null ? MappingTarget.SubCard : MappingTarget.Question;
+            var cardId = currentSubCard?.CardId;
+            if (GetMappingsForFieldByEventType(target, q.Id, tab, cardId).Count > 0) mapped++;
+        }
+        foreach (var sub in card.SubCards)
+        {
+            var (sm, st) = CountCardMappedForEventType(sub, currentSubCard, tab);
+            mapped += sm;
+            total += st;
+        }
+        return (mapped, total);
+    }
+
+    /// <summary>
+    /// 在卡片树中查找某节点的 SubCard 祖先
+    /// </summary>
+    private static CardNode? FindSubCardAncestor(CardNode target, List<CardNode> roots)
+    {
+        foreach (var root in roots)
+        {
+            var result = FindSubCardAncestorRecursive(target, root, null);
+            if (result != null) return result;
+        }
+        return null;
+    }
+
+    private static CardNode? FindSubCardAncestorRecursive(CardNode target, CardNode current, CardNode? subCardAncestor)
+    {
+        var isSubCard = current.CardType is "multiple" or "table";
+        var currentSubCard = isSubCard ? current : subCardAncestor;
+
+        if (current.CardId == target.CardId)
+            return currentSubCard;
+
+        foreach (var sub in current.SubCards)
+        {
+            var result = FindSubCardAncestorRecursive(target, sub, currentSubCard);
+            if (result != null) return result;
+        }
+        return null;
+    }
+
+    private static IEnumerable<CardNode> GetAllCardsFlat(List<CardNode> cards)
+    {
+        foreach (var card in cards)
+        {
+            yield return card;
+            foreach (var sub in GetAllCardsFlat(card.SubCards))
+                yield return sub;
+        }
+    }
+
+    /// <summary>
+    /// Tab 内搜索
+    /// </summary>
+    private void ApplyFilterForTab(EventTypeTabData tab)
+    {
+        if (string.IsNullOrEmpty(tab.SearchText))
+        {
+            foreach (var f in tab.FormNodes)
+            {
+                f.IsExpanded = true;
+                SetCardExpanded(f.Cards, false);
+            }
+            return;
+        }
+
+        var search = tab.SearchText.ToLower();
+        foreach (var f in tab.FormNodes)
+        {
+            var formHasMatch = false;
+            foreach (var card in GetAllCardsFlat(f.Cards))
+            {
+                var cardHasMatch = card.Questions.Any(q => MatchesSearch(q, search));
+                card.IsExpanded = cardHasMatch;
+                if (cardHasMatch) formHasMatch = true;
+            }
+            if (f.OrphanQuestions.Any(q => MatchesSearch(q, search)))
+                formHasMatch = true;
+            f.IsExpanded = formHasMatch;
+        }
+    }
+
+    private static bool MatchesSearch(QuestionInfo q, string search)
+    {
+        return (q.Title?.ToLower().Contains(search) == true) ||
+               q.Id.Contains(search) ||
+               (q.DataType?.ToLower().Contains(search) == true);
+    }
+
+    private static void SetCardExpanded(List<CardNode> cards, bool expanded)
+    {
+        foreach (var card in cards)
+        {
+            card.IsExpanded = expanded;
+            SetCardExpanded(card.SubCards, expanded);
+        }
+    }
+
+    #endregion
+}

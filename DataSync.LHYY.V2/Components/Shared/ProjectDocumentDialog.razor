@@ -1,0 +1,530 @@
+﻿<MudDialog Visible="Visible" VisibleChanged="OnVisibleChanged" Options="_dialogOptions">
+    <TitleContent>
+        <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween" Class="project-doc-dialog-title">
+            <MudText Typo="Typo.h6">项目文档</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@GetDialogProjectText()</MudText>
+        </MudStack>
+    </TitleContent>
+    <DialogContent>
+        @if (string.IsNullOrWhiteSpace(IntegrationProjectCode))
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">未提供接入项目编码，无法加载项目文档。</MudAlert>
+        }
+        else
+        {
+            <div class="project-doc-toolbar">
+                <MudSelect T="string" Value="_categoryFilter" ValueChanged="OnCategoryChanged" Label="分类筛选" Dense="true" Variant="Variant.Outlined" Class="project-doc-filter">
+                    <MudSelectItem T="string" Value="@AllCategory">全部</MudSelectItem>
+                    @foreach (var category in ProjectDocumentService.Categories)
+                    {
+                        <MudSelectItem T="string" Value="@category">@category</MudSelectItem>
+                    }
+                </MudSelect>
+                @if (AllowManage)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.UploadFile" OnClick="OpenUploadDialog">
+                        上传文档
+                    </MudButton>
+                }
+            </div>
+
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                PDF、图片和文本支持弹窗预览；Word（.docx）支持浏览器新页面预览。
+            </MudAlert>
+
+            @if (_loading)
+            {
+                <MudProgressLinear Indeterminate="true" Class="mb-3" />
+            }
+            else if (_documents.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true">当前项目还没有文档。</MudAlert>
+            }
+            else
+            {
+                <MudTable Items="_documents" Dense="true" Hover="true" Bordered="true" Striped="true">
+                    <HeaderContent>
+                        <MudTh>标题</MudTh>
+                        <MudTh>分类</MudTh>
+                        <MudTh>原始文件名</MudTh>
+                        <MudTh>上传时间</MudTh>
+                        <MudTh>备注</MudTh>
+                        <MudTh>操作</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd DataLabel="标题">@context.Title</MudTd>
+                        <MudTd DataLabel="分类">@context.Category</MudTd>
+                        <MudTd DataLabel="原始文件名">@context.OriginalFileName</MudTd>
+                        <MudTd DataLabel="上传时间">@context.CreatedAt.ToString("yyyy-MM-dd HH:mm")</MudTd>
+                        <MudTd DataLabel="备注">@context.Remark</MudTd>
+                        <MudTd DataLabel="操作">
+                            <div class="project-doc-row-actions">
+                                @if (ProjectDocumentService.IsWordDocument(context))
+                                {
+                                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.OpenInNew"
+                                               Href="@ProjectDocumentService.GetBrowserPreviewUrl(context)"
+                                               Target="_blank">
+                                        浏览器查看
+                                    </MudButton>
+                                }
+                                else if (ProjectDocumentService.CanPreview(context))
+                                {
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Visibility" OnClick="@(() => OpenPreviewAsync(context))">
+                                        在线查看
+                                    </MudButton>
+                                }
+                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Info" OnClick="@(() => OpenPathDialog(context))">
+                                    文件路径
+                                </MudButton>
+                                @if (AllowManage)
+                                {
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Edit" OnClick="@(() => OpenEditDialog(context))">
+                                        编辑
+                                    </MudButton>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => DeleteAsync(context))">
+                                        删除
+                                    </MudButton>
+                                }
+                            </div>
+                        </MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_uploadDialogVisible" Options="_smallDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">上传项目文档</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="_uploadCategory" Label="分类" Dense="true">
+                    @foreach (var category in ProjectDocumentService.Categories)
+                    {
+                        <MudSelectItem Value="@category">@category</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_uploadTitle" Label="标题" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_uploadRemark" Label="备注" Lines="2" />
+            </MudItem>
+            <MudItem xs="12">
+                <div class="project-doc-upload-box">
+                    <InputFile OnChange="OnFileChanged" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        @(_selectedFile == null ? "请选择要上传的文件" : $"已选择：{_selectedFile.Name}")
+                    </MudText>
+                </div>
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _uploadDialogVisible = false)">取消</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_selectedFile == null || _uploadSaving)" OnClick="SaveUploadAsync">
+            @(_uploadSaving ? "上传中..." : "开始上传")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_editDialogVisible" Options="_smallDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">编辑文档信息</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="_editCategory" Label="分类" Dense="true">
+                    @foreach (var category in ProjectDocumentService.Categories)
+                    {
+                        <MudSelectItem Value="@category">@category</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_editTitle" Label="标题" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField Value="@_editOriginalFileName" Label="原始文件名" ReadOnly="true" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editRemark" Label="备注" Lines="2" />
+            </MudItem>
+        </MudGrid>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _editDialogVisible = false)">取消</MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(_editDocumentId <= 0)" OnClick="SaveEditAsync">保存</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_previewDialogVisible" Options="_previewDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_previewDocument?.Title ?? "在线查看")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_previewDocument == null)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">未选择文档。</MudAlert>
+        }
+        else if (_previewLoading)
+        {
+            <MudProgressLinear Indeterminate="true" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_previewText))
+        {
+            @if (IsWordDocument(_previewDocument))
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">当前 Word 文档按纯文本方式在线预览。</MudAlert>
+            }
+            <MudTextField Value="@_previewText" ReadOnly="true" Lines="24" Variant="Variant.Outlined" Class="project-doc-preview-text" />
+        }
+        else if (!string.IsNullOrWhiteSpace(_previewUrl))
+        {
+            @if (IsImageDocument(_previewDocument))
+            {
+                <div class="project-doc-preview-image-wrap">
+                    <img src="@_previewUrl" alt="@_previewDocument.Title" class="project-doc-preview-image" />
+                </div>
+            }
+            else
+            {
+                <iframe src="@_previewUrl" class="project-doc-preview-frame" title="@_previewDocument.Title"></iframe>
+            }
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">当前文件暂不支持在线预览。</MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _previewDialogVisible = false)">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_pathDialogVisible" Options="_smallDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">文件路径</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_pathDocument != null)
+        {
+            <MudText Typo="Typo.body2" Class="mb-2">@_pathDocument.Title</MudText>
+            <MudTextField Value="@ProjectDocumentService.GetPhysicalPath(_pathDocument)" Label="文件路径" ReadOnly="true" Lines="3" />
+            <MudTextField Value="@ProjectDocumentService.GetDirectoryPath(_pathDocument)" Label="所在目录" ReadOnly="true" Lines="2" Class="mt-3" />
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">
+                浏览器可能会拦截本地目录打开；如未成功，请直接复制路径。
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_pathDocument != null)
+        {
+            <MudButton OnClick="@(() => CopyPathAsync(ProjectDocumentService.GetPhysicalPath(_pathDocument)))">复制文件路径</MudButton>
+            <MudButton OnClick="@(() => TryOpenPathAsync(ProjectDocumentService.GetDirectoryPath(_pathDocument)))">尝试打开目录</MudButton>
+        }
+        <MudButton OnClick="@(() => _pathDialogVisible = false)">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Inject] private ProjectDocumentService ProjectDocumentService { get; set; } = default!;
+
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public string? IntegrationProjectCode { get; set; }
+    [Parameter] public string? IntegrationProjectName { get; set; }
+    [Parameter] public bool AllowManage { get; set; }
+
+    private const string AllCategory = "__ALL__";
+
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+    private readonly DialogOptions _smallDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+    private readonly DialogOptions _previewDialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+
+    private List<EsbIntegrationProjectDocument> _documents = [];
+    private bool _loading;
+    private string _categoryFilter = AllCategory;
+    private bool _uploadDialogVisible;
+    private bool _uploadSaving;
+    private IBrowserFile? _selectedFile;
+    private string _uploadCategory = ProjectDocumentService.CategoryInterface;
+    private string? _uploadTitle;
+    private string? _uploadRemark;
+
+    private bool _editDialogVisible;
+    private int _editDocumentId;
+    private string _editCategory = ProjectDocumentService.CategoryInterface;
+    private string? _editTitle;
+    private string? _editRemark;
+    private string? _editOriginalFileName;
+
+    private bool _previewDialogVisible;
+    private bool _previewLoading;
+    private EsbIntegrationProjectDocument? _previewDocument;
+    private string? _previewUrl;
+    private string? _previewText;
+
+    private bool _pathDialogVisible;
+    private EsbIntegrationProjectDocument? _pathDocument;
+
+    private string? _loadedProjectCode;
+    private bool _lastVisible;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && (!_lastVisible || !string.Equals(_loadedProjectCode, IntegrationProjectCode, StringComparison.OrdinalIgnoreCase)))
+        {
+            await LoadDataAsync();
+        }
+
+        _lastVisible = Visible;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        if (string.IsNullOrWhiteSpace(IntegrationProjectCode))
+        {
+            _documents = [];
+            _loadedProjectCode = null;
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            _documents = await ProjectDocumentService.GetDocumentsAsync(IntegrationProjectCode, NormalizeFilter(_categoryFilter));
+            _loadedProjectCode = IntegrationProjectCode;
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载项目文档失败: {ex.Message}", Severity.Error);
+            _documents = [];
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnVisibleChanged(bool visible)
+    {
+        Visible = visible;
+        await VisibleChanged.InvokeAsync(visible);
+    }
+
+    private async Task Close()
+    {
+        await OnVisibleChanged(false);
+    }
+
+    private async Task OnCategoryChanged(string value)
+    {
+        _categoryFilter = string.IsNullOrWhiteSpace(value) ? AllCategory : value;
+        await LoadDataAsync();
+    }
+
+    private void OpenUploadDialog()
+    {
+        _uploadCategory = ProjectDocumentService.CategoryInterface;
+        _uploadTitle = null;
+        _uploadRemark = null;
+        _selectedFile = null;
+        _uploadDialogVisible = true;
+    }
+
+    private void OnFileChanged(InputFileChangeEventArgs args)
+    {
+        _selectedFile = args.File;
+        if (_selectedFile != null && string.IsNullOrWhiteSpace(_uploadTitle))
+        {
+            _uploadTitle = Path.GetFileNameWithoutExtension(_selectedFile.Name);
+        }
+    }
+
+    private async Task SaveUploadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(IntegrationProjectCode) || _selectedFile == null)
+        {
+            inj_snackbar.Add("请选择文件后再上传。", Severity.Warning);
+            return;
+        }
+
+        _uploadSaving = true;
+        try
+        {
+            await ProjectDocumentService.UploadAsync(
+                IntegrationProjectCode,
+                _uploadCategory,
+                _selectedFile,
+                _uploadTitle,
+                _uploadRemark);
+
+            _uploadDialogVisible = false;
+            inj_snackbar.Add("上传成功", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"上传失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _uploadSaving = false;
+        }
+    }
+
+    private void OpenEditDialog(EsbIntegrationProjectDocument document)
+    {
+        _editDocumentId = document.Id;
+        _editCategory = document.Category;
+        _editTitle = document.Title;
+        _editRemark = document.Remark;
+        _editOriginalFileName = document.OriginalFileName;
+        _editDialogVisible = true;
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editDocumentId <= 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await ProjectDocumentService.UpdateMetadataAsync(_editDocumentId, _editCategory, _editTitle ?? "", _editRemark);
+            _editDialogVisible = false;
+            inj_snackbar.Add("文档信息已更新", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task DeleteAsync(EsbIntegrationProjectDocument document)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除文档“{document.Title}”吗？此操作只会隐藏记录，不删除磁盘文件。",
+            yesText: "删除",
+            cancelText: "取消");
+
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await ProjectDocumentService.SoftDeleteAsync(document.Id);
+            inj_snackbar.Add("文档已删除", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task OpenPreviewAsync(EsbIntegrationProjectDocument document)
+    {
+        _previewDocument = document;
+        _previewDialogVisible = true;
+        _previewLoading = true;
+        _previewText = null;
+        _previewUrl = null;
+
+        try
+        {
+            if (ProjectDocumentService.IsTextPreview(document))
+            {
+                _previewText = await ProjectDocumentService.ReadTextPreviewAsync(document);
+            }
+            else if (ProjectDocumentService.CanPreview(document))
+            {
+                _previewUrl = ProjectDocumentService.GetPreviewUrl(document);
+            }
+            else
+            {
+                _previewDialogVisible = false;
+                OpenPathDialog(document);
+            }
+        }
+        catch (Exception ex)
+        {
+            _previewDialogVisible = false;
+            inj_snackbar.Add($"打开预览失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _previewLoading = false;
+        }
+    }
+
+    private void OpenPathDialog(EsbIntegrationProjectDocument document)
+    {
+        _pathDocument = document;
+        _pathDialogVisible = true;
+    }
+
+    private async Task CopyPathAsync(string path)
+    {
+        try
+        {
+            await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", path);
+            inj_snackbar.Add("路径已复制", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"复制失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task TryOpenPathAsync(string path)
+    {
+        try
+        {
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.openPath", path);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"尝试打开目录失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private string GetDialogProjectText()
+    {
+        var projectName = string.IsNullOrWhiteSpace(IntegrationProjectName)
+            ? IntegrationProjectCode
+            : $"{IntegrationProjectName} ({IntegrationProjectCode})";
+        return AllowManage ? $"管理项目：{projectName}" : $"当前项目：{projectName}";
+    }
+
+    private static string? NormalizeFilter(string? value)
+        => string.IsNullOrWhiteSpace(value) || string.Equals(value, AllCategory, StringComparison.Ordinal)
+            ? null
+            : value;
+
+    private static bool IsImageDocument(EsbIntegrationProjectDocument document)
+    {
+        var extension = Path.GetExtension(document.OriginalFileName).ToLowerInvariant();
+        return extension is ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".webp";
+    }
+
+    private static bool IsWordDocument(EsbIntegrationProjectDocument document)
+    {
+        return string.Equals(Path.GetExtension(document.OriginalFileName), ".docx", StringComparison.OrdinalIgnoreCase);
+    }
+}

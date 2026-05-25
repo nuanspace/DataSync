@@ -1,0 +1,169 @@
+﻿@using Bio.Core.Services
+@using Bio.Models
+@using DataSync.LHYY.V2.Models.Dto
+
+@inject BioCoreIntegrationService BioCoreService
+
+@if (MappingTargetType == MappingTarget.Patient)
+{
+    <MudAutocomplete T="string" Label="目标字段" Value="@Value" ValueChanged="OnValueChanged"
+                     SearchFunc="SearchPatientFields" Dense="true" Variant="Variant.Outlined"
+                     CoerceText="false" CoerceValue="false"
+                     HelperText="患者表字段名（如 name, gender, birthday）" />
+}
+else if (MappingTargetType == MappingTarget.Event)
+{
+    <MudSelect T="string" Label="目标字段" Value="@Value" ValueChanged="OnValueChanged"
+               Dense="true" Variant="Variant.Outlined">
+        <MudSelectItem Value="@("event_start_time")">event_start_time（事件开始时间）</MudSelectItem>
+        <MudSelectItem Value="@("event_end_time")">event_end_time（事件结束时间）</MudSelectItem>
+    </MudSelect>
+}
+else if (MappingTargetType is MappingTarget.Question or MappingTarget.SubCard && !string.IsNullOrEmpty(LicenseCode))
+{
+    <MudAutocomplete T="string" Label="目标字段" Value="@Value" ValueChanged="OnValueChanged"
+                     SearchFunc="SearchQuestions" Dense="true" Variant="Variant.Outlined"
+                     CoerceText="false" CoerceValue="false" MaxItems="50"
+                     ToStringFunc="@(v => FormatQuestionDisplay(v))"
+                     HelperText="@QuestionHelperText" />
+}
+else
+{
+    <MudTextField T="string" Label="目标字段" Value="@Value" ValueChanged="OnValueChanged"
+                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                  HelperText="Patient/Event 使用字段名，Question/SubCard 使用问题字段" />
+}
+
+@code {
+    [Parameter] public MappingTarget MappingTargetType { get; set; }
+    [Parameter] public string? LicenseCode { get; set; }
+    [Parameter] public Guid? CardId { get; set; }
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+
+    // 患者字段缓存
+    private static List<PatientFieldItem>? _patientFields;
+
+    // 问题列表缓存（按 LicenseCode）
+    private string? _cachedLicenseCode;
+    private List<QuestionFieldItem> _questionFields = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // 当 LicenseCode 变化时重新加载问题列表
+        if (_cachedLicenseCode != LicenseCode)
+        {
+            _cachedLicenseCode = LicenseCode;
+            await LoadQuestionFieldsAsync();
+        }
+    }
+
+    private async Task OnValueChanged(string value)
+    {
+        Value = value;
+        if (ValueChanged.HasDelegate)
+            await ValueChanged.InvokeAsync(value);
+    }
+
+    #region Patient 字段
+
+    private Task<IEnumerable<string>> SearchPatientFields(string? search, CancellationToken ct)
+    {
+        _patientFields ??= BuildPatientFields();
+
+        var result = _patientFields.AsEnumerable();
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.ToLower();
+            result = result.Where(f => f.FieldName.ToLower().Contains(s) || f.Description.ToLower().Contains(s));
+        }
+
+        return Task.FromResult(result.Select(f => f.FieldName));
+    }
+
+    private static List<PatientFieldItem> BuildPatientFields()
+    {
+        return PatientFieldCatalog.Definitions
+            .Select(f => new PatientFieldItem(f.Name, f.Label))
+            .ToList();
+    }
+
+    #endregion
+
+    #region Question 字段
+
+    private string QuestionHelperText =>
+        CardId.HasValue && CardId.Value != Guid.Empty
+            ? "搜索当前卡片下的问题标题"
+            : "搜索问题标题";
+
+    private async Task LoadQuestionFieldsAsync()
+    {
+        _questionFields = [];
+        if (string.IsNullOrEmpty(LicenseCode)) return;
+
+        var dict = await BioCoreService.GetFormQuestionDictAsync(LicenseCode);
+        foreach (var (id, q) in dict)
+        {
+            var displayName = FormBrowserHelper.GetPropertyValue(q, "display_name")
+                              ?? FormBrowserHelper.GetPropertyValue(q, "label_text")
+                              ?? id.ToString();
+            var dataType = FormBrowserHelper.GetPropertyValue(q, "data_type") ?? "";
+            var cardIdStr = FormBrowserHelper.GetPropertyValue(q, "card_id");
+            Guid.TryParse(cardIdStr, out var qCardId);
+
+            _questionFields.Add(new QuestionFieldItem
+            {
+                QuestionId = id,
+                DisplayName = displayName,
+                DataType = dataType,
+                CardId = qCardId,
+            });
+        }
+    }
+
+    private Task<IEnumerable<string>> SearchQuestions(string? search, CancellationToken ct)
+    {
+        var items = _questionFields.AsEnumerable();
+
+        if (CardId.HasValue && CardId.Value != Guid.Empty)
+        {
+            items = items.Where(q => q.CardId == CardId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.ToLower();
+            items = items.Where(q =>
+                q.DisplayName.ToLower().Contains(s) ||
+                q.QuestionId.ToString().Contains(s));
+        }
+
+        return Task.FromResult(items.Take(50).Select(q => q.QuestionId.ToString()));
+    }
+
+    private string FormatQuestionDisplay(string? questionIdStr)
+    {
+        if (string.IsNullOrEmpty(questionIdStr)) return "";
+        if (!Guid.TryParse(questionIdStr, out var qid)) return questionIdStr;
+
+        var item = _questionFields.FirstOrDefault(q => q.QuestionId == qid);
+        if (item == null) return questionIdStr;
+
+        return string.IsNullOrWhiteSpace(item.DataType)
+            ? item.DisplayName
+            : $"{item.DisplayName} ({item.DataType})";
+    }
+
+    #endregion
+
+    private record PatientFieldItem(string FieldName, string Description);
+
+    private class QuestionFieldItem
+    {
+        public Guid QuestionId { get; set; }
+        public string DisplayName { get; set; } = "";
+        public string DataType { get; set; } = "";
+        public Guid CardId { get; set; }
+    }
+}

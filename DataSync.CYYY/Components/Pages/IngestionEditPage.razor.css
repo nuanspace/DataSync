@@ -1,0 +1,43 @@
+.ingestion-edit-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.ingestion-edit-actions {
+    display: flex;
+    align-items: center;
+    padding-bottom: 24px;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.pk-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.pk-input-row {
+    display: flex;
+    align-items: flex-start;
+}
+
+.pk-input {
+    max-width: 360px;
+}
+
+.pk-add-btn {
+    margin-top: 4px;
+    height: 40px;
+}
+
+.pk-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}

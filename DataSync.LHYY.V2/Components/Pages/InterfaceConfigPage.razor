@@ -1,0 +1,1334 @@
+﻿@page "/config/interfaces"
+@inherits BasePage
+@using Newtonsoft.Json.Linq
+
+<PageTitle>接口配置 - LHYY V2</PageTitle>
+
+<MudText Typo="Typo.h5" Class="mb-4">接口配置</MudText>
+
+<MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+           OnClick="AddNew" Class="mb-4">新增接口</MudButton>
+<MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderOpen"
+           OnClick="@(() => _projectDocumentsVisible = true)" Class="mb-4 ml-2">项目文档</MudButton>
+@if (_llmAvailable)
+{
+    <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome"
+               OnClick="@(() => _aiDialogVisible = true)" Class="mb-4 ml-2 llm-action-button">AI 新建</MudButton>
+}
+
+<MudTable Items="_items" Dense="true" Hover="true" Bordered="true" Striped="true" Loading="_loading">
+    <HeaderContent>
+        <MudTh>排序</MudTh>
+        <MudTh>事件代码</MudTh>
+        <MudTh>事件名称</MudTh>
+        <MudTh>启用</MudTh>
+        <MudTh>处理器</MudTh>
+        <MudTh>事件类型</MudTh>
+        <MudTh>说明</MudTh>
+        <MudTh>操作</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.SortOrder</MudTd>
+        <MudTd><MudText Typo="Typo.body2"><b>@context.TranCode</b></MudText></MudTd>
+        <MudTd>@context.TranName</MudTd>
+        <MudTd>
+            @if (context.IsEnabled)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Default" Size="Size.Small" />
+            }
+        </MudTd>
+        <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
+        <MudTd>@context.EventTypeName</MudTd>
+        <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
+        <MudTd>
+            <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
+                           OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))"
+                           Title="映射引导" />
+            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
+            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                           OnClick="@(() => Delete(context))" />
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@* AI 新建对话框 *@
+<MudDialog @bind-Visible="_aiDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">AI 分析接口配置</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField @bind-Value="_aiSampleJson" Label="JSON 示例（必填）" Lines="12" Required="true"
+                      Variant="Variant.Outlined" Placeholder="粘贴该接口的示例 JSON 数据..."
+                      Disabled="_aiAnalyzing" />
+        <MudTextField @bind-Value="_aiDocDescription" Label="接口文档描述（选填）" Lines="4" Class="mt-3"
+                      Variant="Variant.Outlined" Placeholder="如：入院登记接口，用于接收 HIS 系统的入院通知..."
+                      Disabled="_aiAnalyzing" />
+        @if (_aiAnalyzing)
+        {
+            <MudProgressLinear Color="Color.Secondary" Indeterminate="true" Class="mt-3" />
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">正在分析 JSON 结构，请稍候...</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _aiDialogVisible = false)" Disabled="_aiAnalyzing">取消</MudButton>
+        <MudButton Color="Color.Secondary" Variant="Variant.Filled" OnClick="RunAiAnalysis"
+                   Disabled="_aiAnalyzing" StartIcon="@Icons.Material.Filled.AutoAwesome" Class="llm-action-button">开始分析</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<ProjectDocumentDialog Visible="_projectDocumentsVisible"
+                       VisibleChanged="OnProjectDocumentsVisibleChanged"
+                       IntegrationProjectCode="@CurrentIntegrationProjectCode"
+                       IntegrationProjectName="@CurrentIntegrationProjectName"
+                       AllowManage="false" />
+
+@if (_dialogVisible)
+{
+    <div class="interface-config-modal-overlay">
+        <div class="interface-config-modal" @onclick:stopPropagation="true">
+            <div class="interface-config-modal-header">
+                <MudText Typo="Typo.h6">@(_isNew ? "新增接口" : "编辑接口")</MudText>
+                <MudIconButton Icon="@Icons.Material.Filled.Close"
+                               Size="Size.Small"
+                               OnClick="@(() => _dialogVisible = false)"
+                               Class="interface-config-modal-close" />
+            </div>
+            <div class="@(_hasSampleJson ? "interface-config-modal-body interface-config-modal-body-split" : "interface-config-modal-body")">
+                @if (_editItem != null)
+                {
+                    <div class="@(_hasSampleJson ? "interface-config-dialog-body" : null)">
+                        @if (_hasSampleJson)
+                        {
+                            <div class="interface-config-columns">
+                                <div class="interface-config-col interface-config-col-json">
+                                    <div class="interface-config-panel">
+                                        <div class="interface-config-panel-header">
+                                        @if (_pathPickTarget != PathPickTarget.None)
+                                        {
+                                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">@GetPathPickPrompt()</MudAlert>
+                                        }
+                                        else
+                                        {
+                                            <MudText Typo="Typo.subtitle2" Class="mb-2">点击右侧路径输入框，再点击下方节点填入</MudText>
+                                        }
+                                        </div>
+                                        <div class="interface-config-surface interface-config-json-tree-shell">
+                                            <div class="interface-config-json-tree-scroll-body">
+                                            <JsonTreeViewer JsonText="@_editItem.SampleJson"
+                                                            MaxNodesToRender="0"
+                                                            MaxArrayItemsToRender="0"
+                                                            ShowSearch="true"
+                                                            UseArrayBrackets="true"
+                                                            PreferFirstArrayItemAsRoot="true"
+                                                            SelectedPath="@_selectedJsonTreePath"
+                                                            SelectionVersion="@_selectedJsonTreeVersion"
+                                                            OnPathSelected="OnSidePanelPathPicked" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="interface-config-col interface-config-col-form">
+                                    <div class="interface-config-surface interface-config-panel interface-config-form-panel">
+                                        @EditFormContent
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            @EditFormContent
+                        }
+                    </div>
+                }
+            </div>
+            <div class="interface-config-modal-actions">
+                <MudButton OnClick="@(() => _dialogVisible = false)">取消</MudButton>
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">保存</MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject] private ConfigService ConfigSvc { get; set; } = default!;
+    [Inject] private BioCoreIntegrationService BioCoreService { get; set; } = default!;
+    [Inject] private LlmService LlmService { get; set; } = default!;
+    [Inject] private MessageQueryService MessageQuerySvc { get; set; } = default!;
+    [SupplyParameterFromQuery(Name = "createFromMessageId")] public long? QueryCreateFromMessageId { get; set; }
+
+    private List<EsbInterfaceConfig> _items = [];
+    private EsbInterfaceConfig? _editItem;
+    private bool _loading = true;
+    private bool _dialogVisible;
+    private bool _isNew;
+    private bool _projectDocumentsVisible;
+
+    // 接口级过滤规则
+    private List<EsbFilterRule> _editFilterRules = [];
+    private List<EsbInterfaceMatchRule> _editMatchRules = [];
+    private List<EsbIdempotentKeyPart> _editIdempotentKeyParts = [];
+
+    // 可用的自定义处理器类名
+    private List<string> _availableHandlers = [];
+
+    // 事件类型下拉数据
+    private List<string> _eventTypes = [];
+
+    // 全局默认 LicenseCode
+    private string? _defaultLicenseCode;
+
+    // AI 新建相关
+    private bool _llmAvailable;
+    private bool _aiDialogVisible;
+    private string _aiSampleJson = "";
+    private string _aiDocDescription = "";
+    private bool _aiAnalyzing;
+    private bool _openWizardAfterCreateFromMessageSave;
+
+    // 路径选取目标枚举（与 MappingEditDialog 模式一致）
+    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, SourceMessageId, MainRecordArray, FilterRule, MatchRule, IdempotentKeyPart }
+    private enum EventIdentityModeOption
+    {
+        RequireEventTime,
+        LookupThenFail,
+        LookupThenDegradeToPatientOnly,
+        LookupThenPending
+    }
+
+    private PathPickTarget _pathPickTarget = PathPickTarget.None;
+    private int _pickFilterRuleIndex = -1;
+    private int _pickMatchRuleIndex = -1;
+    private int _pickIdempotentKeyPartIndex = -1;
+    private EventCallback<int> _filterRulePathPickCallback;
+    private EventCallback<int> _matchRulePathPickCallback;
+    private EventCallback<int> _idempotentKeyPartPathPickCallback;
+    private string? _selectedJsonTreePath;
+    private int _selectedJsonTreeVersion;
+    private bool _advancedExpanded;
+    private bool _dedupeExpanded;
+    private bool _recognitionExpanded;
+    private bool _filterExpanded;
+
+    // 当前编辑项是否有 SampleJson
+    private bool _hasSampleJson => !string.IsNullOrWhiteSpace(_editItem?.SampleJson);
+    private bool _supportsEventIdentity => _editItem != null && RequiresEventStartTimePath(_editItem.HandlerType);
+    private bool _showVisitIdentityFields => _supportsEventIdentity && SelectedEventIdentityMode != EventIdentityModeOption.RequireEventTime;
+
+    private ReceiveMode SelectedReceiveMode
+    {
+        get => _editItem?.ReceiveMode ?? ReceiveMode.PersistAndAsync;
+        set
+        {
+            if (_editItem == null)
+                return;
+
+            _editItem.ReceiveMode = value;
+            if (value == ReceiveMode.Direct && SelectedEventIdentityMode == EventIdentityModeOption.LookupThenPending)
+                SelectedEventIdentityMode = EventIdentityModeOption.LookupThenFail;
+        }
+    }
+
+    private EventIdentityModeOption SelectedEventIdentityMode
+    {
+        get
+        {
+            if (_editItem == null)
+                return EventIdentityModeOption.RequireEventTime;
+
+            if (!_editItem.AllowMissingEventTime)
+                return EventIdentityModeOption.RequireEventTime;
+
+            if (_editItem.HandlerType == HandlerType.GenericQuestionWriteBack &&
+                _editItem.MissingEventIdentityPolicy == MissingEventIdentityPolicy.DegradeToPatientOnly)
+            {
+                return EventIdentityModeOption.LookupThenFail;
+            }
+
+            return _editItem.MissingEventIdentityPolicy switch
+            {
+                MissingEventIdentityPolicy.DegradeToPatientOnly => EventIdentityModeOption.LookupThenDegradeToPatientOnly,
+                MissingEventIdentityPolicy.Pending => EventIdentityModeOption.LookupThenPending,
+                _ => EventIdentityModeOption.LookupThenFail
+            };
+        }
+        set
+        {
+            if (_editItem == null)
+                return;
+
+            switch (value)
+            {
+                case EventIdentityModeOption.RequireEventTime:
+                    _editItem.AllowMissingEventTime = false;
+                    _editItem.MissingEventIdentityPolicy = MissingEventIdentityPolicy.Fail;
+                    break;
+                case EventIdentityModeOption.LookupThenFail:
+                    _editItem.AllowMissingEventTime = true;
+                    _editItem.MissingEventIdentityPolicy = MissingEventIdentityPolicy.Fail;
+                    break;
+                case EventIdentityModeOption.LookupThenDegradeToPatientOnly:
+                    _editItem.AllowMissingEventTime = true;
+                    _editItem.MissingEventIdentityPolicy = MissingEventIdentityPolicy.DegradeToPatientOnly;
+                    break;
+                case EventIdentityModeOption.LookupThenPending:
+                    _editItem.AllowMissingEventTime = true;
+                    _editItem.MissingEventIdentityPolicy = MissingEventIdentityPolicy.Pending;
+                    break;
+            }
+        }
+    }
+
+    private Task OnProjectDocumentsVisibleChanged(bool visible)
+    {
+        _projectDocumentsVisible = visible;
+        return Task.CompletedTask;
+    }
+
+    private void PrepareDialogLayout(bool hasExistingAdvancedConfig = false)
+    {
+        _advancedExpanded = false;
+        _dedupeExpanded = false;
+        _recognitionExpanded = hasExistingAdvancedConfig && _editMatchRules.Count > 0;
+        _filterExpanded = hasExistingAdvancedConfig && _editFilterRules.Count > 0;
+    }
+
+    private void ActivatePathPickTarget(PathPickTarget target, int targetIndex = -1)
+    {
+        SetPathPickTarget(target, targetIndex);
+    }
+
+    private string GetPathPickPrompt()
+        => _pathPickTarget switch
+        {
+            PathPickTarget.Mrn => "当前正在为病案号路径选取节点。",
+            PathPickTarget.EventTime => "当前正在为事件开始时间路径选取节点。",
+            PathPickTarget.VisitNo => "当前正在为住院次数路径选取节点。",
+            PathPickTarget.InpatientNo => "当前正在为住院号路径选取节点。",
+            PathPickTarget.SourceMessageId => "当前正在为上游消息号路径选取节点。",
+            PathPickTarget.MainRecordArray => "当前正在为主记录数组路径选取节点，请尽量点击数组节点。",
+            PathPickTarget.FilterRule => $"当前正在为过滤规则 #{_pickFilterRuleIndex + 1} 选取源路径。",
+            PathPickTarget.MatchRule => $"当前正在为识别规则 #{_pickMatchRuleIndex + 1} 选取源路径。",
+            PathPickTarget.IdempotentKeyPart => $"当前正在为幂等键片段 #{_pickIdempotentKeyPartIndex + 1} 选取源路径。",
+            _ => "当前未选择路径目标。"
+        };
+
+    /// <summary>表单内容（SidePanel 和普通两种布局复用）</summary>
+    private RenderFragment EditFormContent => __builder =>
+    {
+        <MudGrid Class="interface-config-form">
+            <MudItem xs="12">
+                <MudText Typo="Typo.subtitle1" Class="mb-1">核心配置</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="interface-config-caption">
+                    先填写能让接口接收、识别患者并定位事件的最少字段；其余配置按需展开。
+                </MudText>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_editItem!.TranCode" Label="事件代码" Required="true"
+                              Disabled="!_isNew" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_editItem!.TranName" Label="事件名称" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="HandlerType" @bind-Value="_editItem!.HandlerType" Label="处理器类型"
+                           HelperText="大多数接口使用 Generic；只有真正特殊逻辑才切到 Custom。">
+                    <MudSelectItem Value="HandlerType.Generic">Generic</MudSelectItem>
+                    <MudSelectItem Value="HandlerType.GenericQuestionWriteBack">GenericQuestionWriteBack</MudSelectItem>
+                    <MudSelectItem Value="HandlerType.Custom">Custom</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudSelect T="ReceiveMode" @bind-Value="SelectedReceiveMode" Label="接收方式" HelperText="@GetReceiveModeHelperText()">
+                    <MudSelectItem Value="ReceiveMode.PersistAndAsync">入队异步处理</MudSelectItem>
+                    <MudSelectItem Value="ReceiveMode.Direct">直接处理</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            @if (_editItem!.HandlerType == HandlerType.Custom)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" @bind-Value="_editItem.HandlerName" Label="处理器类名" Clearable="true"
+                               HelperText="选择已实现 IMessageHandler 的处理器类">
+                        @foreach (var name in _availableHandlers)
+                        {
+                            <MudSelectItem Value="@name">@name</MudSelectItem>
+                        }
+                    </MudSelect>
+                </MudItem>
+            }
+            <MudItem xs="12" sm="6">
+                <MudSelect T="string" @bind-Value="_editItem!.EventTypeName" Label="事件类型" Clearable="true"
+                           Disabled="@(string.IsNullOrEmpty(_defaultLicenseCode))">
+                    @foreach (var et in _eventTypes)
+                    {
+                        <MudSelectItem Value="@et">@et</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                @if (_hasSampleJson)
+                {
+                    <PathPickTextField @bind-Value="_editItem!.MrnSourcePath"
+                                       Label="病案号路径"
+                                       HelperText="可手填；也可配合左侧 JSON 树点选路径"
+                                       IsActive="@(_pathPickTarget == PathPickTarget.Mrn)"
+                                       OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.Mrn))" />
+                }
+                else
+                {
+                    <MudTextField @bind-Value="_editItem!.MrnSourcePath" Label="病案号路径" Required="true"
+                                      HelperText="消息 JSON 中病案号的路径；主记录字段可写 $main.mrn，根字段可写 $.patient.mrn" Placeholder="$main.mrn" />
+                }
+            </MudItem>
+            @if (_supportsEventIdentity)
+            {
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="EventIdentityModeOption" @bind-Value="SelectedEventIdentityMode"
+                               Label="事件时间缺失时的处理方式" HelperText="@GetEventIdentityModeHelperText()">
+                        <MudSelectItem Value="EventIdentityModeOption.RequireEventTime">必须直接提供事件时间</MudSelectItem>
+                        <MudSelectItem Value="EventIdentityModeOption.LookupThenFail">允许缺失，回查失败则报错</MudSelectItem>
+                        @if (_editItem!.HandlerType != HandlerType.GenericQuestionWriteBack)
+                        {
+                            <MudSelectItem Value="EventIdentityModeOption.LookupThenDegradeToPatientOnly">允许缺失，回查失败则只处理患者</MudSelectItem>
+                        }
+                        <MudSelectItem Value="EventIdentityModeOption.LookupThenPending" Disabled="@(_editItem!.ReceiveMode == ReceiveMode.Direct)">允许缺失，回查失败则转待处理</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (_hasSampleJson)
+                    {
+                        <PathPickTextField @bind-Value="_editItem!.EventStartTimeSourcePath"
+                                           Label="事件开始时间路径"
+                                           HelperText="能直接定位住院事件的时间字段"
+                                           IsActive="@(_pathPickTarget == PathPickTarget.EventTime)"
+                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.EventTime))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_editItem!.EventStartTimeSourcePath" Label="事件开始时间路径"
+                                      HelperText="能直接定位住院事件的时间字段；主记录字段可写 $main.ADMISSION_TIME" Placeholder="$main.ADMISSION_TIME" />
+                    }
+                </MudItem>
+            }
+            @if (_showVisitIdentityFields)
+            {
+                <MudItem xs="12" sm="6">
+                    @if (_hasSampleJson)
+                    {
+                        <PathPickTextField @bind-Value="_editItem!.VisitNoSourcePath"
+                                           Label="住院次数路径"
+                                           HelperText="缺少事件时间时用于回查住院事件"
+                                           IsActive="@(_pathPickTarget == PathPickTarget.VisitNo)"
+                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.VisitNo))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_editItem!.VisitNoSourcePath" Label="住院次数路径"
+                                      HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.VISIT_NO" Placeholder="$main.VISIT_NO" />
+                    }
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (_hasSampleJson)
+                    {
+                        <PathPickTextField @bind-Value="_editItem!.InpatientNoSourcePath"
+                                           Label="住院号路径"
+                                           HelperText="缺少事件时间时用于回查住院事件"
+                                           IsActive="@(_pathPickTarget == PathPickTarget.InpatientNo)"
+                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.InpatientNo))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_editItem!.InpatientNoSourcePath" Label="住院号路径"
+                                      HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.INPATIENT_NO" Placeholder="$main.INPATIENT_NO" />
+                    }
+                </MudItem>
+            }
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_editItem!.SampleJson" Label="消息模板（JSON）" Lines="6"
+                              Variant="Variant.Outlined"
+                              HelperText="填写后左侧会显示 JSON 树，可直接点选路径"
+                              Placeholder="粘贴该接口的示例 JSON 数据..." />
+            </MudItem>
+            <MudItem xs="12">
+                <MudExpansionPanels Class="interface-config-panels" MultiExpansion="true">
+                    <MudExpansionPanel Text="高级选项" Icon="@Icons.Material.Filled.Tune" @bind-Expanded="_advancedExpanded">
+                        <MudGrid Class="mt-1">
+                            <MudItem xs="12" sm="6">
+                                <MudSwitch @bind-Value="_editItem!.IsEnabled" Label="启用" Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudNumericField @bind-Value="_editItem!.SortOrder" Label="排序" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSelect T="ApiResponseMode" @bind-Value="_editItem!.ResponseMode" Label="响应模式">
+                                    <MudSelectItem Value="ApiResponseMode.DefaultJson">默认 JSON</MudSelectItem>
+                                    <MudSelectItem Value="ApiResponseMode.Esb">ESB 响应</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSwitch @bind-Value="_editItem!.AllowMultipleMatch" Label="允许多接口命中" Color="Color.Primary" />
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">一条消息命中多个接口配置时继续处理全部命中项。</MudText>
+                            </MudItem>
+                            <MudItem xs="12">
+                                <MudTextField @bind-Value="_editItem!.Description" Label="说明" Lines="2" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                    <MudExpansionPanel Text="去重与批量" Icon="@Icons.Material.Filled.ContentCopy" @bind-Expanded="_dedupeExpanded">
+                        <MudGrid Class="mt-1">
+                    <MudItem xs="12" sm="6">
+                                @if (_hasSampleJson)
+                                {
+                                    <PathPickTextField @bind-Value="_editItem!.SourceMessageIdPath"
+                                                       Label="上游消息号路径"
+                                                       HelperText="上游有稳定唯一消息号时建议直接填写"
+                                                       IsActive="@(_pathPickTarget == PathPickTarget.SourceMessageId)"
+                                                       OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.SourceMessageId))" />
+                                }
+                                else
+                                {
+                                    <MudTextField @bind-Value="_editItem!.SourceMessageIdPath" Label="上游消息号路径"
+                                                  HelperText="上游有稳定唯一消息号时建议直接填写；主记录字段可写 $main.xxx，根字段可写 $.Request.Head.MessageId" Placeholder="$.Request.Head.MessageId" />
+                                }
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                @if (_hasSampleJson)
+                                {
+                                    <PathPickTextField @bind-Value="_editItem!.MainRecordArrayPath"
+                                                       Label="主记录数组路径"
+                                                       HelperText="批量主记录时填写"
+                                                       IsActive="@(_pathPickTarget == PathPickTarget.MainRecordArray)"
+                                                       OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.MainRecordArray))" />
+                                }
+                                else
+                                {
+                                    <MudTextField @bind-Value="_editItem!.MainRecordArrayPath" Label="主记录数组路径"
+                                                  HelperText="对象内主记录批量时填写数组容器路径" Placeholder="Request.Body.DataList" />
+                                }
+                            </MudItem>
+                            <MudItem xs="12">
+                                <IdempotentKeyPartEditor Parts="_editIdempotentKeyParts"
+                                                         PartsChanged="v => _editIdempotentKeyParts = v"
+                                                         JsonText="@(_hasSampleJson ? null : _editItem!.SampleJson)"
+                                                         OnRequestPathPick="@(_hasSampleJson ? _idempotentKeyPartPathPickCallback : default)"
+                                                         ActivePickIndex="@(_pathPickTarget == PathPickTarget.IdempotentKeyPart ? _pickIdempotentKeyPartIndex : -1)" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                    <MudExpansionPanel Text="接口识别规则" Icon="@Icons.Material.Filled.Rule" @bind-Expanded="_recognitionExpanded">
+                        <InterfaceMatchRuleEditor Rules="_editMatchRules"
+                                                  RulesChanged="v => _editMatchRules = v"
+                                                  JsonText="@(_hasSampleJson ? null : _editItem!.SampleJson)"
+                                                  OnRequestPathPick="@(_hasSampleJson ? _matchRulePathPickCallback : default)"
+                                                  ActivePickIndex="@(_pathPickTarget == PathPickTarget.MatchRule ? _pickMatchRuleIndex : -1)" />
+                    </MudExpansionPanel>
+                    <MudExpansionPanel Text="过滤规则" Icon="@Icons.Material.Filled.FilterAlt" @bind-Expanded="_filterExpanded">
+                        <FilterRuleEditor Rules="_editFilterRules" RulesChanged="v => _editFilterRules = v"
+                                          JsonText="@(_hasSampleJson ? null : _editItem!.SampleJson)"
+                                          OnRequestPathPick="@(_hasSampleJson ? _filterRulePathPickCallback : default)"
+                                          ActivePickIndex="@(_pathPickTarget == PathPickTarget.FilterRule ? _pickFilterRuleIndex : -1)"
+                                          ShowScope="true" />
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudItem>
+        </MudGrid>
+    };
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _availableHandlers = ConfigService.GetAvailableHandlerNames();
+        _llmAvailable = await LlmService.IsAvailableAsync();
+
+        // 获取当前项目默认 LicenseCode
+        _defaultLicenseCode = await ConfigSvc.GetDefaultLicenseCodeAsync(CurrentIntegrationProjectCode);
+
+        // 初始化事件类型下拉
+        await LoadEventTypesAsync();
+
+        // 初始化过滤规则路径选取回调
+        _filterRulePathPickCallback = EventCallback.Factory.Create<int>(this, idx => ActivatePathPickTarget(PathPickTarget.FilterRule, idx));
+        _matchRulePathPickCallback = EventCallback.Factory.Create<int>(this, idx => ActivatePathPickTarget(PathPickTarget.MatchRule, idx));
+        _idempotentKeyPartPathPickCallback = EventCallback.Factory.Create<int>(this, idx => ActivatePathPickTarget(PathPickTarget.IdempotentKeyPart, idx));
+
+        await LoadDataAsync();
+        await OpenCreateFromMessageAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var scopedItems = await ApplyCurrentProjectScope(db.EsbInterfaceConfigs)
+                .OrderByDescending(c => c.IntegrationProjectCode == CurrentIntegrationProjectCode)
+                .ThenBy(c => c.SortOrder)
+                .ThenBy(c => c.TranCode)
+                .ToListAsync();
+
+            _items = SelectEffectiveProjectItems(scopedItems, item => item.TranCode, item => item.IntegrationProjectCode)
+                .OrderBy(c => c.SortOrder)
+                .ThenBy(c => c.TranCode)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenCreateFromMessageAsync()
+    {
+        if (!QueryCreateFromMessageId.HasValue)
+            return;
+
+        var message = await MessageQuerySvc.GetMessageByIdAsync(QueryCreateFromMessageId.Value);
+        if (message == null)
+        {
+            inj_snackbar.Add("消息不存在，无法创建接口配置", Severity.Warning);
+            return;
+        }
+
+        if (!MessageJsonHelper.TryParseToken(message.RawJson, out var sampleToken, out var error))
+        {
+            inj_snackbar.Add(error ?? "消息 RawJson 无效，无法创建接口配置", Severity.Warning);
+            return;
+        }
+
+        var existing = _items.FirstOrDefault(item =>
+            string.Equals(item.TranCode, message.TranCode, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            inj_snackbar.Add("接口配置已存在，可直接进入工作台配置", Severity.Info);
+            inj_navigationManager.NavigateTo($"/config/wizard?messageId={QueryCreateFromMessageId.Value}");
+            return;
+        }
+
+        _editItem = new EsbInterfaceConfig
+        {
+            IsEnabled = true,
+            ReceiveMode = ReceiveMode.PersistAndAsync,
+            TranCode = Truncate(message.TranCode, 20),
+            TranName = Truncate(message.TranName, 100),
+            SampleJson = sampleToken.ToString(Newtonsoft.Json.Formatting.Indented),
+            IntegrationProjectCode = CurrentIntegrationProjectCode,
+        };
+        _editFilterRules = [];
+        _editMatchRules = [];
+        _editIdempotentKeyParts = [];
+        ResetPathPickState();
+        PrepareDialogLayout();
+        _isNew = true;
+        _dialogVisible = true;
+        _openWizardAfterCreateFromMessageSave = true;
+        await LoadEventTypesAsync();
+        inj_snackbar.Add("已根据当前消息创建接口配置草稿，保存后才会写入数据库", Severity.Info);
+    }
+
+    private async Task AddNew()
+    {
+        _openWizardAfterCreateFromMessageSave = false;
+        _editItem = new EsbInterfaceConfig
+        {
+            IsEnabled = true,
+            ReceiveMode = ReceiveMode.PersistAndAsync,
+            IntegrationProjectCode = CurrentIntegrationProjectCode,
+        };
+        _editFilterRules = [];
+        _editMatchRules = [];
+        _editIdempotentKeyParts = [];
+        ResetPathPickState();
+        PrepareDialogLayout();
+        _isNew = true;
+        _dialogVisible = true;
+        await LoadEventTypesAsync();
+    }
+
+    private async Task Edit(EsbInterfaceConfig item)
+    {
+        _openWizardAfterCreateFromMessageSave = false;
+        _editItem = new EsbInterfaceConfig
+        {
+            Id = item.Id,
+            TranCode = item.TranCode,
+            TranName = item.TranName,
+            IsEnabled = item.IsEnabled,
+            HandlerType = item.HandlerType,
+            HandlerName = item.HandlerName,
+            AllowMultipleMatch = item.AllowMultipleMatch,
+            ReceiveMode = item.ReceiveMode,
+            LicenseCode = item.LicenseCode,
+            EventTypeName = item.EventTypeName,
+            Description = item.Description,
+            SortOrder = item.SortOrder,
+            MrnSourcePath = item.MrnSourcePath,
+            EventStartTimeSourcePath = item.EventStartTimeSourcePath,
+            VisitNoSourcePath = item.VisitNoSourcePath,
+            InpatientNoSourcePath = item.InpatientNoSourcePath,
+            SourceMessageIdPath = item.SourceMessageIdPath,
+            MainRecordArrayPath = item.MainRecordArrayPath,
+            AllowMissingEventTime = item.AllowMissingEventTime,
+            ResponseMode = item.ResponseMode,
+            MissingEventIdentityPolicy = item.MissingEventIdentityPolicy,
+            SampleJson = item.SampleJson,
+            IntegrationProjectCode = item.IntegrationProjectCode,
+        };
+        _isNew = false;
+        ResetPathPickState();
+
+        // 加载该接口的过滤规则（接口级，MappingId == null）
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        _editFilterRules = await db.EsbFilterRules
+            .Where(r => r.TranCode == item.TranCode && r.MappingId == null && r.IntegrationProjectCode == item.IntegrationProjectCode)
+            .OrderBy(r => r.RuleGroup)
+            .ThenBy(r => r.SortOrder)
+            .ToListAsync();
+        _editMatchRules = await db.EsbInterfaceMatchRules
+            .Where(r => r.TranCode == item.TranCode && r.IntegrationProjectCode == item.IntegrationProjectCode)
+            .OrderBy(r => r.MatchGroup)
+            .ThenBy(r => r.SortOrder)
+            .ToListAsync();
+        _editIdempotentKeyParts = await db.EsbIdempotentKeyParts
+            .Where(p => p.TranCode == item.TranCode && p.IntegrationProjectCode == item.IntegrationProjectCode)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+
+        // 级联加载事件类型
+        await LoadEventTypesAsync();
+        PrepareDialogLayout(true);
+
+        _dialogVisible = true;
+    }
+
+    private async Task LoadEventTypesAsync()
+    {
+        _eventTypes = [];
+        if (string.IsNullOrEmpty(_defaultLicenseCode)) return;
+
+        _eventTypes = (await BioCoreService.GetEventTypesAsync(_defaultLicenseCode))
+            .Select(e => e.Name)
+            .Distinct()
+            .OrderBy(n => n)
+            .ToList();
+    }
+
+    private string GetReceiveModeHelperText()
+        => SelectedReceiveMode switch
+        {
+            ReceiveMode.Direct => "收到消息后立即处理，响应更快，但不支持转为待处理。",
+            _ => "先入队再由后台处理，支持待处理和失败重试。"
+        };
+
+    private string GetEventIdentityModeHelperText()
+        => SelectedEventIdentityMode switch
+        {
+            EventIdentityModeOption.RequireEventTime => "消息里必须直接带事件开始时间；取不到就失败。",
+            EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就只处理患者。",
+            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就转待处理。",
+            _ => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就报错。"
+        };
+
+    private static bool RequiresEventStartTimePath(HandlerType handlerType)
+        => handlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack;
+
+    private static string GetHandlerTypeDisplayName(HandlerType handlerType)
+        => handlerType switch
+        {
+            HandlerType.Generic => "Generic",
+            HandlerType.GenericQuestionWriteBack => "GenericQuestionWriteBack",
+            HandlerType.Custom => "Custom",
+            _ => handlerType.ToString()
+        };
+
+    private static string? NormalizeJsonTreeSelectionPath(string? path)
+    {
+        var normalized = path?.Trim();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        normalized = SubCardPathHelper.IsAbsoluteJsonPath(normalized)
+            ? normalized[2..]
+            : normalized;
+
+        return SubCardPathHelper.NormalizeArrayPath(normalized);
+    }
+
+    private void SetJsonTreeSelection(string? path)
+    {
+        _selectedJsonTreePath = NormalizeJsonTreeSelectionPath(path);
+        _selectedJsonTreeVersion++;
+    }
+
+    private JToken? GetSampleJsonRoot()
+    {
+        if (string.IsNullOrWhiteSpace(_editItem?.SampleJson))
+            return null;
+
+        try
+        {
+            return JToken.Parse(_editItem.SampleJson);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private string GetMainRecordArrayPath() =>
+        SubCardPathHelper.NormalizeArrayContainerPath(_editItem?.MainRecordArrayPath);
+
+    private JToken? GetConfiguredMainRecordContext()
+    {
+        var root = GetSampleJsonRoot();
+        var mainRecordArrayPath = GetMainRecordArrayPath();
+        if (root == null || string.IsNullOrWhiteSpace(mainRecordArrayPath))
+            return null;
+
+        return SubCardPathHelper.ResolveFirstSubCardContext(root, mainRecordArrayPath);
+    }
+
+    private string BuildScopedPath(string arrayPath, string sourcePath)
+    {
+        if (SubCardPathHelper.PathsEqual(arrayPath, "$"))
+            return sourcePath;
+
+        var root = GetSampleJsonRoot();
+        if (root != null && SubCardPathHelper.ResolveSubCardContainer(root, arrayPath) is JObject)
+            return $"{arrayPath}.{sourcePath}";
+
+        return $"{arrayPath}[].{sourcePath}";
+    }
+
+    private bool TryBuildMainRecordScopedPath(string? sourcePath, out string scopedPath)
+    {
+        scopedPath = "";
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        var mainRecordArrayPath = GetMainRecordArrayPath();
+        var mainRecordContext = GetConfiguredMainRecordContext();
+        if (string.IsNullOrWhiteSpace(normalizedSource)
+            || string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            || mainRecordContext == null
+            || SubCardPathHelper.IsAbsoluteJsonPath(normalizedSource)
+            || SubCardPathHelper.IsRootScopedPath(normalizedSource, mainRecordArrayPath))
+        {
+            return false;
+        }
+
+        if (MessageJsonHelper.IsMainRecordScopedPath(normalizedSource))
+        {
+            var relativePath = MessageJsonHelper.TrimMainRecordScopePrefix(normalizedSource);
+            if (string.IsNullOrWhiteSpace(relativePath))
+                return false;
+
+            scopedPath = MessageJsonHelper.EnsureMainRecordScopedPath(relativePath);
+            return true;
+        }
+
+        if (SubCardPathHelper.ResolveFirstToken(mainRecordContext, normalizedSource) == null)
+            return false;
+
+        scopedPath = MessageJsonHelper.EnsureMainRecordScopedPath(normalizedSource);
+        return true;
+    }
+
+    private bool TryNormalizeMainRecordSourcePath(string? sourcePath, out string normalizedPath)
+        => MessageJsonHelper.TryNormalizeMainRecordSourcePath(sourcePath, GetMainRecordArrayPath(), out normalizedPath);
+
+    private bool TryExpandMainRecordScopedPath(string? sourcePath, out string scopedPath)
+    {
+        scopedPath = "";
+        var normalizedSource = sourcePath?.Trim() ?? "";
+        var mainRecordArrayPath = GetMainRecordArrayPath();
+        var mainRecordContext = GetConfiguredMainRecordContext();
+        if (string.IsNullOrWhiteSpace(normalizedSource)
+            || string.IsNullOrWhiteSpace(mainRecordArrayPath)
+            || mainRecordContext == null
+            || SubCardPathHelper.IsAbsoluteJsonPath(normalizedSource)
+            || SubCardPathHelper.IsRootScopedPath(normalizedSource, mainRecordArrayPath))
+        {
+            return false;
+        }
+
+        var relativePath = MessageJsonHelper.IsMainRecordScopedPath(normalizedSource)
+            ? MessageJsonHelper.TrimMainRecordScopePrefix(normalizedSource)
+            : normalizedSource;
+        if (string.IsNullOrWhiteSpace(relativePath)
+            || SubCardPathHelper.ResolveFirstToken(mainRecordContext, relativePath) == null)
+        {
+            return false;
+        }
+
+        scopedPath = BuildScopedPath(mainRecordArrayPath, relativePath);
+        return true;
+    }
+
+    private string NormalizePickedPath(string? path)
+        => TryNormalizeMainRecordSourcePath(path, out var normalizedPath)
+            ? normalizedPath
+            : path?.Trim() ?? "";
+
+    private string? BuildArrayPathTreeSelectionPath(string? arrayPath)
+    {
+        var normalizedPath = SubCardPathHelper.NormalizeArrayContainerPath(arrayPath);
+        if (string.IsNullOrWhiteSpace(normalizedPath))
+            return null;
+
+        var root = GetSampleJsonRoot();
+        if (root != null && SubCardPathHelper.ResolveSubCardContainer(root, normalizedPath) is JArray)
+            return NormalizeJsonTreeSelectionPath($"{normalizedPath}[]");
+
+        return NormalizeJsonTreeSelectionPath(normalizedPath);
+    }
+
+    private string? BuildJsonTreeSelectionPath(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return null;
+
+        var normalizedSource = sourcePath.Trim();
+        return TryExpandMainRecordScopedPath(normalizedSource, out var scopedPath)
+            ? NormalizeJsonTreeSelectionPath(scopedPath)
+            : NormalizeJsonTreeSelectionPath(normalizedSource);
+    }
+
+    private string? GetPathSelection(PathPickTarget target, int targetIndex = -1)
+    {
+        if (_editItem == null)
+            return null;
+
+        return target switch
+        {
+            PathPickTarget.Mrn => _editItem.MrnSourcePath,
+            PathPickTarget.EventTime => _editItem.EventStartTimeSourcePath,
+            PathPickTarget.VisitNo => _editItem.VisitNoSourcePath,
+            PathPickTarget.InpatientNo => _editItem.InpatientNoSourcePath,
+            PathPickTarget.SourceMessageId => _editItem.SourceMessageIdPath,
+            PathPickTarget.MainRecordArray => _editItem.MainRecordArrayPath,
+            PathPickTarget.FilterRule when targetIndex >= 0 && targetIndex < _editFilterRules.Count => _editFilterRules[targetIndex].SourcePath,
+            PathPickTarget.MatchRule when targetIndex >= 0 && targetIndex < _editMatchRules.Count => _editMatchRules[targetIndex].SourcePath,
+            PathPickTarget.IdempotentKeyPart when targetIndex >= 0 && targetIndex < _editIdempotentKeyParts.Count => _editIdempotentKeyParts[targetIndex].SourcePath,
+            _ => null
+        };
+    }
+
+    private void SetPathPickTarget(PathPickTarget target, int targetIndex = -1)
+    {
+        ResetPathPickState();
+        if (target == PathPickTarget.None)
+            return;
+
+        _pathPickTarget = target;
+
+        switch (target)
+        {
+            case PathPickTarget.FilterRule:
+                _pickFilterRuleIndex = targetIndex;
+                break;
+            case PathPickTarget.MatchRule:
+                _pickMatchRuleIndex = targetIndex;
+                break;
+            case PathPickTarget.IdempotentKeyPart:
+                _pickIdempotentKeyPartIndex = targetIndex;
+                break;
+        }
+
+        SetJsonTreeSelection(target == PathPickTarget.MainRecordArray
+            ? BuildArrayPathTreeSelectionPath(GetPathSelection(target, targetIndex))
+            : BuildJsonTreeSelectionPath(GetPathSelection(target, targetIndex)));
+    }
+
+    private void ResetPathPickState()
+    {
+        _pathPickTarget = PathPickTarget.None;
+        _pickFilterRuleIndex = -1;
+        _pickMatchRuleIndex = -1;
+        _pickIdempotentKeyPartIndex = -1;
+        SetJsonTreeSelection(null);
+    }
+
+    private void OnSidePanelPathPicked(string path)
+    {
+        if (_editItem == null) return;
+
+        var normalizedPath = NormalizePickedPath(path);
+
+        switch (_pathPickTarget)
+        {
+            case PathPickTarget.Mrn:
+                _editItem.MrnSourcePath = normalizedPath;
+                break;
+            case PathPickTarget.EventTime:
+                _editItem.EventStartTimeSourcePath = normalizedPath;
+                break;
+            case PathPickTarget.VisitNo:
+                _editItem.VisitNoSourcePath = normalizedPath;
+                break;
+            case PathPickTarget.InpatientNo:
+                _editItem.InpatientNoSourcePath = normalizedPath;
+                break;
+            case PathPickTarget.SourceMessageId:
+                _editItem.SourceMessageIdPath = normalizedPath;
+                break;
+            case PathPickTarget.MainRecordArray:
+                _editItem.MainRecordArrayPath = SubCardPathHelper.NormalizeArrayContainerPath(path);
+                break;
+            case PathPickTarget.FilterRule:
+                if (_pickFilterRuleIndex >= 0 && _pickFilterRuleIndex < _editFilterRules.Count)
+                    _editFilterRules[_pickFilterRuleIndex].SourcePath = normalizedPath;
+                break;
+            case PathPickTarget.MatchRule:
+                if (_pickMatchRuleIndex >= 0 && _pickMatchRuleIndex < _editMatchRules.Count)
+                    _editMatchRules[_pickMatchRuleIndex].SourcePath = normalizedPath;
+                break;
+            case PathPickTarget.IdempotentKeyPart:
+                if (_pickIdempotentKeyPartIndex >= 0 && _pickIdempotentKeyPartIndex < _editIdempotentKeyParts.Count)
+                    _editIdempotentKeyParts[_pickIdempotentKeyPartIndex].SourcePath = normalizedPath;
+                break;
+        }
+
+        var currentTargetIndex = _pathPickTarget switch
+        {
+            PathPickTarget.FilterRule => _pickFilterRuleIndex,
+            PathPickTarget.MatchRule => _pickMatchRuleIndex,
+            PathPickTarget.IdempotentKeyPart => _pickIdempotentKeyPartIndex,
+            _ => -1
+        };
+
+        SetJsonTreeSelection(_pathPickTarget == PathPickTarget.MainRecordArray
+            ? BuildArrayPathTreeSelectionPath(GetPathSelection(_pathPickTarget, currentTargetIndex))
+            : BuildJsonTreeSelectionPath(GetPathSelection(_pathPickTarget, currentTargetIndex)));
+    }
+
+    private async Task Save()
+    {
+        if (_editItem == null || string.IsNullOrWhiteSpace(_editItem.TranCode))
+        {
+            inj_snackbar.Add("事件代码不能为空", Severity.Warning);
+            return;
+        }
+
+        // 启用时校验关键路径
+        if (_editItem.IsEnabled)
+        {
+            var errors = ConfigSvc.ValidateInterfaceConfig(_editItem);
+            if (errors.Count > 0)
+            {
+                foreach (var err in errors)
+                    inj_snackbar.Add(err, Severity.Error);
+                return;
+            }
+        }
+
+        try
+        {
+            if (_editItem.HandlerType != HandlerType.Custom)
+                _editItem.HandlerName = null;
+
+            if (_editItem.HandlerType == HandlerType.GenericQuestionWriteBack &&
+                _editItem.MissingEventIdentityPolicy == MissingEventIdentityPolicy.DegradeToPatientOnly)
+            {
+                _editItem.MissingEventIdentityPolicy = MissingEventIdentityPolicy.Fail;
+            }
+
+            _editItem.MainRecordArrayPath = string.IsNullOrWhiteSpace(_editItem.MainRecordArrayPath)
+                ? null
+                : SubCardPathHelper.NormalizeArrayContainerPath(_editItem.MainRecordArrayPath);
+
+            _editItem.MrnSourcePath = NormalizePickedPath(_editItem.MrnSourcePath);
+            _editItem.EventStartTimeSourcePath = NormalizePickedPath(_editItem.EventStartTimeSourcePath);
+            _editItem.VisitNoSourcePath = NormalizePickedPath(_editItem.VisitNoSourcePath);
+            _editItem.InpatientNoSourcePath = NormalizePickedPath(_editItem.InpatientNoSourcePath);
+            _editItem.SourceMessageIdPath = NormalizePickedPath(_editItem.SourceMessageIdPath);
+
+            foreach (var rule in _editFilterRules)
+                rule.SourcePath = NormalizePickedPath(rule.SourcePath);
+
+            foreach (var rule in _editMatchRules)
+                rule.SourcePath = NormalizePickedPath(rule.SourcePath);
+
+            foreach (var part in _editIdempotentKeyParts)
+                part.SourcePath = NormalizePickedPath(part.SourcePath);
+
+            await using var db = await ContextFactory.CreateDbContextAsync();
+
+            if (_isNew)
+            {
+                _editItem.IntegrationProjectCode ??= CurrentIntegrationProjectCode;
+                db.EsbInterfaceConfigs.Add(_editItem);
+            }
+            else
+            {
+                var existing = await db.EsbInterfaceConfigs.FindAsync(_editItem.Id);
+                if (existing != null)
+                {
+                    existing.TranCode = _editItem.TranCode;
+                    existing.TranName = _editItem.TranName;
+                    existing.IsEnabled = _editItem.IsEnabled;
+                    existing.HandlerType = _editItem.HandlerType;
+                    existing.HandlerName = _editItem.HandlerName;
+                    existing.AllowMultipleMatch = _editItem.AllowMultipleMatch;
+                    existing.ReceiveMode = _editItem.ReceiveMode;
+                    existing.LicenseCode = _editItem.LicenseCode;
+                    existing.EventTypeName = _editItem.EventTypeName;
+                    existing.Description = _editItem.Description;
+                    existing.SortOrder = _editItem.SortOrder;
+                    existing.MrnSourcePath = _editItem.MrnSourcePath;
+                    existing.EventStartTimeSourcePath = _editItem.EventStartTimeSourcePath;
+                    existing.VisitNoSourcePath = _editItem.VisitNoSourcePath;
+                    existing.InpatientNoSourcePath = _editItem.InpatientNoSourcePath;
+                    existing.SourceMessageIdPath = _editItem.SourceMessageIdPath;
+                    existing.MainRecordArrayPath = _editItem.MainRecordArrayPath;
+                    existing.AllowMissingEventTime = _editItem.AllowMissingEventTime;
+                    existing.ResponseMode = _editItem.ResponseMode;
+                    existing.MissingEventIdentityPolicy = _editItem.MissingEventIdentityPolicy;
+                    existing.SampleJson = _editItem.SampleJson;
+                    existing.IntegrationProjectCode = _editItem.IntegrationProjectCode;
+                }
+            }
+
+            await db.SaveChangesAsync();
+            await SyncFilterRulesAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
+            await SyncMatchRulesAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
+            await SyncIdempotentKeyPartsAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
+
+            var savedTranCode = _editItem.TranCode;
+            var openWizardAfterSave = _openWizardAfterCreateFromMessageSave;
+            ConfigSvc.ClearCache();
+            _dialogVisible = false;
+            _openWizardAfterCreateFromMessageSave = false;
+            inj_snackbar.Add("保存成功", Severity.Success);
+            await LoadDataAsync();
+
+            if (openWizardAfterSave)
+            {
+                var confirmed = await inj_dialogService.ShowMessageBox(
+                    "继续配置工作台",
+                    "接口配置已创建，是否进入接口配置工作台继续配置？",
+                    yesText: "进入工作台",
+                    cancelText: "暂不进入");
+
+                if (confirmed == true)
+                {
+                    inj_navigationManager.NavigateTo($"/config/wizard?tranCode={Uri.EscapeDataString(savedTranCode)}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RunAiAnalysis()
+    {
+        if (string.IsNullOrWhiteSpace(_aiSampleJson))
+        {
+            inj_snackbar.Add("请粘贴 JSON 示例", Severity.Warning);
+            return;
+        }
+
+        // 校验 JSON 格式
+        try
+        {
+            var token = Newtonsoft.Json.Linq.JToken.Parse(_aiSampleJson);
+            if (token is not Newtonsoft.Json.Linq.JObject && token is not Newtonsoft.Json.Linq.JArray)
+            {
+                inj_snackbar.Add("JSON 格式无效: 根节点必须是对象或数组", Severity.Error);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"JSON 格式无效: {ex.Message}", Severity.Error);
+            return;
+        }
+
+        _aiAnalyzing = true;
+        StateHasChanged();
+
+        try
+        {
+            await LoadEventTypesAsync();
+            var result = await LlmService.AnalyzeInterfaceConfigAsync(_aiSampleJson, _aiDocDescription, _eventTypes, CancellationToken.None);
+            if (result == null)
+            {
+                inj_snackbar.Add("AI 未返回有效结果，请检查 JSON 或重试", Severity.Warning);
+                return;
+            }
+
+            // 创建新接口配置，填入 LLM 结果（按 MaxLength 截断）
+            _editItem = new EsbInterfaceConfig
+            {
+                IsEnabled = true,
+                TranCode = Truncate(result.TranCode, 20),
+                TranName = Truncate(result.TranName, 100),
+                EventTypeName = Truncate(result.EventTypeName, 100),
+                MainRecordArrayPath = Truncate(result.MainRecordArrayPath, 500),
+                MrnSourcePath = Truncate(result.MrnSourcePath, 500),
+                EventStartTimeSourcePath = Truncate(result.EventStartTimeSourcePath, 500),
+                Description = Truncate(result.Description, 500),
+                SampleJson = _aiSampleJson,
+            };
+            _editFilterRules = [];
+            _editMatchRules = [];
+            _editIdempotentKeyParts = [];
+            ResetPathPickState();
+            PrepareDialogLayout();
+            _isNew = true;
+            await LoadEventTypesAsync();
+
+            // 关闭 AI 对话框，打开编辑对话框
+            _aiDialogVisible = false;
+            _dialogVisible = true;
+            inj_snackbar.Add("AI 分析完成，请审核并修改配置", Severity.Success);
+        }
+        catch (HttpRequestException ex)
+        {
+            inj_snackbar.Add($"LLM 服务请求失败: {ex.Message}", Severity.Error);
+        }
+        catch (TimeoutException ex)
+        {
+            inj_snackbar.Add(ex.Message, Severity.Warning);
+        }
+        catch (TaskCanceledException)
+        {
+            inj_snackbar.Add("LLM 请求超时，请稍后重试", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"AI 分析出错: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _aiAnalyzing = false;
+        }
+    }
+
+    private static string Truncate(string? value, int maxLength)
+        => string.IsNullOrEmpty(value) ? "" : value.Length <= maxLength ? value : value[..maxLength];
+
+    private async Task SyncFilterRulesAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var oldRules = await db.EsbFilterRules
+            .Where(r => r.TranCode == tranCode && r.MappingId == null && r.IntegrationProjectCode == integrationProjectCode)
+            .ToListAsync();
+        db.EsbFilterRules.RemoveRange(oldRules);
+
+        foreach (var (rule, index) in _editFilterRules.Select((r, i) => (r, i)))
+        {
+            db.EsbFilterRules.Add(new EsbFilterRule
+            {
+                TranCode = tranCode,
+                SourcePath = rule.SourcePath,
+                RuleGroup = Math.Max(1, rule.RuleGroup),
+                Operator = rule.Operator,
+                CompareValue = rule.CompareValue,
+                MappingId = null,
+                FilterScope = rule.FilterScope,
+                IsEnabled = rule.IsEnabled,
+                SortOrder = index,
+                Description = rule.Description,
+                IntegrationProjectCode = integrationProjectCode,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SyncMatchRulesAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var oldRules = await db.EsbInterfaceMatchRules
+            .Where(r => r.TranCode == tranCode && r.IntegrationProjectCode == integrationProjectCode)
+            .ToListAsync();
+        db.EsbInterfaceMatchRules.RemoveRange(oldRules);
+
+        foreach (var (rule, index) in _editMatchRules.Select((r, i) => (r, i)))
+        {
+            db.EsbInterfaceMatchRules.Add(new EsbInterfaceMatchRule
+            {
+                TranCode = tranCode,
+                MatchGroup = rule.MatchGroup <= 0 ? 1 : rule.MatchGroup,
+                SourcePath = rule.SourcePath,
+                Operator = string.IsNullOrWhiteSpace(rule.Operator) ? "eq" : rule.Operator,
+                CompareValue = rule.CompareValue ?? "",
+                IsEnabled = rule.IsEnabled,
+                SortOrder = index,
+                Description = rule.Description,
+                IntegrationProjectCode = integrationProjectCode,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SyncIdempotentKeyPartsAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var oldParts = await db.EsbIdempotentKeyParts
+            .Where(p => p.TranCode == tranCode && p.IntegrationProjectCode == integrationProjectCode)
+            .ToListAsync();
+        db.EsbIdempotentKeyParts.RemoveRange(oldParts);
+
+        foreach (var (part, index) in _editIdempotentKeyParts.Select((p, i) => (p, i)))
+        {
+            db.EsbIdempotentKeyParts.Add(new EsbIdempotentKeyPart
+            {
+                TranCode = tranCode,
+                SourcePath = part.SourcePath,
+                LiteralValue = part.LiteralValue,
+                DefaultValue = part.DefaultValue,
+                SortOrder = index,
+                IsEnabled = part.IsEnabled,
+                Description = part.Description,
+                IntegrationProjectCode = integrationProjectCode,
+            });
+        }
+
+        await db.SaveChangesAsync();
+    }
+
+    private async Task Delete(EsbInterfaceConfig item)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox("确认删除",
+            $"确定要删除接口 {item.TranCode} - {item.TranName} 吗？", yesText: "删除", cancelText: "取消");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var entity = await db.EsbInterfaceConfigs.FindAsync(item.Id);
+            if (entity != null)
+            {
+                var oldFilterRules = await db.EsbFilterRules
+                    .Where(r => r.TranCode == item.TranCode && r.MappingId == null && r.IntegrationProjectCode == item.IntegrationProjectCode)
+                    .ToListAsync();
+                var oldMatchRules = await db.EsbInterfaceMatchRules
+                    .Where(r => r.TranCode == item.TranCode && r.IntegrationProjectCode == item.IntegrationProjectCode)
+                    .ToListAsync();
+                var oldIdempotentParts = await db.EsbIdempotentKeyParts
+                    .Where(p => p.TranCode == item.TranCode && p.IntegrationProjectCode == item.IntegrationProjectCode)
+                    .ToListAsync();
+
+                db.EsbFilterRules.RemoveRange(oldFilterRules);
+                db.EsbInterfaceMatchRules.RemoveRange(oldMatchRules);
+                db.EsbIdempotentKeyParts.RemoveRange(oldIdempotentParts);
+                db.EsbInterfaceConfigs.Remove(entity);
+                await db.SaveChangesAsync();
+                ConfigSvc.ClearCache();
+                inj_snackbar.Add("删除成功", Severity.Success);
+                await LoadDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败: {ex.Message}", Severity.Error);
+        }
+    }
+}

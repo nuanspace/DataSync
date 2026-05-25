@@ -1,0 +1,68 @@
+﻿@* 支持从 JSON 树聚焦选取的路径输入框 *@
+@* 聚焦/点击自动激活为路径选取目标，外部点击 JSON 树节点即可填入 *@
+
+<div @onclick="HandleClick"
+     @onfocusin="HandleFocusIn"
+     @onpointerdown="HandlePointerDown"
+     @onpointerup="HandlePointerUp"
+     @onclick:stopPropagation="true"
+     class="@(IsActive ? "path-pick-field active" : "path-pick-field")">
+    <MudTextField T="string" Value="@(Value ?? "")"
+                  ValueChanged="@((string v) => ValueChanged.InvokeAsync(v))"
+                  Label="@Label" HelperText="@HelperText"
+                  Margin="Margin.Dense" Variant="Variant.Outlined" Style="@Style" />
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public string? HelperText { get; set; }
+    [Parameter] public string? Style { get; set; }
+    /// <summary>
+    /// 当前是否为活跃的路径选取目标
+    /// </summary>
+    [Parameter] public bool IsActive { get; set; }
+    /// <summary>
+    /// 聚焦/点击时通知父组件"我是当前选取目标"
+    /// </summary>
+    [Parameter] public EventCallback OnActivated { get; set; }
+
+    private bool _skipNextFocusActivation;
+
+    private async Task HandleFocusIn()
+    {
+        if (_skipNextFocusActivation)
+        {
+            _skipNextFocusActivation = false;
+            return;
+        }
+
+        await ActivateAsync();
+    }
+
+    private async Task HandleClick()
+    {
+        await ActivateAsync();
+    }
+
+    private async Task HandlePointerDown()
+    {
+        _skipNextFocusActivation = true;
+        await ActivateAsync();
+    }
+
+    private Task HandlePointerUp()
+    {
+        _skipNextFocusActivation = false;
+        return Task.CompletedTask;
+    }
+
+    private async Task ActivateAsync()
+    {
+        if (OnActivated.HasDelegate)
+        {
+            await OnActivated.InvokeAsync();
+        }
+    }
+}

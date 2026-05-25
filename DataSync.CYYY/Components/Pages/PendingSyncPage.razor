@@ -1,0 +1,313 @@
+﻿@page "/pending-sync"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>待同步对象</PageTitle>
+
+<div class="pending-sync-toolbar">
+    <MudText Typo="Typo.h5">待同步对象</MudText>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="SearchAsync">
+        刷新
+    </MudButton>
+</div>
+
+@if (HasQuickFilter)
+{
+    <MudPaper Class="pending-sync-quick-filter pa-3 mb-4" Elevation="0">
+        <div class="pending-sync-quick-filter-text">
+            <MudText Typo="Typo.body2">当前快捷筛选</MudText>
+            @if (!string.IsNullOrWhiteSpace(_filterTaskCode))
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+                    任务：@GetTaskName(_filterTaskCode)
+                </MudChip>
+            }
+            @if (!string.IsNullOrWhiteSpace(_filterStatus))
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info">
+                    状态：@GetStatusLabel(_filterStatus)
+                </MudChip>
+            }
+        </div>
+        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearQuickFilter">
+            清除
+        </MudButton>
+    </MudPaper>
+}
+
+<MudPaper Class="pa-4 mb-4" Elevation="1">
+    <MudGrid>
+        <MudItem xs="12" sm="3">
+            <MudSelect @bind-Value="_filterTaskCode" Label="任务" Clearable="true"
+                       Variant="Variant.Outlined" Dense="true">
+                @foreach (var task in _tasks)
+                {
+                    <MudSelectItem Value="@task.Code">@task.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="3">
+            <MudSelect @bind-Value="_filterStatus" Label="状态" Clearable="true"
+                       Variant="Variant.Outlined" Dense="true">
+                @foreach (var status in _statuses)
+                {
+                    <MudSelectItem Value="@status.Value">@status.Label</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudTextField @bind-Value="_filterKeyword" Label="患者 / 对象键 / 记录键 / 采集源 / 错误关键字"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="2" Class="d-flex align-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">查询</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable ServerData="LoadServerData" @ref="_table" Dense="true" Hover="true" Bordered="true"
+          Loading="_loading" LoadingProgressColor="Color.Primary">
+    <HeaderContent>
+        <MudTh>执行明细</MudTh>
+        <MudTh>更新时间</MudTh>
+        <MudTh>任务</MudTh>
+        <MudTh>患者</MudTh>
+        <MudTh>就诊号</MudTh>
+        <MudTh>采集源</MudTh>
+        <MudTh>对象键</MudTh>
+        <MudTh>触发记录键</MudTh>
+        <MudTh>状态</MudTh>
+        <MudTh>重试</MudTh>
+        <MudTh>最近开始</MudTh>
+        <MudTh>最近完成</MudTh>
+        <MudTh>最后错误</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="() => OpenDetails(context.Id)">
+                查看明细
+            </MudButton>
+        </MudTd>
+        <MudTd>@context.UpdatedAt.ToString("MM-dd HH:mm:ss")</MudTd>
+        <MudTd>@GetTaskName(context.TaskCode)</MudTd>
+        <MudTd>@FormatPatient(context)</MudTd>
+        <MudTd>@FormatPatVisitSn(context)</MudTd>
+        <MudTd>@context.SourceServerCode</MudTd>
+        <MudTd>
+            <MudTooltip Arrow="true">
+                <TooltipContent>
+                    <div class="pending-sync-multiline">@FormatObjectKey(context)</div>
+                </TooltipContent>
+                <ChildContent>
+                    <div class="pending-sync-ellipsis" @onclick="() => CopyToClipboardAsync(FormatObjectKey(context))">
+                        @FormatObjectKey(context)
+                    </div>
+                </ChildContent>
+            </MudTooltip>
+        </MudTd>
+        <MudTd>
+            <MudTooltip Arrow="true">
+                <TooltipContent>
+                    <div class="pending-sync-multiline">@context.SourceRecordKey</div>
+                </TooltipContent>
+                <ChildContent>
+                    <div class="pending-sync-ellipsis" @onclick="() => CopyToClipboardAsync(context.SourceRecordKey)">
+                        @context.SourceRecordKey
+                    </div>
+                </ChildContent>
+            </MudTooltip>
+        </MudTd>
+        <MudTd>
+            <MudChip T="string" Color="@GetStatusColor(context.Status)" Size="Size.Small">
+                @GetStatusLabel(context.Status)
+            </MudChip>
+        </MudTd>
+        <MudTd>@context.RetryCount</MudTd>
+        <MudTd>@FormatDateTime(context.LastStartedAt)</MudTd>
+        <MudTd>@FormatDateTime(context.LastCompletedAt)</MudTd>
+        <MudTd>
+            @if (!string.IsNullOrWhiteSpace(context.LastError))
+            {
+                <MudTooltip Arrow="true">
+                    <TooltipContent>
+                        <div class="pending-sync-multiline">@context.LastError</div>
+                    </TooltipContent>
+                    <ChildContent>
+                        <div class="pending-sync-ellipsis" @onclick="() => CopyToClipboardAsync(context.LastError!)">
+                            @context.LastError
+                        </div>
+                    </ChildContent>
+                </MudTooltip>
+            }
+        </MudTd>
+    </RowTemplate>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new int[] { 20, 50, 100 }" />
+    </PagerContent>
+</MudTable>
+
+@code {
+    private sealed class StatusOption
+    {
+        public string Value { get; init; } = "";
+        public string Label { get; init; } = "";
+    }
+
+    private MudTable<PendingSyncItem>? _table;
+    private List<SyncTask> _tasks = [];
+    private readonly List<StatusOption> _statuses =
+    [
+        new() { Value = PendingSyncStatuses.Pending, Label = "待执行" },
+        new() { Value = PendingSyncStatuses.Waiting, Label = "等待条件" },
+        new() { Value = PendingSyncStatuses.Running, Label = "执行中" },
+        new() { Value = PendingSyncStatuses.Failed, Label = "失败" },
+        new() { Value = PendingSyncStatuses.Success, Label = "成功" },
+        new() { Value = PendingSyncStatuses.Skipped, Label = "跳过" }
+    ];
+    private string? _filterTaskCode;
+    private string? _filterStatus;
+    private string? _filterKeyword;
+    private bool _loading;
+
+    [SupplyParameterFromQuery(Name = "task")]
+    public string? QueryTaskCode { get; set; }
+
+    [SupplyParameterFromQuery(Name = "status")]
+    public string? QueryStatus { get; set; }
+
+    private bool HasQuickFilter
+        => !string.IsNullOrWhiteSpace(QueryTaskCode) || !string.IsNullOrWhiteSpace(QueryStatus);
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _tasks = await GetAllTasksAsync();
+        ApplyQueryFilters();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var filterChanged = ApplyQueryFilters();
+        if (filterChanged && _table != null)
+            await _table.ReloadServerData();
+
+        await base.OnParametersSetAsync();
+    }
+
+    private async Task<List<SyncTask>> GetAllTasksAsync()
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        return await db.SyncTasks
+            .AsNoTracking()
+            .OrderBy(task => task.Id)
+            .ToListAsync(CancellationToken);
+    }
+
+    private async Task<TableData<PendingSyncItem>> LoadServerData(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
+        {
+            var logService = new SyncLogService(ContextFactory);
+            var (items, total) = await logService.QueryPendingItemsAsync(
+                _filterTaskCode,
+                _filterStatus,
+                _filterKeyword,
+                state.Page + 1,
+                state.PageSize,
+                ct);
+
+            return new TableData<PendingSyncItem> { Items = items, TotalItems = total };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_table != null)
+            await _table.ReloadServerData();
+    }
+
+    private bool ApplyQueryFilters()
+    {
+        var taskCode = string.IsNullOrWhiteSpace(QueryTaskCode) ? null : QueryTaskCode;
+        var status = NormalizeStatus(QueryStatus);
+        var changed = _filterTaskCode != taskCode || _filterStatus != status;
+
+        _filterTaskCode = taskCode;
+        _filterStatus = status;
+        return changed;
+    }
+
+    private static string? NormalizeStatus(string? status)
+        => status switch
+        {
+            PendingSyncStatuses.Pending => status,
+            PendingSyncStatuses.Waiting => status,
+            PendingSyncStatuses.Running => status,
+            PendingSyncStatuses.Failed => status,
+            PendingSyncStatuses.Success => status,
+            PendingSyncStatuses.Skipped => status,
+            _ => null
+        };
+
+    private string GetTaskName(string taskCode)
+        => _tasks.FirstOrDefault(task => task.Code == taskCode)?.Name ?? taskCode;
+
+    private static string FormatDateTime(DateTime? value)
+        => value?.ToString("MM-dd HH:mm:ss") ?? "-";
+
+    private static string FormatPatient(PendingSyncItem item)
+    {
+        if (string.IsNullOrWhiteSpace(item.PatName))
+            return string.IsNullOrWhiteSpace(item.HisPatId) ? "-" : item.HisPatId;
+
+        return string.IsNullOrWhiteSpace(item.HisPatId)
+            ? item.PatName
+            : $"{item.PatName} ({item.HisPatId})";
+    }
+
+    private static string FormatPatVisitSn(PendingSyncItem item)
+        => string.IsNullOrWhiteSpace(item.PatVisitSn) ? "-" : item.PatVisitSn;
+
+    private static string FormatObjectKey(PendingSyncItem item)
+        => string.IsNullOrWhiteSpace(item.ObjectKey) ? "-" : item.ObjectKey;
+
+    private static string GetStatusLabel(string status)
+        => status switch
+        {
+            PendingSyncStatuses.Pending => "待执行",
+            PendingSyncStatuses.Waiting => "等待条件",
+            PendingSyncStatuses.Running => "执行中",
+            PendingSyncStatuses.Failed => "失败",
+            PendingSyncStatuses.Success => "成功",
+            PendingSyncStatuses.Skipped => "跳过",
+            _ => status
+        };
+
+    private static Color GetStatusColor(string status)
+        => status switch
+        {
+            PendingSyncStatuses.Pending => Color.Warning,
+            PendingSyncStatuses.Waiting => Color.Info,
+            PendingSyncStatuses.Running => Color.Primary,
+            PendingSyncStatuses.Failed => Color.Error,
+            PendingSyncStatuses.Success => Color.Success,
+            PendingSyncStatuses.Skipped => Color.Default,
+            _ => Color.Default
+        };
+
+    private void OpenDetails(long id)
+        => inj_navigationManager.NavigateTo($"/pending-sync/{id}");
+
+    private void ClearQuickFilter()
+        => inj_navigationManager.NavigateTo("/pending-sync", replace: true);
+
+    private async Task CopyToClipboardAsync(string text)
+    {
+        await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        inj_snackbar.Add("已复制到剪贴板", Severity.Success);
+    }
+}

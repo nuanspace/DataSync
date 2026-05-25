@@ -1,0 +1,79 @@
+﻿@implements IAsyncDisposable
+
+@code {
+    [Inject]
+    protected IDbContextFactory<DataSyncDbContext> ContextFactory { get; set; } = default!;
+
+    [Inject]
+    protected IntegrationProjectService IntegrationProjectService { get; set; } = default!;
+
+    private readonly CancellationTokenSource _cancellationTokenSource = new();
+    protected CancellationToken CancellationToken => _cancellationTokenSource.Token;
+    protected string CurrentIntegrationProjectCode { get; private set; } = "DEFAULT";
+    protected string? CurrentIntegrationProjectName { get; private set; }
+    protected bool IsDefaultIntegrationProject =>
+        string.Equals(CurrentIntegrationProjectCode, "DEFAULT", StringComparison.OrdinalIgnoreCase);
+    protected virtual bool RequiresIntegrationProject => true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (RequiresIntegrationProject)
+        {
+            var currentProject = await IntegrationProjectService.GetCurrentProjectAsync();
+            CurrentIntegrationProjectCode = currentProject?.ProjectCode ?? await IntegrationProjectService.GetCurrentProjectCodeAsync();
+            CurrentIntegrationProjectName = currentProject?.ProjectName ?? CurrentIntegrationProjectCode;
+        }
+
+        await OnPageInitializedAsync();
+        await base.OnInitializedAsync();
+    }
+
+    protected virtual Task OnPageInitializedAsync() => Task.CompletedTask;
+
+    protected IQueryable<T> ApplyCurrentProjectScope<T>(IQueryable<T> query, bool includeLegacyDefault = true)
+        where T : class
+    {
+        if (includeLegacyDefault && IsDefaultIntegrationProject)
+            return query.WhereInProjectOrGlobal(CurrentIntegrationProjectCode);
+
+        return query.WhereInProjectOnly(CurrentIntegrationProjectCode);
+    }
+
+    protected List<T> SelectEffectiveProjectItems<T, TKey>(
+        IEnumerable<T> items,
+        Func<T, TKey> keySelector,
+        Func<T, string?> projectCodeSelector)
+        where TKey : notnull
+    {
+        return items
+            .GroupBy(keySelector)
+            .Select(group => group
+                .OrderByDescending(item => GetProjectScopePriority(projectCodeSelector(item)))
+                .First())
+            .ToList();
+    }
+
+    protected int GetProjectScopePriority(string? integrationProjectCode)
+    {
+        if (string.Equals(integrationProjectCode, CurrentIntegrationProjectCode, StringComparison.OrdinalIgnoreCase))
+            return 2;
+
+        if (IsDefaultIntegrationProject && string.IsNullOrWhiteSpace(integrationProjectCode))
+            return 1;
+
+        return 0;
+    }
+
+    public virtual async ValueTask DisposeAsync()
+    {
+        try
+        {
+            _cancellationTokenSource.Cancel();
+            await Task.Delay(100);
+        }
+        finally
+        {
+            _cancellationTokenSource.Dispose();
+        }
+    }
+}

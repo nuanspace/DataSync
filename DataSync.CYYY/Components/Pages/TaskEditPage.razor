@@ -1,0 +1,1990 @@
+﻿@page "/tasks/create"
+@page "/tasks/edit/{Id:int}"
+@inherits BasePage
+@inject LocalQueryService inj_localQueryService
+@inject TaskManagementService inj_taskManagementService
+@rendermode InteractiveServer
+
+<PageTitle>@(_isEdit ? $"编辑任务 - {_task.Name}" : "新增任务")</PageTitle>
+
+<div class="task-edit-page">
+    <div class="task-edit-toolbar task-edit-toolbar--page">
+        <div class="task-edit-heading">
+            <div class="task-edit-eyebrow">同步任务编排</div>
+            <MudText Typo="Typo.h4" Class="task-edit-title">@(_isEdit ? $"编辑任务 - {_task.Name}" : "新增任务")</MudText>
+        </div>
+        <div class="task-edit-toolbar-actions">
+            <span class="task-state-pill @(_task.Enabled ? "is-enabled" : "is-disabled")">@(_task.Enabled ? "已启用" : "未启用")</span>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="BackToTaskList">
+                返回列表
+            </MudButton>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+    }
+    else
+    {
+        var placeholders = ExtractPlaceholders();
+        var interfaceGroups = GetInterfaceGroups();
+        var workspaceSummary = GetInterfaceWorkspaceSummary();
+
+        <div class="task-edit-actions task-edit-actions--sticky">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="Save" Disabled="_saving">
+                @(_saving ? "保存中..." : "保存")
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="BackToTaskList">
+                返回列表
+            </MudButton>
+        </div>
+
+        <div class="task-overview-grid">
+            <div class="task-overview-item">
+                <span class="overview-label">患者来源</span>
+                <strong class="overview-value">@GetTriggerSourceSummary()</strong>
+            </div>
+            <div class="task-overview-item">
+                <span class="overview-label">接口状态</span>
+                <strong class="overview-value">@GetEnabledInterfaceCount() / @_interfaces.Count</strong>
+            </div>
+            <div class="task-overview-item">
+                <span class="overview-label">执行组</span>
+                <strong class="overview-value">@GetExecutionGroupCount()</strong>
+            </div>
+            <div class="task-overview-item">
+                <span class="overview-label">推送目标</span>
+                <strong class="overview-value">@GetPushTypeSummary()</strong>
+            </div>
+        </div>
+
+        <div class="task-panel-grid">
+            <MudPaper Class="task-panel" Elevation="0">
+                <div class="task-panel-header">
+                    <div>
+                        <div class="task-panel-tag">任务身份</div>
+                        <MudText Typo="Typo.h6">基本信息</MudText>
+                    </div>
+                </div>
+                <MudGrid>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_task.Name" Label="名称" Required="true" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_task.Code" Label="编码" Required="true" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudSelect T="string" Value="_task.TriggerServerCode" ValueChanged="OnTriggerServerCodeChanged"
+                                   Label="患者来源接口" Required="true" Variant="Variant.Outlined">
+                            @foreach (var src in _ingestionSources)
+                            {
+                                <MudSelectItem Value="@src.ServerCode">@src.Name (@src.ServerCode)</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_task.PatientIdField" Label="患者ID字段" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="3">
+                        <MudTextField @bind-Value="_task.VisitSnField" Label="就诊号字段" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudSwitch @bind-Value="_task.Enabled" Label="启用当前任务" Color="Color.Success" />
+                    </MudItem>
+                </MudGrid>
+                <MudExpansionPanels Class="mt-4" Elevation="0">
+                    <MudExpansionPanel Text="高级设置">
+                        <MudGrid>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField @bind-Value="_task.PollingIntervalSeconds" Label="轮询间隔(秒)"
+                                                 Variant="Variant.Outlined" Min="10" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField @bind-Value="_task.PatientConcurrency" Label="患者并发数"
+                                                 Variant="Variant.Outlined" Min="1" />
+                            </MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudNumericField @bind-Value="_task.ApiConcurrency" Label="接口并发数"
+                                                 Variant="Variant.Outlined" Min="1" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                </MudExpansionPanels>
+            </MudPaper>
+
+            <MudPaper Class="task-panel" Elevation="0">
+                <div class="task-panel-header">
+                    <div>
+                        <div class="task-panel-tag">推送策略</div>
+                        <MudText Typo="Typo.h6">推送配置</MudText>
+                    </div>
+                    @if (placeholders.Count > 0)
+                    {
+                        <div class="task-inline-pills">
+                            @foreach (var placeholder in placeholders)
+                            {
+                                <span class="meta-pill">@($"{{{placeholder}}}")</span>
+                            }
+                        </div>
+                    }
+                </div>
+                <MudGrid>
+                    <MudItem xs="12" sm="4">
+                        <MudSelect @bind-Value="_task.PushType" Label="推送方式" Required="true" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@("Api")">Api</MudSelectItem>
+                            <MudSelectItem Value="@("Database")">Database</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="8">
+                        <MudTextField @bind-Value="_task.PushTarget" Label="推送目标" Required="true"
+                                      Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudSwitch T="bool"
+                                   @bind-Value="_task.EnableTriggerRecordPush"
+                                   Label="启用触发记录单独推送"
+                                   Color="Color.Primary" />
+                    </MudItem>
+                    @if (_task.EnableTriggerRecordPush)
+                    {
+                        <MudItem xs="12" sm="8">
+                            <MudTextField @bind-Value="_task.TriggerPushTarget"
+                                          Label="触发记录推送目标"
+                                          Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12" sm="4">
+                            <MudTextField @bind-Value="_task.TriggerPushParams"
+                                          Label="触发记录路由参数(JSON)"
+                                          Variant="Variant.Outlined" />
+                        </MudItem>
+                    }
+                </MudGrid>
+            </MudPaper>
+        </div>
+
+        <MudPaper Class="task-panel task-panel--workspace mt-4" Elevation="0">
+            <div class="task-panel-header task-panel-header--split">
+                <div>
+                    <div class="task-panel-tag">核心配置</div>
+                    <MudText Typo="Typo.h5">关联接口工作台</MudText>
+                </div>
+                <div class="task-panel-actions">
+                    @if (_interfaces.Count > 0)
+                    {
+                        <div class="task-inline-pills task-inline-pills--wrap">
+                            @foreach (var group in interfaceGroups)
+                            {
+                                <span class="stage-pill">执行组 @group.SortOrder · @group.Items.Count 项</span>
+                            }
+                        </div>
+                    }
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddInterface">
+                        添加接口
+                    </MudButton>
+                </div>
+            </div>
+
+            @if (_interfaces.Count > 0)
+            {
+                <div class="task-readiness-grid">
+                    <div class="readiness-card readiness-card--ready">
+                        <span class="readiness-label">可直接执行</span>
+                        <strong class="readiness-value">@workspaceSummary.ReadyCount</strong>
+                    </div>
+                    <div class="readiness-card readiness-card--warning">
+                        <span class="readiness-label">待选接口</span>
+                        <strong class="readiness-value">@workspaceSummary.MissingServerCount</strong>
+                    </div>
+                    <div class="readiness-card readiness-card--warning">
+                        <span class="readiness-label">待定查询</span>
+                        <strong class="readiness-value">@workspaceSummary.MissingQueryCount</strong>
+                    </div>
+                    <div class="readiness-card readiness-card--info">
+                        <span class="readiness-label">待补占位符</span>
+                        <strong class="readiness-value">@workspaceSummary.MissingPushParamCount</strong>
+                    </div>
+                </div>
+            }
+
+            @if (_interfaces.Count == 0)
+            {
+                <div class="task-empty-state">
+                    <MudText Typo="Typo.h6">还没有关联接口</MudText>
+                </div>
+            }
+            else
+            {
+                <MudDropContainer @ref="_dropContainer" T="SyncTaskInterface" Items="_interfaces"
+                                  ItemsSelector="IsItemInDropZone"
+                                  ItemDropped="OnInterfaceDrop"
+                                  Class="task-interface-dropzone">
+                    <ChildContent>
+                        @foreach (var group in interfaceGroups)
+                        {
+                            <div class="task-group-section">
+                                <div class="task-group-header">
+                                    <div>
+                                        <div class="task-group-title">执行组 @group.SortOrder</div>
+                                    </div>
+                                    <div class="task-inline-pills task-inline-pills--wrap">
+                                        <span class="meta-pill">接口 @group.Items.Count</span>
+                                        <span class="meta-pill">必要 @group.Items.Count(i => i.IsRequired)</span>
+                                        <span class="meta-pill">启用 @group.Items.Count(i => i.Enabled)</span>
+                                    </div>
+                                </div>
+                                <MudDropZone T="SyncTaskInterface"
+                                             Identifier="@GetDropZoneIdentifier(group.SortOrder)"
+                                             AllowReorder="true"
+                                             Class="task-interface-zone" />
+                            </div>
+                        }
+                    </ChildContent>
+                    <ItemRenderer>
+                        @{
+                            var missingPushParams = GetMissingPushParamNames(context);
+                        }
+                        <div @key="GetInterfaceRenderKey(context)"
+                             class="interface-card @GetInterfaceCardClass(context) @(context.Enabled ? string.Empty : "interface-card--disabled") @(IsPendingNewInterface(context) ? "interface-card--new" : string.Empty) @(IsSortOrderAnimating(context) ? "interface-card--moving" : string.Empty)"
+                             data-interface-key="@context.InterfaceKey"
+                             tabindex="-1">
+                            <div class="interface-card-rail">
+                                <MudIcon Icon="@Icons.Material.Filled.DragIndicator" Size="Size.Small"
+                                         Class="cursor-grab interface-drag-icon" />
+                                <span class="interface-order-pill">#@GetInterfaceGroupPosition(context)</span>
+                                <span class="stage-pill stage-pill--solid">组 @context.SortOrder</span>
+                            </div>
+
+                            <div class="interface-card-body">
+                                <div class="interface-card-head">
+                                    <div class="interface-card-title-block">
+                                        <MudAutocomplete T="string"
+                                                         Value="context.ServerCode"
+                                                         Label="目标接口"
+                                                         Variant="Variant.Outlined"
+                                                         Margin="Margin.Dense"
+                                                         SearchFunc="@SearchDataLakeInterfaces"
+                                                         ToStringFunc="@(code => FormatInterfaceDisplay(code))"
+                                                         ValueChanged="@(v => OnInterfaceServerCodeChanged(context, v))"
+                                                          Dense="true"
+                                                          CoerceValue="true" />
+                                        @if (IsChildInterface(context) || HasChildInterfaces(context))
+                                        {
+                                            <div class="interface-card-caption-row">
+                                            @if (IsChildInterface(context))
+                                            {
+                                                <span class="interface-link-pill interface-link-pill--child">挂载分支</span>
+                                            }
+                                            else if (HasChildInterfaces(context))
+                                            {
+                                                <span class="interface-link-pill interface-link-pill--root">组合根接口</span>
+                                            }
+                                            </div>
+                                        }
+                                    </div>
+
+                                    <div class="interface-card-switches">
+                                        <MudCheckBox T="bool"
+                                                     Value="context.IsRequired"
+                                                     ValueChanged="@(v => OnInterfaceRequiredChanged(context, v))"
+                                                     Dense="true"
+                                                     Label="必要接口" />
+                                        <MudCheckBox T="bool"
+                                                     Value="context.Enabled"
+                                                     ValueChanged="@(v => OnInterfaceEnabledChanged(context, v))"
+                                                     Dense="true"
+                                                     Label="启用" />
+                                     </div>
+                                 </div>
+
+                                <div class="interface-card-status-row">
+                                    <span class="interface-status-pill @GetInterfaceStatusClass(context)">@GetInterfaceStatusText(context)</span>
+                                    <span class="meta-pill">@GetInterfaceRoleSummary(context)</span>
+                                    @if (missingPushParams.Count > 0)
+                                    {
+                                        <span class="meta-pill meta-pill--warning">占位符待补 @missingPushParams.Count</span>
+                                    }
+                                </div>
+
+                                @if (IsChildInterface(context))
+                                {
+                                    <div class="interface-linkage interface-linkage--child">
+                                        <span class="interface-linkage-label">组合关系</span>
+                                        <div class="interface-linkage-row">
+                                            <span class="interface-linkage-item">@GetChildParentSummary(context)</span>
+                                            <span class="interface-linkage-item">@GetChildSourceSummary(context)</span>
+                                            <span class="interface-linkage-item">@GetChildMatchSummary(context)</span>
+                                            <span class="interface-linkage-item">@GetChildMountSummary(context)</span>
+                                            <span class="interface-linkage-item">@GetChildRouteSummary(context)</span>
+                                        </div>
+                                    </div>
+                                }
+                                else if (HasChildInterfaces(context))
+                                {
+                                    <div class="interface-linkage">
+                                        <span class="interface-linkage-label">组合链路</span>
+                                        <div class="interface-branch-list">
+                                            @foreach (var child in GetChildInterfaces(context))
+                                            {
+                                                <span class="interface-branch-pill">@GetChildBranchPreview(child)</span>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+
+                                <div class="interface-card-grid">
+                                    <MudTextField @bind-Value="context.QueryField"
+                                                  Label="@GetQueryFieldLabel(context)"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                    @if (IsChildInterface(context))
+                                    {
+                                        <div class="interface-inline-summary">
+                                            <span class="interface-inline-summary-label">上游取值</span>
+                                            <strong class="interface-inline-summary-value">@GetChildSourceSummary(context)</strong>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <MudSelect T="string"
+                                                   @bind-Value="context.QueryValueField"
+                                                   Label="触发记录取值字段"
+                                                   Variant="Variant.Outlined"
+                                                   Margin="Margin.Dense"
+                                                   Dense="true">
+                                            <MudSelectItem T="string" Value="@((string?)null)">@GetAutoQueryValueLabel(context)</MudSelectItem>
+                                            @foreach (var col in GetTriggerSourceColumns())
+                                            {
+                                                <MudSelectItem Value="@col">@col</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    }
+                                    <MudNumericField T="int"
+                                                     Value="context.SortOrder"
+                                                     ValueChanged="@(v => OnInterfaceSortOrderChanged(context, v))"
+                                                     Label="第几步执行"
+                                                     Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense"
+                                                     Disabled="@IsChildInterface(context)"
+                                                     Min="1" />
+                                </div>
+
+                                <div class="interface-card-footer">
+                                    <span class="interface-mapping">查询映射：@GetQueryMappingPreview(context)</span>
+                                    <div class="task-inline-pills task-inline-pills--wrap">
+                                        <span class="meta-pill">注入字段 @GetInjectFieldCount(context)</span>
+                                        <span class="meta-pill">路由参数 @GetPushParamCompletionText(context)</span>
+                                        <span class="meta-pill">过滤条件 @GetFilterConditionCount(context)</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="interface-card-actions">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.Settings"
+                                           OnClick="@(() => OpenConfigDialog(context))">
+                                    补充配置
+                                </MudButton>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                               OnClick="@(() => RemoveInterface(context))" />
+                            </div>
+                        </div>
+                    </ItemRenderer>
+                </MudDropContainer>
+
+                <div class="task-interface-add">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddInterface">
+                        添加接口
+                    </MudButton>
+                </div>
+            }
+        </MudPaper>
+
+        <MudPaper Class="task-panel mt-4" Elevation="0">
+            <div class="task-panel-header task-panel-header--split">
+                <div>
+                    <div class="task-panel-tag">触发筛选</div>
+                    <MudText Typo="Typo.h6">过滤条件</MudText>
+                </div>
+                <div class="task-inline-pills">
+                    <span class="meta-pill">逻辑 @_conditionConfig.Logic</span>
+                    <span class="meta-pill">规则 @_conditionConfig.Rules.Count</span>
+                </div>
+            </div>
+
+            <div class="task-filter-toolbar">
+                <div class="task-filter-controls">
+                    <MudSelect T="string" @bind-Value="_conditionConfig.Logic" Label="条件逻辑" Variant="Variant.Outlined"
+                               Style="max-width: 180px;">
+                        <MudSelectItem Value="@("AND")">AND（全部满足）</MudSelectItem>
+                        <MudSelectItem Value="@("OR")">OR（满足任一）</MudSelectItem>
+                    </MudSelect>
+                    <MudSwitch T="bool" @bind-Value="_conditionConfig.ExcludeSynced" Label="排除已同步" Color="Color.Primary" />
+                </div>
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Add" OnClick="AddRule">
+                    添加规则
+                </MudButton>
+            </div>
+
+            @for (var i = 0; i < _conditionConfig.Rules.Count; i++)
+            {
+                var index = i;
+                var rule = _conditionConfig.Rules[index];
+                <div class="task-rule-row">
+                    <MudGrid Spacing="2">
+                        <MudItem xs="12" sm="3">
+                            <MudSelect T="string" Value="rule.Interface" Label="接口"
+                                       ValueChanged="(v) => OnRuleInterfaceChanged(index, v)"
+                                       Variant="Variant.Outlined" Dense="true">
+                                @foreach (var src in _ingestionSources)
+                                {
+                                    <MudSelectItem Value="@src.ServerCode">@src.Name (@src.ServerCode)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="3">
+                            <MudSelect T="string" @bind-Value="rule.Field" Label="字段"
+                                       Variant="Variant.Outlined" Dense="true">
+                                @foreach (var col in GetColumnsForInterface(rule.Interface))
+                                {
+                                    <MudSelectItem Value="@col">@col</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="2">
+                            <MudSelect T="string" @bind-Value="rule.Mode" Label="模式"
+                                       Variant="Variant.Outlined" Dense="true">
+                                <MudSelectItem Value="@("include")">接受</MudSelectItem>
+                                <MudSelectItem Value="@("exclude")">排除</MudSelectItem>
+                                <MudSelectItem Value="@("not_null")">非空</MudSelectItem>
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="3">
+                            @if (rule.Mode != "not_null")
+                            {
+                                <MudTextField @bind-Value="_ruleValuesText[index]" Label="值"
+                                              Variant="Variant.Outlined" />
+                            }
+                            else
+                            {
+                                <MudTextField T="string" Label="值" Disabled="true" Variant="Variant.Outlined" />
+                            }
+                        </MudItem>
+                        <MudItem xs="12" sm="1" Class="d-flex align-center justify-center">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                           OnClick="() => RemoveRule(index)" />
+                        </MudItem>
+                    </MudGrid>
+                </div>
+            }
+        </MudPaper>
+
+        <MudDialog @bind-Visible="_showConfigDialog" Options="_configDialogOptions">
+            <TitleContent>
+                <div class="config-dialog-title">
+                    <div class="task-panel-tag">接口附加配置</div>
+                    <MudText Typo="Typo.h6">@GetConfigDialogTitle()</MudText>
+                </div>
+            </TitleContent>
+            <DialogContent>
+                @if (_editingConfigInterface != null)
+                {
+                    <div class="task-inline-pills task-inline-pills--wrap config-dialog-pills">
+                        <span class="meta-pill">注入字段 @GetInjectFieldCount(_editingConfigInterface)</span>
+                        <span class="meta-pill">路由参数 @GetPushParamCompletionText(_editingConfigInterface)</span>
+                        <span class="meta-pill">过滤条件 @GetFilterConditionCount(_editingConfigInterface)</span>
+                    </div>
+
+                    @if (!IsChildInterface(_editingConfigInterface))
+                    {
+                        <div class="config-preview">
+                            <span class="config-preview-title">推送目标预览</span>
+                            <span class="config-preview-text">@GetEditingPushTargetPreview()</span>
+                        </div>
+                    }
+
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">组合关系</MudText>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="6">
+                                <MudSelect T="string"
+                                           Value="@GetEditingParentSelectValue()"
+                                           ValueChanged="OnEditingParentInterfaceChanged"
+                                           Label="父接口"
+                                           Variant="Variant.Outlined"
+                                           Margin="Margin.Dense"
+                                           Dense="true">
+                                    <MudSelectItem Value="@string.Empty">无（独立/根接口）</MudSelectItem>
+                                    @foreach (var candidate in GetParentCandidates(_editingConfigInterface))
+                                    {
+                                        <MudSelectItem Value="@candidate.InterfaceKey">@GetInterfaceDisplayName(candidate)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+
+                            @if (IsChildInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editingConfigInterface.ParentResultField"
+                                                  Label="父记录关联值字段"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editingConfigInterface.MountField"
+                                                  Label="挂载到父记录"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                @if (NeedsRouteConfig(_editingConfigInterface))
+                                {
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField @bind-Value="_editingConfigInterface.RouteField"
+                                                      Label="分流字段"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="4">
+                                        <MudSelect T="string" @bind-Value="_editingConfigInterface.RouteOperator"
+                                                   Label="分流条件"
+                                                   Variant="Variant.Outlined"
+                                                   Margin="Margin.Dense"
+                                                   Dense="true">
+                                            <MudSelectItem Value="@("eq")">eq（等于）</MudSelectItem>
+                                            <MudSelectItem Value="@("in")">in（包含）</MudSelectItem>
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="8">
+                                        <MudTextField @bind-Value="_editingConfigInterface.RouteValue"
+                                                      Label="分流值"
+                                                      Variant="Variant.Outlined"
+                                                      Margin="Margin.Dense" />
+                                    </MudItem>
+                                }
+                            }
+                            else
+                            {
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_editingOutputFieldsText"
+                                                  Label="父级输出字段"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </div>
+                }
+
+                <div class="config-section">
+                    <div class="config-section-header">
+                        <MudText Typo="Typo.subtitle1">注入字段</MudText>
+                    </div>
+                    <MudSelect T="string" MultiSelection="true"
+                               SelectedValues="GetInjectFields(_editingConfigInterface!)"
+                               SelectedValuesChanged="@(v => SetInjectFields(_editingConfigInterface!, v))"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true" Label="选择注入字段"
+                               MultiSelectionTextFunc="@(selected => $"{selected.Count()} 个字段")">
+                        @foreach (var col in GetTriggerSourceColumns())
+                        {
+                            <MudSelectItem Value="@col">@col</MudSelectItem>
+                        }
+                    </MudSelect>
+                </div>
+
+                @if (_editingConfigInterface != null && !IsChildInterface(_editingConfigInterface) && _editingParams.Count > 0)
+                {
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">路由参数</MudText>
+                        </div>
+                        @for (var i = 0; i < _editingParams.Count; i++)
+                        {
+                            var index = i;
+                            <div class="config-row">
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="5">
+                                        <MudTextField Value="_editingParams[index].Key" Label="占位符" ReadOnly="true"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="7">
+                                        <MudTextField Value="_editingParams[index].Value" Label="值"
+                                                      ValueChanged="@((string v) => UpdateParamValue(index, v))"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                </MudGrid>
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="config-section">
+                    <div class="config-section-header">
+                        <MudText Typo="Typo.subtitle1">过滤条件</MudText>
+                    </div>
+                    @for (var i = 0; i < _editingFilters.Count; i++)
+                    {
+                        var index = i;
+                        var filter = _editingFilters[index];
+                        <div class="config-row">
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField @bind-Value="filter.Column" Label="字段名"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect T="string" @bind-Value="filter.Type" Label="条件类型"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                        <MudSelectItem Value="@("eq")">eq（等于）</MudSelectItem>
+                                        <MudSelectItem Value="@("ne")">ne（不等于）</MudSelectItem>
+                                        <MudSelectItem Value="@("in")">in（包含）</MudSelectItem>
+                                        <MudSelectItem Value="@("notin")">notin（不包含）</MudSelectItem>
+                                        <MudSelectItem Value="@("gt")">gt（大于）</MudSelectItem>
+                                        <MudSelectItem Value="@("ge")">ge（大于等于）</MudSelectItem>
+                                        <MudSelectItem Value="@("lt")">lt（小于）</MudSelectItem>
+                                        <MudSelectItem Value="@("le")">le（小于等于）</MudSelectItem>
+                                        <MudSelectItem Value="@("likeright")">likeright（前缀匹配）</MudSelectItem>
+                                        <MudSelectItem Value="@("isnull")">isnull（为空）</MudSelectItem>
+                                        <MudSelectItem Value="@("isnotnull")">isnotnull（不为空）</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField T="string" Value="@(filter.Value?.ToString() ?? "")" Label="值"
+                                                  ValueChanged="@((string v) => { filter.Value = v; })"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Disabled="@(filter.Type is "isnull" or "isnotnull")" />
+                                </MudItem>
+                                <MudItem xs="12" sm="1" Class="d-flex align-center justify-center">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                   OnClick="@(() => _editingFilters.RemoveAt(index))" />
+                                </MudItem>
+                            </MudGrid>
+                        </div>
+                    }
+                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _editingFilters.Add(new()))">
+                        添加条件
+                    </MudButton>
+                </div>
+            </DialogContent>
+            <DialogActions>
+                <MudButton OnClick="@(() => _showConfigDialog = false)">取消</MudButton>
+                <MudButton Color="Color.Primary" OnClick="SaveConfig">确定</MudButton>
+            </DialogActions>
+        </MudDialog>
+
+        <div class="task-edit-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="Save" Disabled="_saving">
+                @(_saving ? "保存中..." : "保存")
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="BackToTaskList">
+                返回列表
+            </MudButton>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int Id { get; set; }
+
+    private SyncTask _task = new();
+    private List<SyncTaskInterface> _interfaces = [];
+    private List<int> _removedInterfaceIds = [];
+    private bool _isEdit;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _originalEnabled;
+    private string _originalTriggerServerCode = "";
+    private string _originalPushType = "";
+    private string _originalPushTarget = "";
+    private SyncTaskInterface? _pendingNewInterface;
+    private string? _pendingSortOrderFocusKey;
+    private string? _movingSortOrderInterfaceKey;
+    private bool _sortOrderTransitioning;
+    private int _sortOrderTransitionVersion;
+
+    // 拖拽容器引用
+    private MudDropContainer<SyncTaskInterface>? _dropContainer;
+
+    // 下拉数据源
+    private List<DataLakeInterface> _dataLakeInterfaces = [];
+    private List<IngestionSource> _ingestionSources = [];
+
+    // 统一配置弹窗相关
+    private SyncTaskInterface? _editingConfigInterface;
+    private List<KeyValuePair<string, string>> _editingParams = [];
+    private List<DataLakeCondition> _editingFilters = [];
+    private string _editingOutputFieldsText = "";
+    private bool _showConfigDialog;
+    private readonly DialogOptions _configDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
+
+    // 过滤条件相关
+    private TriggerConditionConfig _conditionConfig = new();
+    private List<string> _ruleValuesText = [];
+    private readonly Dictionary<string, List<string>> _columnsCache = [];
+
+    private sealed class InterfaceGroupView
+    {
+        public int SortOrder { get; init; }
+        public List<SyncTaskInterface> Items { get; init; } = [];
+    }
+
+    private sealed class InterfaceWorkspaceSummary
+    {
+        public int ReadyCount { get; init; }
+        public int MissingServerCount { get; init; }
+        public int MissingQueryCount { get; init; }
+        public int MissingPushParamCount { get; init; }
+    }
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _isEdit = Id > 0;
+
+        // 加载下拉数据源
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            _dataLakeInterfaces = await db.DataLakeInterfaces
+                .OrderBy(d => d.ServerCode).ToListAsync(CancellationToken);
+            _ingestionSources = await db.IngestionSources
+                .OrderBy(s => s.ServerCode).ToListAsync(CancellationToken);
+        }
+
+        if (_isEdit)
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var task = await db.SyncTasks
+                .Include(t => t.Interfaces.OrderBy(i => i.SortOrder))
+                .FirstOrDefaultAsync(t => t.Id == Id, CancellationToken);
+
+            if (task is null)
+            {
+                inj_snackbar.Add("任务不存在", Severity.Error);
+                inj_navigationManager.NavigateTo("/tasks");
+                return;
+            }
+
+            _task = task;
+            _interfaces = task.Interfaces.ToList();
+            EnsureInterfaceKeys();
+
+            // 解析现有过滤条件
+            _conditionConfig = inj_localQueryService.ParseTriggerConditions(
+                _task.TriggerConditions, _task.TriggerServerCode);
+            _ruleValuesText = _conditionConfig.Rules
+                .Select(r => string.Join(",", r.Values))
+                .ToList();
+            CaptureOriginalTaskState();
+
+            // 预加载已有规则的字段列表
+            foreach (var rule in _conditionConfig.Rules)
+                await EnsureColumnsLoadedAsync(rule.Interface);
+
+            // 预加载触发源列（供"取值字段"下拉使用）
+            await EnsureColumnsLoadedAsync(_task.TriggerServerCode);
+        }
+        else
+        {
+            _task = new SyncTask();
+            _interfaces = [];
+            CaptureOriginalTaskState();
+        }
+
+        _loading = false;
+    }
+
+    // --- 接口管理 ---
+
+    private async Task AddInterface()
+    {
+        var newInterface = new SyncTaskInterface
+        {
+            Enabled = true,
+            SortOrder = GetRecommendedSortOrderForNewInterface(),
+            InterfaceKey = CreateInterfaceKey(),
+            RouteOperator = "eq"
+        };
+
+        _interfaces.Add(newInterface);
+        _pendingNewInterface = newInterface;
+        await RefreshInterfaceWorkspaceAsync();
+    }
+
+    private void RemoveInterface(SyncTaskInterface item)
+    {
+        if (item.Id > 0)
+            _removedInterfaceIds.Add(item.Id);
+
+        foreach (var child in _interfaces.Where(i => i.ParentInterfaceKey == item.InterfaceKey))
+            ClearParentBinding(child);
+
+        _interfaces.Remove(item);
+        _dropContainer?.Refresh();
+    }
+
+    private async Task OnInterfaceDrop(MudItemDropInfo<SyncTaskInterface> dropInfo)
+    {
+        if (dropInfo.Item == null) return;
+
+        var targetSortOrder = GetSortOrderFromDropZone(dropInfo.DropzoneIdentifier, dropInfo.Item.SortOrder);
+        var parent = GetParentInterface(dropInfo.Item);
+        if (parent != null)
+            targetSortOrder = parent.SortOrder;
+
+        _interfaces.Remove(dropInfo.Item);
+        dropInfo.Item.SortOrder = targetSortOrder;
+
+        var insertIndex = GetInsertIndexForDrop(targetSortOrder, dropInfo.IndexInZone);
+        _interfaces.Insert(insertIndex, dropInfo.Item);
+        SyncChildSortOrders(dropInfo.Item.InterfaceKey, dropInfo.Item.SortOrder);
+        await RefreshInterfaceWorkspaceAsync();
+    }
+
+    private void OnInterfaceServerCodeChanged(SyncTaskInterface item, string serverCode)
+    {
+        item.ServerCode = serverCode;
+        var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == serverCode);
+        item.DisplayName = dl?.Name ?? "";
+    }
+
+    private Task<IEnumerable<string>> SearchDataLakeInterfaces(string value, CancellationToken token = default)
+    {
+        var results = string.IsNullOrEmpty(value)
+            ? _dataLakeInterfaces
+            : _dataLakeInterfaces.Where(d =>
+                d.ServerCode.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+                d.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(results.Select(d => d.ServerCode));
+    }
+
+    private string FormatInterfaceDisplay(string code)
+    {
+        if (string.IsNullOrEmpty(code)) return "";
+        var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == code);
+        return dl is not null ? $"{dl.Name} ({dl.ServerCode})" : code;
+    }
+
+    private async Task OnInterfaceEnabledChanged(SyncTaskInterface item, bool enabled)
+    {
+        item.Enabled = enabled;
+        if (!enabled)
+        {
+            foreach (var child in _interfaces.Where(i => i.ParentInterfaceKey == item.InterfaceKey))
+                child.Enabled = false;
+        }
+        await RefreshInterfaceWorkspaceAsync();
+    }
+
+    private async Task OnInterfaceRequiredChanged(SyncTaskInterface item, bool isRequired)
+    {
+        item.IsRequired = isRequired;
+        await RefreshInterfaceWorkspaceAsync();
+    }
+
+    private async Task OnInterfaceSortOrderChanged(SyncTaskInterface item, int sortOrder)
+    {
+        var parent = GetParentInterface(item);
+        if (parent != null)
+        {
+            item.SortOrder = parent.SortOrder;
+            return;
+        }
+
+        var normalizedSortOrder = Math.Max(1, sortOrder);
+        if (item.SortOrder == normalizedSortOrder)
+            return;
+
+        _sortOrderTransitioning = true;
+        _movingSortOrderInterfaceKey = item.InterfaceKey;
+        _sortOrderTransitionVersion++;
+        var transitionVersion = _sortOrderTransitionVersion;
+        _interfaces.Remove(item);
+        item.SortOrder = normalizedSortOrder;
+        var insertIndex = GetInsertIndexForManualGroupChange(normalizedSortOrder);
+        _interfaces.Insert(insertIndex, item);
+        SyncChildSortOrders(item.InterfaceKey, item.SortOrder);
+        _pendingSortOrderFocusKey = item.InterfaceKey;
+        await RefreshInterfaceWorkspaceAsync();
+        _ = ReleaseSortOrderTransitionAsync(transitionVersion);
+    }
+
+    private async Task RefreshInterfaceWorkspaceAsync()
+    {
+        _dropContainer?.Refresh();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string CreateInterfaceKey() => Guid.NewGuid().ToString("N");
+
+    private void EnsureInterfaceKeys()
+    {
+        foreach (var iface in _interfaces)
+        {
+            if (string.IsNullOrWhiteSpace(iface.InterfaceKey))
+                iface.InterfaceKey = CreateInterfaceKey();
+
+            if (string.IsNullOrWhiteSpace(iface.RouteOperator))
+                iface.RouteOperator = "eq";
+        }
+    }
+
+    private bool IsChildInterface(SyncTaskInterface iface) =>
+        !string.IsNullOrWhiteSpace(iface.ParentInterfaceKey);
+
+    private bool HasChildInterfaces(SyncTaskInterface iface) =>
+        _interfaces.Any(i => i.ParentInterfaceKey == iface.InterfaceKey);
+
+    private List<SyncTaskInterface> GetChildInterfaces(SyncTaskInterface iface) => _interfaces
+        .Where(i => i.ParentInterfaceKey == iface.InterfaceKey)
+        .OrderBy(i => i.DisplayName)
+        .ThenBy(i => i.ServerCode)
+        .ToList();
+
+    private SyncTaskInterface? GetParentInterface(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+            return null;
+
+        return _interfaces.FirstOrDefault(i => i.InterfaceKey == iface.ParentInterfaceKey);
+    }
+
+    private IEnumerable<SyncTaskInterface> GetParentCandidates(SyncTaskInterface current) =>
+        _interfaces.Where(i =>
+            !ReferenceEquals(i, current) &&
+            !IsChildInterface(i) &&
+            !string.Equals(i.InterfaceKey, current.InterfaceKey, StringComparison.Ordinal));
+
+    private string GetEditingParentSelectValue() => _editingConfigInterface?.ParentInterfaceKey ?? "";
+
+    private Task OnEditingParentInterfaceChanged(string parentInterfaceKey)
+    {
+        if (_editingConfigInterface == null)
+            return Task.CompletedTask;
+
+        ApplyParentBinding(_editingConfigInterface, parentInterfaceKey);
+        return RefreshInterfaceWorkspaceAsync();
+    }
+
+    private void ApplyParentBinding(SyncTaskInterface iface, string? parentInterfaceKey)
+    {
+        var normalizedParentKey = string.IsNullOrWhiteSpace(parentInterfaceKey) ? null : parentInterfaceKey;
+        iface.ParentInterfaceKey = normalizedParentKey;
+
+        if (string.IsNullOrWhiteSpace(normalizedParentKey))
+        {
+            ClearParentBinding(iface);
+            return;
+        }
+
+        var parent = _interfaces.FirstOrDefault(i => i.InterfaceKey == normalizedParentKey);
+        iface.SortOrder = parent?.SortOrder ?? iface.SortOrder;
+        iface.RouteOperator = string.IsNullOrWhiteSpace(iface.RouteOperator) ? "eq" : iface.RouteOperator;
+        iface.OutputFields = null;
+    }
+
+    private void ClearParentBinding(SyncTaskInterface iface)
+    {
+        iface.ParentInterfaceKey = null;
+        iface.ParentResultField = null;
+        iface.MountField = null;
+        iface.RouteField = null;
+        iface.RouteOperator = "eq";
+        iface.RouteValue = null;
+    }
+
+    private void SyncChildSortOrders(string interfaceKey, int sortOrder)
+    {
+        foreach (var child in _interfaces.Where(i => i.ParentInterfaceKey == interfaceKey))
+            child.SortOrder = sortOrder;
+    }
+
+    private string GetInterfaceCardClass(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+            return "interface-card--child";
+
+        return HasChildInterfaces(iface)
+            ? "interface-card--root"
+            : "interface-card--standalone";
+    }
+
+    private bool NeedsRouteConfig(SyncTaskInterface iface)
+    {
+        if (!IsChildInterface(iface) || string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+            return false;
+
+        return _interfaces.Count(i =>
+            !ReferenceEquals(i, iface) &&
+            string.Equals(i.ParentInterfaceKey, iface.ParentInterfaceKey, StringComparison.Ordinal)) > 0;
+    }
+
+    private void NormalizeInterfaceConfig(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+        {
+            iface.OutputFields = null;
+            iface.PushParams = null;
+            if (NeedsRouteConfig(iface))
+            {
+                iface.RouteOperator = string.IsNullOrWhiteSpace(iface.RouteOperator) ? "eq" : iface.RouteOperator;
+            }
+            else
+            {
+                iface.RouteField = null;
+                iface.RouteOperator = "eq";
+                iface.RouteValue = null;
+            }
+            var parent = GetParentInterface(iface);
+            if (parent != null)
+                iface.SortOrder = parent.SortOrder;
+            return;
+        }
+
+        iface.ParentResultField = null;
+        iface.MountField = null;
+        iface.RouteField = null;
+        iface.RouteOperator = "eq";
+        iface.RouteValue = null;
+    }
+
+    private async Task OnTriggerServerCodeChanged(string serverCode)
+    {
+        _task.TriggerServerCode = serverCode;
+        await EnsureColumnsLoadedAsync(serverCode);
+    }
+
+    private string GetTriggerSourceSummary()
+    {
+        if (string.IsNullOrWhiteSpace(_task.TriggerServerCode))
+            return "未设置";
+
+        var source = _ingestionSources.FirstOrDefault(s => s.ServerCode == _task.TriggerServerCode);
+        return source is null ? _task.TriggerServerCode : $"{source.Name} ({source.ServerCode})";
+    }
+
+    private int GetEnabledInterfaceCount() => _interfaces.Count(i => i.Enabled);
+
+    private int GetExecutionGroupCount() => _interfaces.Count == 0
+        ? 0
+        : _interfaces.Select(i => i.SortOrder).Distinct().Count();
+
+    private InterfaceWorkspaceSummary GetInterfaceWorkspaceSummary()
+    {
+        var readyCount = 0;
+        var missingServerCount = 0;
+        var missingQueryCount = 0;
+        var missingPushParamCount = 0;
+
+        foreach (var iface in _interfaces.Where(i => i.Enabled))
+        {
+            if (string.IsNullOrWhiteSpace(iface.ServerCode))
+            {
+                missingServerCount++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(iface.QueryField))
+                missingQueryCount++;
+
+            if (GetMissingPushParamCount(iface) > 0)
+                missingPushParamCount++;
+
+            if (GetInterfaceIssues(iface).Count == 0)
+                readyCount++;
+        }
+
+        return new InterfaceWorkspaceSummary
+        {
+            ReadyCount = readyCount,
+            MissingServerCount = missingServerCount,
+            MissingQueryCount = missingQueryCount,
+            MissingPushParamCount = missingPushParamCount
+        };
+    }
+
+    private string GetPushTypeSummary() => string.IsNullOrWhiteSpace(_task.PushType) ? "未设置" : _task.PushType;
+
+    private bool IsSortOrderAnimating(SyncTaskInterface iface) =>
+        _sortOrderTransitioning &&
+        string.Equals(_movingSortOrderInterfaceKey, iface.InterfaceKey, StringComparison.Ordinal);
+
+    private int GetRecommendedSortOrderForNewInterface()
+    {
+        var groups = GetInterfaceGroups();
+        if (groups.Count == 0)
+            return 1;
+
+        if (groups.Count == 1 && groups[0].Items.Count == 1)
+            return Math.Max(1, groups[0].SortOrder + 1);
+
+        return groups[^1].SortOrder;
+    }
+
+    private List<InterfaceGroupView> GetInterfaceGroups() => _interfaces
+        .GroupBy(i => i.SortOrder)
+        .OrderBy(g => g.Key)
+        .Select(g => new InterfaceGroupView
+        {
+            SortOrder = g.Key,
+            Items = g.ToList()
+        })
+        .ToList();
+
+    private bool IsItemInDropZone(SyncTaskInterface item, string zoneIdentifier) =>
+        item.SortOrder == GetSortOrderFromDropZone(zoneIdentifier, item.SortOrder);
+
+    private static string GetDropZoneIdentifier(int sortOrder) => $"group-{sortOrder}";
+
+    private static int GetSortOrderFromDropZone(string? zoneIdentifier, int fallbackSortOrder)
+    {
+        if (string.IsNullOrWhiteSpace(zoneIdentifier))
+            return fallbackSortOrder;
+
+        const string prefix = "group-";
+        if (zoneIdentifier.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+            int.TryParse(zoneIdentifier[prefix.Length..], out var sortOrder) &&
+            sortOrder > 0)
+        {
+            return sortOrder;
+        }
+
+        return fallbackSortOrder;
+    }
+
+    private int GetInsertIndexForDrop(int targetSortOrder, int indexInZone)
+    {
+        var targetItems = _interfaces
+            .Where(i => i.SortOrder == targetSortOrder)
+            .ToList();
+
+        if (targetItems.Count == 0)
+        {
+            var lastLowerOrEqualIndex = _interfaces.FindLastIndex(i => i.SortOrder <= targetSortOrder);
+            return lastLowerOrEqualIndex >= 0 ? lastLowerOrEqualIndex + 1 : 0;
+        }
+
+        var safeIndex = Math.Clamp(indexInZone, 0, targetItems.Count);
+        if (safeIndex >= targetItems.Count)
+        {
+            var lastItem = targetItems[^1];
+            return _interfaces.IndexOf(lastItem) + 1;
+        }
+
+        var anchorItem = targetItems[safeIndex];
+        return _interfaces.IndexOf(anchorItem);
+    }
+
+    private int GetInsertIndexForManualGroupChange(int targetSortOrder)
+    {
+        var targetItems = _interfaces
+            .Where(i => i.SortOrder == targetSortOrder)
+            .ToList();
+
+        if (targetItems.Count == 0)
+        {
+            var lastLowerIndex = _interfaces.FindLastIndex(i => i.SortOrder < targetSortOrder);
+            return lastLowerIndex >= 0 ? lastLowerIndex + 1 : 0;
+        }
+
+        var lastItem = targetItems[^1];
+        return _interfaces.IndexOf(lastItem) + 1;
+    }
+
+    private int GetInterfaceGroupPosition(SyncTaskInterface iface)
+    {
+        var groupItems = _interfaces.Where(i => i.SortOrder == iface.SortOrder).ToList();
+        var index = groupItems.IndexOf(iface);
+        return index >= 0 ? index + 1 : 0;
+    }
+
+    private static string GetInterfaceRenderKey(SyncTaskInterface iface) =>
+        $"{System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(iface)}:{iface.SortOrder}:{iface.Enabled}:{iface.IsRequired}:{iface.ParentInterfaceKey}:{iface.ServerCode}";
+
+    private bool IsPendingNewInterface(SyncTaskInterface iface) => ReferenceEquals(_pendingNewInterface, iface);
+
+    private string GetAutoQueryValueLabel(SyncTaskInterface iface) => $"自动（{GetAutoQueryValueField(iface)}）";
+
+    private string GetAutoQueryValueField(SyncTaskInterface iface)
+    {
+        if (iface.QueryField == _task.PatientIdField)
+            return _task.PatientIdField;
+
+        return !string.IsNullOrWhiteSpace(_task.VisitSnField)
+            ? _task.VisitSnField
+            : _task.PatientIdField;
+    }
+
+    private string GetQueryMappingPreview(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.QueryField))
+            return "未配置";
+
+        if (IsChildInterface(iface))
+        {
+            var parentName = GetParentInterface(iface) is { } parent
+                ? GetInterfaceDisplayName(parent)
+                : "父接口";
+            return string.IsNullOrWhiteSpace(iface.ParentResultField)
+                ? $"{iface.QueryField} ← {parentName}.?"
+                : $"{iface.QueryField} ← {parentName}.{iface.ParentResultField}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(iface.QueryValueField))
+            return $"{iface.QueryField} ← {iface.QueryValueField}";
+
+        return $"{iface.QueryField} ← {GetAutoQueryValueField(iface)}";
+    }
+
+    private string GetQueryFieldLabel(SyncTaskInterface iface) =>
+        IsChildInterface(iface) ? "当前接口关联字段" : "目标接口查询字段";
+
+    private string GetInterfaceRoleSummary(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+        {
+            var parentName = GetParentInterface(iface) is { } parent
+                ? GetInterfaceDisplayName(parent)
+                : "父接口";
+            return $"挂载子接口 · 归属 {parentName} · 失败影响组合结果";
+        }
+
+        if (_interfaces.Any(i => i.ParentInterfaceKey == iface.InterfaceKey))
+            return $"第 {Math.Max(iface.SortOrder, 1)} 步 · 组合根接口 · 负责最终组装发送";
+
+        var role = iface.IsRequired ? "必要接口" : "可选接口";
+        var effect = iface.IsRequired ? "失败影响当前对象结果" : "失败仅记录状态";
+        return $"第 {Math.Max(iface.SortOrder, 1)} 步 · {role} · {effect}";
+    }
+
+    private string GetInterfaceStatusText(SyncTaskInterface iface)
+    {
+        if (!iface.Enabled)
+            return "已停用";
+
+        if (string.IsNullOrWhiteSpace(iface.ServerCode))
+            return "待选接口";
+
+        if (string.IsNullOrWhiteSpace(iface.QueryField))
+            return "待定查询";
+
+        if (IsChildInterface(iface) &&
+            (string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.MountField)))
+        {
+            return "待定关联";
+        }
+
+        return GetMissingPushParamCount(iface) > 0 ? "待补配置" : "可执行";
+    }
+
+    private string GetInterfaceStatusClass(SyncTaskInterface iface)
+    {
+        if (!iface.Enabled)
+            return "is-muted";
+
+        return GetInterfaceIssues(iface).Count == 0 ? "is-success" : "is-warning";
+    }
+
+    private string GetInterfaceDisplayName(SyncTaskInterface iface)
+    {
+        if (!string.IsNullOrWhiteSpace(iface.DisplayName))
+            return iface.DisplayName;
+
+        return string.IsNullOrWhiteSpace(iface.ServerCode) ? "当前接口" : iface.ServerCode;
+    }
+
+    private List<string> GetInterfaceIssues(SyncTaskInterface iface)
+    {
+        if (!iface.Enabled)
+            return [];
+
+        var issues = new List<string>();
+        if (string.IsNullOrWhiteSpace(iface.ServerCode))
+        {
+            issues.Add("先选择目标接口");
+            return issues;
+        }
+
+        if (string.IsNullOrWhiteSpace(iface.QueryField))
+            issues.Add(IsChildInterface(iface) ? "先填写当前接口关联字段" : "先填写目标接口查询字段");
+
+        if (IsChildInterface(iface))
+        {
+            var parent = GetParentInterface(iface);
+            if (parent == null)
+                issues.Add("先选择有效父接口");
+            else if (!parent.Enabled)
+                issues.Add("父接口已停用");
+
+            if (string.IsNullOrWhiteSpace(iface.ParentResultField))
+                issues.Add("先填写父记录关联值字段");
+
+            if (string.IsNullOrWhiteSpace(iface.MountField))
+                issues.Add("先填写挂载字段名");
+
+            if (!string.IsNullOrWhiteSpace(iface.MountField))
+            {
+                var duplicateMount = _interfaces.Any(i =>
+                    !ReferenceEquals(i, iface) &&
+                    i.Enabled &&
+                    i.ParentInterfaceKey == iface.ParentInterfaceKey &&
+                    string.Equals(i.MountField, iface.MountField, StringComparison.OrdinalIgnoreCase));
+                if (duplicateMount)
+                    issues.Add("同一父接口下挂载字段名不能重复");
+            }
+
+            var siblings = _interfaces
+                .Where(i => i.Enabled && i.ParentInterfaceKey == iface.ParentInterfaceKey)
+                .ToList();
+            if (siblings.Count > 1)
+            {
+                if (string.IsNullOrWhiteSpace(iface.RouteField))
+                    issues.Add("存在多个候选子接口时必须配置分流字段");
+                if (string.IsNullOrWhiteSpace(iface.RouteValue))
+                    issues.Add("存在多个候选子接口时必须配置分流值");
+            }
+
+            return issues;
+        }
+
+        var missingPushParams = GetMissingPushParamNames(iface);
+        if (missingPushParams.Count > 0)
+            issues.Add($"补齐路由参数：{string.Join("、", missingPushParams)}");
+
+        return issues;
+    }
+
+    private string GetChildParentSummary(SyncTaskInterface iface)
+    {
+        var parentName = GetParentInterface(iface) is { } parent
+            ? GetInterfaceDisplayName(parent)
+            : "父接口待定";
+        return $"归属：{parentName}";
+    }
+
+    private string GetChildSourceSummary(SyncTaskInterface iface)
+    {
+        var parentField = string.IsNullOrWhiteSpace(iface.ParentResultField) ? "待定" : iface.ParentResultField;
+        return $"取值：父.{parentField}";
+    }
+
+    private string GetChildMatchSummary(SyncTaskInterface iface)
+    {
+        var childField = string.IsNullOrWhiteSpace(iface.QueryField) ? "待定" : iface.QueryField;
+        return $"匹配：当前.{childField}";
+    }
+
+    private string GetChildMountSummary(SyncTaskInterface iface) =>
+        string.IsNullOrWhiteSpace(iface.MountField)
+            ? "挂载字段：待定"
+            : $"挂载字段：{iface.MountField}";
+
+    private string GetChildRouteSummary(SyncTaskInterface iface)
+    {
+        if (!NeedsRouteConfig(iface))
+            return "分流：无需配置";
+
+        if (string.IsNullOrWhiteSpace(iface.RouteField) || string.IsNullOrWhiteSpace(iface.RouteValue))
+            return "分流：待配置";
+
+        return $"分流：{iface.RouteField} {iface.RouteOperator ?? "eq"} {iface.RouteValue}";
+    }
+
+    private string GetChildBranchPreview(SyncTaskInterface child)
+    {
+        var name = GetInterfaceDisplayName(child);
+        var mount = string.IsNullOrWhiteSpace(child.MountField) ? "挂载待定" : $"挂载 {child.MountField}";
+        var route = NeedsRouteConfig(child)
+            ? (string.IsNullOrWhiteSpace(child.RouteField) || string.IsNullOrWhiteSpace(child.RouteValue)
+                ? "分流待定"
+                : $"{child.RouteField} {child.RouteOperator ?? "eq"} {child.RouteValue}")
+            : "默认分支";
+        return $"{name} · {mount} · {route}";
+    }
+
+    private string GetConfigDialogTitle()
+    {
+        if (_editingConfigInterface == null)
+            return "接口配置";
+
+        if (!string.IsNullOrWhiteSpace(_editingConfigInterface.DisplayName))
+            return $"{_editingConfigInterface.DisplayName} ({_editingConfigInterface.ServerCode})";
+
+        return string.IsNullOrWhiteSpace(_editingConfigInterface.ServerCode)
+            ? "接口配置"
+            : _editingConfigInterface.ServerCode;
+    }
+
+    // --- 统一配置弹窗管理 ---
+
+    private List<string> ExtractPlaceholders(string? target = null)
+    {
+        var result = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var url = target ?? _task.PushTarget;
+        if (string.IsNullOrEmpty(url)) return result;
+
+        var start = -1;
+        for (var i = 0; i < url.Length; i++)
+        {
+            if (url[i] == '{') start = i + 1;
+            else if (url[i] == '}' && start >= 0)
+            {
+                var name = url[start..i];
+                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name))
+                    result.Add(name);
+                start = -1;
+            }
+        }
+        return result;
+    }
+
+    private async Task OpenConfigDialog(SyncTaskInterface iface)
+    {
+        await EnsureColumnsLoadedAsync(_task.TriggerServerCode);
+        _editingConfigInterface = iface;
+        _editingOutputFieldsText = iface.OutputFields ?? "";
+
+        // 初始化路由参数
+        Dictionary<string, string>? existingParams = null;
+        if (!IsChildInterface(iface) && !string.IsNullOrEmpty(iface.PushParams))
+        {
+            try { existingParams = JsonSerializer.Deserialize<Dictionary<string, string>>(iface.PushParams); }
+            catch (JsonException) { /* 忽略 */ }
+        }
+        var placeholders = IsChildInterface(iface) ? new List<string>() : ExtractPlaceholders();
+        _editingParams = placeholders.Select(key =>
+        {
+            var value = "";
+            existingParams?.TryGetValue(key, out value);
+            return new KeyValuePair<string, string>(key, value ?? "");
+        }).ToList();
+
+        // 初始化过滤条件
+        _editingFilters = [];
+        if (!string.IsNullOrEmpty(iface.FilterConditions))
+        {
+            try
+            {
+                var existing = JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions);
+                if (existing != null)
+                    _editingFilters = existing.Select(c => new DataLakeCondition
+                    {
+                        Column = c.Column, Type = c.Type, Value = c.Value
+                    }).ToList();
+            }
+            catch (JsonException) { /* 忽略 */ }
+        }
+
+        _showConfigDialog = true;
+    }
+
+    private void UpdateParamValue(int index, string value) =>
+        _editingParams[index] = new KeyValuePair<string, string>(_editingParams[index].Key, value);
+
+    private static IEnumerable<string> GetInjectFields(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrEmpty(iface.InjectFields)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(iface.InjectFields) ?? [];
+        }
+        catch (JsonException) { return []; }
+    }
+
+    private static void SetInjectFields(SyncTaskInterface iface, IEnumerable<string> values)
+    {
+        var list = values.ToList();
+        iface.InjectFields = list.Count > 0 ? JsonSerializer.Serialize(list) : null;
+    }
+
+    private static int GetInjectFieldCount(SyncTaskInterface iface) => GetInjectFields(iface).Count();
+
+    private static Dictionary<string, string> ParsePushParams(string? pushParams)
+    {
+        if (string.IsNullOrWhiteSpace(pushParams)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(pushParams) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static bool TryValidatePushParams(string? pushParams, out string? errorMessage)
+    {
+        errorMessage = null;
+        if (string.IsNullOrWhiteSpace(pushParams))
+            return true;
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, string>>(pushParams);
+            if (parsed == null)
+            {
+                errorMessage = "必须是 JSON 对象";
+                return false;
+            }
+
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            errorMessage = ex.Message;
+            return false;
+        }
+    }
+
+    private static int GetPushParamCount(SyncTaskInterface iface) => ParsePushParams(iface.PushParams).Count;
+
+    private List<string> GetMissingPushParamNames(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+            return [];
+
+        var placeholders = ExtractPlaceholders();
+        if (placeholders.Count == 0)
+            return [];
+
+        var existingParams = ParsePushParams(iface.PushParams);
+        return placeholders
+            .Where(name => !existingParams.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+            .ToList();
+    }
+
+    private int GetMissingPushParamCount(SyncTaskInterface iface) => GetMissingPushParamNames(iface).Count;
+
+    private string GetPushParamCompletionText(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+            return "子接口不单独推送";
+
+        var total = ExtractPlaceholders().Count;
+        if (total == 0)
+            return "无需补充";
+
+        var completed = total - GetMissingPushParamCount(iface);
+        return $"{completed}/{total} 已补齐";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (!string.IsNullOrWhiteSpace(_pendingSortOrderFocusKey))
+        {
+            var interfaceKey = _pendingSortOrderFocusKey;
+            _pendingSortOrderFocusKey = null;
+            await inj_jsRuntime.InvokeVoidAsync("taskEdit.focusInterfaceCard", interfaceKey);
+
+            return;
+        }
+
+        if (_pendingNewInterface is null)
+            return;
+
+        await inj_jsRuntime.InvokeVoidAsync("taskEdit.focusNewInterfaceCard", ".interface-card--new");
+        _pendingNewInterface = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ReleaseSortOrderTransitionAsync(int transitionVersion)
+    {
+        await Task.Delay(280);
+        if (transitionVersion != _sortOrderTransitionVersion)
+            return;
+
+        _sortOrderTransitioning = false;
+        _movingSortOrderInterfaceKey = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private List<string> GetEditingMissingParamNames() => _editingParams
+        .Where(kv => string.IsNullOrWhiteSpace(kv.Value))
+        .Select(kv => kv.Key)
+        .ToList();
+
+    private string GetEditingPushTargetPreview()
+    {
+        if (string.IsNullOrWhiteSpace(_task.PushTarget))
+            return "未配置";
+
+        if (_editingParams.Count == 0)
+            return _task.PushTarget;
+
+        var preview = _task.PushTarget;
+        foreach (var item in _editingParams)
+        {
+            var value = string.IsNullOrWhiteSpace(item.Value)
+                ? $"{{{item.Key}}}"
+                : item.Value.Trim();
+            preview = preview.Replace($"{{{item.Key}}}", value, StringComparison.Ordinal);
+        }
+
+        return preview;
+    }
+
+    private static int GetFilterConditionCount(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.FilterConditions)) return 0;
+        try
+        {
+            return JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions)?.Count ?? 0;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
+    }
+
+    private void CaptureOriginalTaskState()
+    {
+        _originalEnabled = _task.Enabled;
+        _originalTriggerServerCode = _task.TriggerServerCode;
+        _originalPushType = _task.PushType;
+        _originalPushTarget = _task.PushTarget;
+    }
+
+    private bool ShouldConfirmEnableRisk()
+    {
+        if (!_task.Enabled)
+            return false;
+
+        if (!_isEdit)
+            return true;
+
+        if (!_originalEnabled)
+            return true;
+
+        return !string.Equals(_task.TriggerServerCode, _originalTriggerServerCode, StringComparison.Ordinal) ||
+            !string.Equals(_task.PushType, _originalPushType, StringComparison.Ordinal) ||
+            !string.Equals(_task.PushTarget, _originalPushTarget, StringComparison.Ordinal);
+    }
+
+    private void BackToTaskList() => inj_navigationManager.NavigateTo("/tasks");
+
+    private void SaveConfig()
+    {
+        if (_editingConfigInterface == null) return;
+
+        if (IsChildInterface(_editingConfigInterface))
+        {
+            _editingConfigInterface.PushParams = null;
+            _editingConfigInterface.OutputFields = null;
+            _editingConfigInterface.RouteOperator = string.IsNullOrWhiteSpace(_editingConfigInterface.RouteOperator)
+                ? "eq"
+                : _editingConfigInterface.RouteOperator;
+        }
+        else
+        {
+            // 保存路由参数
+            var validParams = _editingParams
+                .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
+                .ToDictionary(kv => kv.Key, kv => kv.Value.Trim());
+            _editingConfigInterface.PushParams = validParams.Count > 0
+                ? JsonSerializer.Serialize(validParams)
+                : null;
+
+            var outputFields = _editingOutputFieldsText
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            _editingConfigInterface.OutputFields = outputFields.Count > 0
+                ? string.Join(",", outputFields)
+                : null;
+        }
+
+        // 保存过滤条件
+        var validFilters = _editingFilters
+            .Where(c => !string.IsNullOrWhiteSpace(c.Column) && !string.IsNullOrWhiteSpace(c.Type))
+            .ToList();
+        foreach (var c in validFilters.Where(c => c.Type is "isnull" or "isnotnull"))
+            c.Value = "";
+        _editingConfigInterface.FilterConditions = validFilters.Count > 0
+            ? JsonSerializer.Serialize(validFilters)
+            : null;
+
+        _showConfigDialog = false;
+    }
+
+    // --- 过滤条件管理 ---
+
+    private async Task AddRule()
+    {
+        var defaultInterface = !string.IsNullOrWhiteSpace(_task.TriggerServerCode)
+            ? _task.TriggerServerCode
+            : _ingestionSources.FirstOrDefault()?.ServerCode ?? "";
+        _conditionConfig.Rules.Add(new ConditionRule { Interface = defaultInterface });
+        _ruleValuesText.Add("");
+        await EnsureColumnsLoadedAsync(defaultInterface);
+    }
+
+    private void RemoveRule(int index)
+    {
+        _conditionConfig.Rules.RemoveAt(index);
+        _ruleValuesText.RemoveAt(index);
+    }
+
+    private async Task OnRuleInterfaceChanged(int index, string serverCode)
+    {
+        _conditionConfig.Rules[index].Interface = serverCode;
+        _conditionConfig.Rules[index].Field = "";
+        await EnsureColumnsLoadedAsync(serverCode);
+    }
+
+    private List<string> GetColumnsForInterface(string? serverCode)
+    {
+        if (string.IsNullOrEmpty(serverCode)) return [];
+        return _columnsCache.TryGetValue(serverCode, out var cols) ? cols : [];
+    }
+
+    private List<string> GetTriggerSourceColumns()
+    {
+        if (string.IsNullOrEmpty(_task.TriggerServerCode)) return [];
+        return _columnsCache.TryGetValue(_task.TriggerServerCode, out var cols) ? cols : [];
+    }
+
+    private async Task EnsureColumnsLoadedAsync(string? serverCode)
+    {
+        if (string.IsNullOrEmpty(serverCode) || _columnsCache.ContainsKey(serverCode)) return;
+        var tableName = IngestionService.GetLocalTableName(serverCode);
+        _columnsCache[serverCode] = await inj_localQueryService
+            .GetTableColumnsAsync(tableName, CancellationToken);
+    }
+
+    // --- 保存 ---
+
+    private async Task Save()
+    {
+        EnsureInterfaceKeys();
+        foreach (var iface in _interfaces)
+            NormalizeInterfaceConfig(iface);
+
+        if (!_task.EnableTriggerRecordPush)
+        {
+            _task.TriggerPushTarget = null;
+            _task.TriggerPushParams = null;
+        }
+
+        if (string.IsNullOrWhiteSpace(_task.Name) ||
+            string.IsNullOrWhiteSpace(_task.Code) ||
+            string.IsNullOrWhiteSpace(_task.TriggerServerCode) ||
+            string.IsNullOrWhiteSpace(_task.PushType) ||
+            string.IsNullOrWhiteSpace(_task.PushTarget))
+        {
+            inj_snackbar.Add("请填写所有必填字段", Severity.Warning);
+            return;
+        }
+
+        if (_task.Enabled && _interfaces.All(i => !i.Enabled))
+        {
+            inj_snackbar.Add("任务已启用时，至少保留 1 个启用接口", Severity.Warning);
+            return;
+        }
+
+        if (_task.EnableTriggerRecordPush)
+        {
+            if (string.IsNullOrWhiteSpace(_task.TriggerPushTarget))
+            {
+                inj_snackbar.Add("启用触发记录单独推送后，必须填写触发记录推送目标", Severity.Warning);
+                return;
+            }
+
+            if (!TryValidatePushParams(_task.TriggerPushParams, out var triggerPushParamError))
+            {
+                inj_snackbar.Add($"触发记录路由参数 JSON 无法解析：{triggerPushParamError}", Severity.Warning);
+                return;
+            }
+
+            var triggerPushParams = ParsePushParams(_task.TriggerPushParams);
+            var missingTriggerPushParams = ExtractPlaceholders(_task.TriggerPushTarget)
+                .Where(name => !triggerPushParams.TryGetValue(name, out var value) || string.IsNullOrWhiteSpace(value))
+                .ToList();
+            if (missingTriggerPushParams.Count > 0)
+            {
+                inj_snackbar.Add(
+                    $"触发记录推送目标仍有未补齐占位符：{string.Join("、", missingTriggerPushParams.Select(name => $"{{{name}}}"))}",
+                    Severity.Warning);
+                return;
+            }
+        }
+
+        var invalidInterfaces = _interfaces
+            .Where(i => i.Enabled)
+            .Select(i => new
+            {
+                Label = GetInterfaceDisplayName(i),
+                Issues = GetInterfaceIssues(i)
+            })
+            .Where(x => x.Issues.Count > 0)
+            .ToList();
+        if (invalidInterfaces.Count > 0)
+        {
+            var detail = string.Join("；", invalidInterfaces
+                .Take(3)
+                .Select(x => $"{x.Label}：{string.Join("、", x.Issues)}"));
+            if (invalidInterfaces.Count > 3)
+                detail += $"；另有 {invalidInterfaces.Count - 3} 个接口也未配置完整";
+            inj_snackbar.Add($"请先补齐启用接口配置：{detail}", Severity.Warning);
+            return;
+        }
+
+        if (ShouldConfirmEnableRisk())
+        {
+            var conflicts = await inj_taskManagementService.GetEnabledConflictsAsync(_task, CancellationToken);
+            if (conflicts.Count > 0)
+            {
+                var confirmed = await inj_dialogService.ShowMessageBox(
+                    "重复同步风险提示",
+                    TaskManagementService.BuildEnableConflictMessage(_task, conflicts),
+                    yesText: "继续保存", cancelText: "取消");
+                if (confirmed != true)
+                    return;
+            }
+        }
+
+        _saving = true;
+        try
+        {
+            // 同步过滤条件文本到 rules 的 values
+            for (var i = 0; i < _conditionConfig.Rules.Count; i++)
+            {
+                _conditionConfig.Rules[i].Values = _ruleValuesText[i]
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToList();
+            }
+            var conditionsJson = _conditionConfig.Rules.Count > 0
+                ? JsonSerializer.Serialize(_conditionConfig, new JsonSerializerOptions { WriteIndented = false })
+                : null;
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+
+            // Code 唯一性校验
+            var codeExists = await db.SyncTasks
+                .AnyAsync(t => t.Code == _task.Code && t.Id != _task.Id, CancellationToken);
+            if (codeExists)
+            {
+                inj_snackbar.Add($"编码「{_task.Code}」已存在，请使用其他编码", Severity.Warning);
+                return;
+            }
+
+            if (_isEdit)
+            {
+                var entity = await db.SyncTasks
+                    .Include(t => t.Interfaces)
+                    .FirstAsync(t => t.Id == Id, CancellationToken);
+
+                entity.Name = _task.Name;
+                entity.Code = _task.Code;
+                entity.TriggerServerCode = _task.TriggerServerCode;
+                entity.PushType = _task.PushType;
+                entity.PushTarget = _task.PushTarget;
+                entity.EnableTriggerRecordPush = _task.EnableTriggerRecordPush;
+                entity.TriggerPushTarget = _task.TriggerPushTarget;
+                entity.TriggerPushParams = _task.TriggerPushParams;
+                entity.PatientIdField = _task.PatientIdField;
+                entity.VisitSnField = _task.VisitSnField;
+                entity.PollingIntervalSeconds = _task.PollingIntervalSeconds;
+                entity.PatientConcurrency = _task.PatientConcurrency;
+                entity.ApiConcurrency = _task.ApiConcurrency;
+                entity.Enabled = _task.Enabled;
+                entity.TriggerConditions = conditionsJson;
+
+                if (_removedInterfaceIds.Count > 0)
+                {
+                    var toRemove = entity.Interfaces
+                        .Where(i => _removedInterfaceIds.Contains(i.Id)).ToList();
+                    db.SyncTaskInterfaces.RemoveRange(toRemove);
+                }
+
+                foreach (var iface in _interfaces)
+                {
+                    if (iface.Id > 0)
+                    {
+                        var existing = entity.Interfaces.First(i => i.Id == iface.Id);
+                        existing.ServerCode = iface.ServerCode;
+                        existing.DisplayName = iface.DisplayName;
+                        existing.QueryField = iface.QueryField;
+                        existing.IsRequired = iface.IsRequired;
+                        existing.SortOrder = iface.SortOrder;
+                        existing.Enabled = iface.Enabled;
+                        existing.InterfaceKey = iface.InterfaceKey;
+                        existing.ParentInterfaceKey = iface.ParentInterfaceKey;
+                        existing.QueryValueField = iface.QueryValueField;
+                        existing.ParentResultField = iface.ParentResultField;
+                        existing.MountField = iface.MountField;
+                        existing.RouteField = iface.RouteField;
+                        existing.RouteOperator = iface.RouteOperator;
+                        existing.RouteValue = iface.RouteValue;
+                        existing.OutputFields = iface.OutputFields;
+                        existing.PushParams = iface.PushParams;
+                        existing.InjectFields = iface.InjectFields;
+                        existing.FilterConditions = iface.FilterConditions;
+                    }
+                    else
+                    {
+                        entity.Interfaces.Add(new SyncTaskInterface
+                        {
+                            ServerCode = iface.ServerCode,
+                            DisplayName = iface.DisplayName,
+                            QueryField = iface.QueryField,
+                            QueryValueField = iface.QueryValueField,
+                            IsRequired = iface.IsRequired,
+                            SortOrder = iface.SortOrder,
+                            Enabled = iface.Enabled,
+                            InterfaceKey = iface.InterfaceKey,
+                            ParentInterfaceKey = iface.ParentInterfaceKey,
+                            ParentResultField = iface.ParentResultField,
+                            MountField = iface.MountField,
+                            RouteField = iface.RouteField,
+                            RouteOperator = iface.RouteOperator,
+                            RouteValue = iface.RouteValue,
+                            OutputFields = iface.OutputFields,
+                            PushParams = iface.PushParams,
+                            InjectFields = iface.InjectFields,
+                            FilterConditions = iface.FilterConditions
+                        });
+                    }
+                }
+            }
+            else
+            {
+                _task.TriggerConditions = conditionsJson;
+                _task.Interfaces = _interfaces;
+                db.SyncTasks.Add(_task);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add(_isEdit ? "任务更新成功" : "任务创建成功", Severity.Success);
+            _removedInterfaceIds.Clear();
+            CaptureOriginalTaskState();
+
+            if (!_isEdit)
+            {
+                _isEdit = true;
+                Id = _task.Id;
+                inj_navigationManager.NavigateTo($"/tasks/edit/{_task.Id}", replace: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
+

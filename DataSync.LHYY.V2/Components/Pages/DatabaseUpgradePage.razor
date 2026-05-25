@@ -1,0 +1,570 @@
+@page "/database-upgrade"
+@inherits BasePage
+
+<PageTitle>数据库升级 - LHYY V2</PageTitle>
+
+<div class="database-upgrade-page">
+    <header class="database-upgrade-header">
+        <div class="database-upgrade-title-block">
+            <MudText Typo="Typo.h4" Class="database-upgrade-title">数据库升级</MudText>
+            <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">选择目标库，检查待执行脚本，确认后先备份再升级。</MudText>
+        </div>
+        <div class="database-upgrade-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="LoadConnections" Disabled="_busy">
+                刷新
+            </MudButton>
+        </div>
+    </header>
+
+    <section class="database-upgrade-panel">
+        <div class="database-upgrade-form">
+            <MudSelect T="string" @bind-Value="_upgradeMode" Label="升级方式"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                <MudSelectItem Value="@CompareMode">数据库比对</MudSelectItem>
+                <MudSelectItem Value="@ProjectScriptsMode">内置脚本</MudSelectItem>
+                <MudSelectItem Value="@SqlFileMode">数据库文件</MudSelectItem>
+            </MudSelect>
+
+            <MudSelect T="string" @bind-Value="_selectedConnectionName" Label="低版本目标数据库"
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                @foreach (var connection in _connections)
+                {
+                    <MudSelectItem Value="@connection.Name">@connection.DisplayName</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudTextField @bind-Value="_pgDumpPath" Label="PostgreSQL 工具路径（可选）"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                          Placeholder="可填 bin 目录、pg_dump.exe 或 psql.exe 路径" />
+        </div>
+
+        @if (IsCompareMode)
+        {
+            <div class="database-upgrade-compare-panel">
+                <div class="database-upgrade-compare-grid">
+                    <MudSelect T="string" @bind-Value="_compareSourceMode" Label="高版本来源"
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                        <MudSelectItem Value="@CompareSourceConnectionMode">数据库连接</MudSelectItem>
+                        <MudSelectItem Value="@CompareSourceSqlFileMode">SQL 文件</MudSelectItem>
+                    </MudSelect>
+
+                    @if (IsCompareSourceConnectionMode)
+                    {
+                        <MudSelect T="string" @bind-Value="_sourceConnectionName" Label="高版本标准数据库"
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                            @foreach (var connection in _connections)
+                            {
+                                <MudSelectItem Value="@connection.Name">@connection.DisplayName</MudSelectItem>
+                            }
+                        </MudSelect>
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_sourceSqlFilePath" Label="高版本 SQL 文件路径"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                      Placeholder="可填服务器路径，也可上传完整 .sql" />
+                    }
+
+                    <MudTextField @bind-Value="_schemasText" Label="Schema"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                  Placeholder="多个用英文逗号分隔，默认 lhyy" />
+                </div>
+
+                @if (IsCompareSourceSqlFileMode)
+                {
+                    <div class="database-upgrade-file-row">
+                        <label class="database-upgrade-upload">
+                            <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
+                            <span>上传高版本 SQL</span>
+                            <InputFile OnChange="OnSourceSqlFileChanged" accept=".sql" />
+                        </label>
+                        @if (!string.IsNullOrWhiteSpace(_uploadedSourceSqlFileName))
+                        {
+                            <MudText Typo="Typo.body2" Class="database-upgrade-file-name">已选择：@_uploadedSourceSqlFileName</MudText>
+                        }
+                    </div>
+                }
+
+                <MudCheckBox T="bool" @bind-Value="_includeDrop" Color="Color.Error" Disabled="_busy"
+                             Label="允许生成删除多余表、字段、索引、约束、视图、函数、触发器的 SQL" />
+            </div>
+        }
+
+        <div class="database-upgrade-backup">
+            <MudCheckBox T="bool" @bind-Value="_skipBackup" Color="Color.Warning" Disabled="_busy"
+                         Label="我已手工备份，跳过自动备份" />
+        </div>
+
+        @if (IsSqlFileMode)
+        {
+            <div class="database-upgrade-file-panel">
+                <div class="database-upgrade-file-row">
+                    <MudTextField @bind-Value="_sqlFilePath" Label="服务器 SQL 文件路径"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                  Placeholder="例如 D:\Upgrade\upgrade.sql；也可使用下方上传" />
+                    <label class="database-upgrade-upload">
+                        <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
+                        <span>上传 SQL 文件</span>
+                        <InputFile OnChange="OnSqlFileChanged" accept=".sql" />
+                    </label>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_uploadedSqlFileName))
+                {
+                    <MudText Typo="Typo.body2" Class="database-upgrade-file-name">已选择：@_uploadedSqlFileName</MudText>
+                }
+            </div>
+        }
+
+        <div class="database-upgrade-button-row">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FactCheck"
+                       OnClick="CheckUpgrade" Disabled="@(!CanOperate)">
+                检查升级
+            </MudButton>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <MudAlert Severity="_messageSeverity" Variant="Variant.Outlined" Dense="true">@_message</MudAlert>
+        }
+
+        @if (_checkResult != null && IsProjectScriptsMode)
+        {
+            <div class="database-upgrade-summary">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">脚本总数：@_checkResult.TotalScriptCount</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">待执行：@_checkResult.PendingScripts.Count</MudChip>
+            </div>
+
+            <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="database-upgrade-tabs">
+                <MudTabPanel Text="待执行脚本" Icon="@Icons.Material.Filled.PendingActions">
+                    @if (_checkResult.PendingScripts.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="database-upgrade-empty">没有待执行脚本。</MudText>
+                    }
+                    else
+                    {
+                        <MudList T="string" Dense="true" Class="database-upgrade-script-list">
+                            @foreach (var script in _checkResult.PendingScripts)
+                            {
+                                <MudListItem Icon="@Icons.Material.Filled.Description">@script</MudListItem>
+                            }
+                        </MudList>
+                    }
+                </MudTabPanel>
+            </MudTabs>
+        }
+
+        @if (_compareResult != null && IsCompareMode)
+        {
+            <div class="database-upgrade-summary">
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">Schema：@string.Join(", ", _compareResult.Schemas)</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">差异：@_compareResult.Differences.Count</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">删除类：@_compareResult.Differences.Count(x => x.IsDangerous)</MudChip>
+            </div>
+
+            <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="database-upgrade-tabs">
+                <MudTabPanel Text="结构差异" Icon="@Icons.Material.Filled.CompareArrows">
+                    @if (_compareResult.Differences.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="database-upgrade-empty">没有发现结构差异。</MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_compareResult.Differences" Dense="true" Hover="true" Elevation="0" Class="database-upgrade-table">
+                            <HeaderContent>
+                                <MudTh>类型</MudTh>
+                                <MudTh>对象</MudTh>
+                                <MudTh>变化</MudTh>
+                                <MudTh>说明</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.Category</MudTd>
+                                <MudTd>@context.ObjectName</MudTd>
+                                <MudTd>
+                                    <MudChip T="string" Size="Size.Small" Color="@(context.IsDangerous ? Color.Error : Color.Primary)" Variant="Variant.Outlined">
+                                        @context.ChangeType
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd>@context.Note</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudTabPanel>
+                <MudTabPanel Text="数据同步" Icon="@Icons.Material.Filled.SyncAlt">
+                    <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">选择需要从高版本同步到低版本的数据表。</MudText>
+                    <MudTable Items="_tableSyncSelections" Dense="true" Hover="true" Elevation="0" Class="database-upgrade-table">
+                        <HeaderContent>
+                            <MudTh>同步</MudTh>
+                            <MudTh>表</MudTh>
+                            <MudTh>方式</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd>
+                                <MudCheckBox T="bool" @bind-Value="context.Selected" Color="Color.Primary" />
+                            </MudTd>
+                            <MudTd>@context.FullName</MudTd>
+                            <MudTd>
+                                <MudSelect T="string" @bind-Value="context.Mode" Dense="true" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    <MudSelectItem Value="@DatabaseCompareService.DataSyncModeUpsert">更新插入</MudSelectItem>
+                                    <MudSelectItem Value="@DatabaseCompareService.DataSyncModeClearImport">清空导入</MudSelectItem>
+                                </MudSelect>
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </MudTabPanel>
+            </MudTabs>
+        }
+
+        <div class="database-upgrade-confirm">
+            <MudText Typo="Typo.subtitle2" Class="database-upgrade-confirm-title">执行确认</MudText>
+            <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">确认目标库和待执行内容无误后，输入“确认”启用执行按钮。</MudText>
+            <MudTextField @bind-Value="_confirmText" Label="确认文本"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
+            <div class="database-upgrade-button-row">
+                <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.PlayArrow"
+                           OnClick="ExecuteUpgrade" Disabled="@(!CanExecute)">
+                    @ExecuteButtonText
+                </MudButton>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_executeMessage))
+            {
+                <MudAlert Severity="_executeMessageSeverity" Variant="Variant.Outlined" Dense="true">@_executeMessage</MudAlert>
+            }
+        </div>
+
+        @if (_executeResult != null)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
+                升级完成，备份文件：@_executeResult.BackupFile
+            </MudAlert>
+            <MudList T="string" Dense="true" Class="database-upgrade-script-list">
+                @foreach (var script in _executeResult.ExecutedScripts)
+                {
+                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">@script</MudListItem>
+                }
+            </MudList>
+        }
+
+        @if (_compareExecuteResult != null)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
+                比对升级完成，备份文件：@_compareExecuteResult.BackupFile
+            </MudAlert>
+            <MudList T="string" Dense="true" Class="database-upgrade-script-list">
+                @foreach (var item in _compareExecuteResult.SummaryItems)
+                {
+                    <MudListItem Icon="@Icons.Material.Filled.CheckCircle">@item</MudListItem>
+                }
+            </MudList>
+        }
+    </section>
+</div>
+
+@code {
+    private List<DatabaseConnectionOption> _connections = [];
+    private const string ProjectScriptsMode = "ProjectScripts";
+    private const string SqlFileMode = "SqlFile";
+    private const string CompareMode = "Compare";
+    private const string CompareSourceConnectionMode = DatabaseCompareService.SourceConnection;
+    private const string CompareSourceSqlFileMode = DatabaseCompareService.SourceSqlFile;
+    private string _upgradeMode = CompareMode;
+    private string _compareSourceMode = CompareSourceConnectionMode;
+    private string? _selectedConnectionName;
+    private string? _sourceConnectionName;
+    private string? _pgDumpPath;
+    private string? _sqlFilePath;
+    private string? _sourceSqlFilePath;
+    private string? _uploadedSqlFileName;
+    private string? _uploadedSourceSqlFileName;
+    private string? _checkedConnectionName;
+    private string? _checkedSqlFilePath;
+    private string? _checkedCompareKey;
+    private string _schemasText = "lhyy";
+    private string? _confirmText;
+    private string? _message;
+    private string? _executeMessage;
+    private Severity _messageSeverity = Severity.Info;
+    private Severity _executeMessageSeverity = Severity.Info;
+    private bool _busy;
+    private bool _sqlFileChecked;
+    private bool _skipBackup;
+    private bool _includeDrop;
+    private DatabaseUpgradeCheckResult? _checkResult;
+    private DatabaseUpgradeExecuteResult? _executeResult;
+    private DatabaseCompareResult? _compareResult;
+    private DatabaseCompareExecuteResult? _compareExecuteResult;
+    private List<TableSyncSelection> _tableSyncSelections = [];
+
+    private bool CanOperate => !_busy && !string.IsNullOrWhiteSpace(_selectedConnectionName);
+    private bool IsProjectScriptsMode => string.Equals(_upgradeMode, ProjectScriptsMode, StringComparison.Ordinal);
+    private bool IsSqlFileMode => string.Equals(_upgradeMode, SqlFileMode, StringComparison.Ordinal);
+    private bool IsCompareMode => string.Equals(_upgradeMode, CompareMode, StringComparison.Ordinal);
+    private bool IsCompareSourceConnectionMode => string.Equals(_compareSourceMode, CompareSourceConnectionMode, StringComparison.Ordinal);
+    private bool IsCompareSourceSqlFileMode => string.Equals(_compareSourceMode, CompareSourceSqlFileMode, StringComparison.Ordinal);
+    private string ExecuteButtonText => IsSqlFileMode
+        ? (_skipBackup ? "执行文件" : "备份并执行文件")
+        : (_skipBackup ? "执行升级" : "备份并升级");
+    private bool CanExecute =>
+        CanOperate
+        && string.Equals(_confirmText, "确认", StringComparison.Ordinal)
+        && string.Equals(_checkedConnectionName, _selectedConnectionName, StringComparison.OrdinalIgnoreCase)
+        && (IsCompareMode
+            ? _compareResult != null
+                && _compareResult.Differences.Count > 0
+                && string.Equals(_checkedCompareKey, BuildCompareKey(), StringComparison.Ordinal)
+            : IsProjectScriptsMode
+            ? _checkResult?.PendingScripts.Count > 0
+            : _sqlFileChecked
+                && !string.IsNullOrWhiteSpace(_sqlFilePath)
+                && string.Equals(_checkedSqlFilePath, _sqlFilePath, StringComparison.OrdinalIgnoreCase));
+
+    protected override bool RequiresIntegrationProject => false;
+
+    protected override Task OnPageInitializedAsync()
+    {
+        LoadConnections();
+        return Task.CompletedTask;
+    }
+
+    private void LoadConnections()
+    {
+        _connections = inj_databaseUpgradeService.GetConnectionOptions();
+        _selectedConnectionName ??= _connections.FirstOrDefault()?.Name;
+        _sourceConnectionName ??= _connections.FirstOrDefault(item => !string.Equals(item.Name, _selectedConnectionName, StringComparison.OrdinalIgnoreCase))?.Name
+            ?? _connections.FirstOrDefault()?.Name;
+        _message = _connections.Count == 0 ? "未找到连接字符串，请检查 appsettings.json。" : null;
+        _messageSeverity = Severity.Info;
+    }
+
+    private async Task CheckUpgrade()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedConnectionName))
+            return;
+
+        _busy = true;
+        _message = "正在检查数据库升级脚本...";
+        _messageSeverity = Severity.Info;
+        _executeMessage = null;
+        _executeResult = null;
+        _compareExecuteResult = null;
+
+        try
+        {
+            if (IsSqlFileMode)
+            {
+                await inj_databaseUpgradeService.CheckSqlFileAsync(_selectedConnectionName, _sqlFilePath ?? "", CancellationToken);
+                _checkResult = null;
+                _sqlFileChecked = true;
+                _checkedConnectionName = _selectedConnectionName;
+                _checkedSqlFilePath = _sqlFilePath;
+                _message = $"检查完成，SQL 文件可执行：{_sqlFilePath}";
+                _messageSeverity = Severity.Success;
+            }
+            else if (IsCompareMode)
+            {
+                var request = BuildCompareRequest();
+                _compareResult = await inj_databaseCompareService.CheckAsync(request, CancellationToken);
+                _tableSyncSelections = _compareResult.Tables
+                    .Select(table => new TableSyncSelection
+                    {
+                        Schema = table.Schema,
+                        Table = table.Table,
+                        FullName = table.FullName,
+                        Mode = DatabaseCompareService.DataSyncModeUpsert
+                    })
+                    .ToList();
+                _checkResult = null;
+                _sqlFileChecked = false;
+                _checkedConnectionName = _selectedConnectionName;
+                _checkedCompareKey = BuildCompareKey();
+                _message = _compareResult.Differences.Count == 0
+                    ? "比对完成，没有发现结构差异。"
+                    : $"比对完成，共 {_compareResult.Differences.Count} 个结构差异。";
+                _messageSeverity = _compareResult.Differences.Any(item => item.IsDangerous) ? Severity.Warning : Severity.Success;
+            }
+            else
+            {
+                _checkResult = await inj_databaseUpgradeService.CheckAsync(_selectedConnectionName, CancellationToken);
+                _sqlFileChecked = false;
+                _checkedConnectionName = _selectedConnectionName;
+                _checkedSqlFilePath = null;
+                _message = _checkResult.PendingScripts.Count == 0
+                    ? "检查完成，没有待执行脚本。"
+                    : $"检查完成，共 {_checkResult.PendingScripts.Count} 个待执行脚本。";
+                _messageSeverity = Severity.Success;
+            }
+        }
+        catch (Exception ex)
+        {
+            _checkResult = null;
+            _compareResult = null;
+            _sqlFileChecked = false;
+            _checkedConnectionName = null;
+            _checkedSqlFilePath = null;
+            _checkedCompareKey = null;
+            _message = $"检查失败：{ex.Message}";
+            _messageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ExecuteUpgrade()
+    {
+        if (!CanExecute || string.IsNullOrWhiteSpace(_selectedConnectionName))
+            return;
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认升级数据库",
+            _skipBackup ? "将跳过自动备份，直接执行待升级内容。确认继续？" : "将先备份目标数据库，再执行待升级内容。确认继续？",
+            yesText: "确认升级",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        _busy = true;
+        _executeMessage = _skipBackup ? "正在升级数据库..." : "正在备份并升级数据库...";
+        _executeMessageSeverity = Severity.Info;
+        _executeResult = null;
+        _compareExecuteResult = null;
+
+        try
+        {
+            if (IsCompareMode)
+            {
+                var syncTables = _tableSyncSelections
+                    .Where(table => table.Selected)
+                    .Select(table => new DatabaseTableDataSyncRequest(table.Schema, table.Table, table.Mode))
+                    .ToList();
+                _compareExecuteResult = await inj_databaseCompareService.ExecuteAsync(BuildCompareRequest(), syncTables, _skipBackup, CancellationToken);
+                _executeResult = null;
+            }
+            else
+            {
+                _executeResult = IsSqlFileMode
+                    ? await inj_databaseUpgradeService.ExecuteSqlFileAsync(_selectedConnectionName, _sqlFilePath ?? "", _pgDumpPath, _skipBackup, CancellationToken)
+                    : await inj_databaseUpgradeService.ExecuteAsync(_selectedConnectionName, _pgDumpPath, _skipBackup, CancellationToken);
+                _compareExecuteResult = null;
+            }
+            _confirmText = null;
+            _executeMessage = "数据库升级完成。";
+            _executeMessageSeverity = Severity.Success;
+            if (IsProjectScriptsMode)
+            {
+                _checkResult = await inj_databaseUpgradeService.CheckAsync(_selectedConnectionName, CancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _executeMessage = $"升级失败：{ex.Message}";
+            _executeMessageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnSqlFileChanged(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        _busy = true;
+        _message = "正在上传 SQL 文件...";
+        _messageSeverity = Severity.Info;
+        _executeMessage = null;
+        _sqlFileChecked = false;
+        _checkedSqlFilePath = null;
+        _executeResult = null;
+        _compareExecuteResult = null;
+
+        try
+        {
+            await using var stream = file.OpenReadStream(DatabaseUpgradeService.MaxSqlFileUploadBytes, CancellationToken);
+            _sqlFilePath = await inj_databaseUpgradeService.SaveSqlFileAsync(file.Name, stream, CancellationToken);
+            _uploadedSqlFileName = $"{file.Name}（{FormatBytes(file.Size)}）";
+            _message = "SQL 文件已上传，请先检查升级。";
+            _messageSeverity = Severity.Success;
+        }
+        catch (Exception ex)
+        {
+            _message = $"上传失败：{ex.Message}";
+            _messageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnSourceSqlFileChanged(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        _busy = true;
+        _message = "正在上传高版本 SQL 文件...";
+        _messageSeverity = Severity.Info;
+        _executeMessage = null;
+        _compareResult = null;
+        _checkedCompareKey = null;
+        _compareExecuteResult = null;
+
+        try
+        {
+            await using var stream = file.OpenReadStream(DatabaseUpgradeService.MaxSqlFileUploadBytes, CancellationToken);
+            _sourceSqlFilePath = await inj_databaseUpgradeService.SaveSqlFileAsync(file.Name, stream, CancellationToken);
+            _uploadedSourceSqlFileName = $"{file.Name}（{FormatBytes(file.Size)}）";
+            _message = "高版本 SQL 文件已上传，请先检查升级。";
+            _messageSeverity = Severity.Success;
+        }
+        catch (Exception ex)
+        {
+            _message = $"上传失败：{ex.Message}";
+            _messageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private DatabaseCompareRequest BuildCompareRequest() =>
+        new(
+            _selectedConnectionName ?? "",
+            _compareSourceMode,
+            _sourceConnectionName,
+            _sourceSqlFilePath,
+            _schemasText,
+            _pgDumpPath,
+            _includeDrop);
+
+    private string BuildCompareKey() =>
+        string.Join("|",
+            _selectedConnectionName,
+            _compareSourceMode,
+            _sourceConnectionName,
+            _sourceSqlFilePath,
+            _schemasText,
+            _pgDumpPath,
+            _includeDrop);
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes >= 1024 * 1024)
+            return $"{bytes / 1024d / 1024d:0.##} MB";
+
+        if (bytes >= 1024)
+            return $"{bytes / 1024d:0.##} KB";
+
+        return $"{bytes} B";
+    }
+
+    private sealed class TableSyncSelection
+    {
+        public string Schema { get; set; } = "";
+        public string Table { get; set; } = "";
+        public string FullName { get; set; } = "";
+        public string Mode { get; set; } = DatabaseCompareService.DataSyncModeUpsert;
+        public bool Selected { get; set; }
+    }
+}

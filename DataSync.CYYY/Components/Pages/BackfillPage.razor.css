@@ -1,0 +1,295 @@
+﻿.backfill-page {
+    --backfill-ink: #1f2937;
+    --backfill-muted: #64748b;
+    --backfill-line: #e2e8f0;
+    --backfill-soft: #f8fafc;
+    --backfill-accent: #0f766e;
+    --backfill-accent-soft: #ecfdf5;
+    --backfill-warn-soft: #fff7ed;
+    color: var(--backfill-ink);
+}
+
+.backfill-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px;
+    padding: 2px 0 18px;
+    border-bottom: 1px solid var(--backfill-line);
+}
+
+.backfill-title {
+    font-weight: 700;
+    letter-spacing: 0;
+}
+
+.backfill-subtitle {
+    margin-top: 4px;
+    color: var(--backfill-muted);
+    font-size: 0.92rem;
+}
+
+.backfill-header-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--backfill-muted);
+    font-size: 0.84rem;
+}
+
+.backfill-header-meta span {
+    border: 1px solid var(--backfill-line);
+    border-radius: 6px;
+    padding: 5px 9px;
+    background: #ffffff;
+}
+
+.backfill-tabs {
+    margin-top: 18px;
+    overflow: hidden;
+    border: 1px solid var(--backfill-line);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.backfill-tabs ::deep .mud-tabs-toolbar {
+    background: var(--backfill-soft);
+    border-bottom: 1px solid var(--backfill-line);
+}
+
+.backfill-tabs ::deep .mud-tab {
+    min-height: 46px;
+    color: var(--backfill-muted);
+    font-weight: 500;
+}
+
+.backfill-tabs ::deep .mud-tab.mud-tab-active {
+    color: var(--backfill-accent);
+    font-weight: 700;
+}
+
+.backfill-tab-panel {
+    padding: 22px 24px 24px;
+}
+
+.backfill-input-grid {
+    margin-bottom: 2px;
+}
+
+.backfill-wide-input {
+    max-width: 760px;
+}
+
+.backfill-selector {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--backfill-line);
+}
+
+.backfill-selector-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.backfill-section-title {
+    color: var(--backfill-ink);
+    font-size: 0.98rem;
+    font-weight: 700;
+}
+
+.backfill-selector-head span {
+    color: var(--backfill-muted);
+    font-size: 0.82rem;
+}
+
+.backfill-task-selector {
+    margin-bottom: 8px;
+    border: 1px solid var(--backfill-line);
+    border-radius: 8px;
+    background: #ffffff;
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.backfill-task-selector.is-selected {
+    border-color: #99f6e4;
+    background: #fbfefd;
+}
+
+.backfill-task-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 48px;
+    padding: 4px 12px 4px 4px;
+}
+
+.backfill-task-header ::deep .mud-checkbox {
+    margin: 0;
+}
+
+.backfill-task-meta {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    color: var(--backfill-muted);
+    font-size: 0.78rem;
+}
+
+.backfill-task-meta span {
+    border: 1px solid var(--backfill-line);
+    border-radius: 5px;
+    padding: 3px 7px;
+    background: #ffffff;
+}
+
+.backfill-interface-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 12px 12px 40px;
+}
+
+.backfill-interface-option {
+    min-height: 34px;
+    border: 1px solid var(--backfill-line);
+    border-radius: 6px;
+    background: #ffffff;
+    transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.backfill-interface-option:hover {
+    border-color: #94a3b8;
+    background: var(--backfill-soft);
+}
+
+.backfill-interface-option-trigger {
+    border-color: #fed7aa;
+    background: var(--backfill-warn-soft);
+}
+
+.backfill-interface-option ::deep .mud-checkbox {
+    margin: 0;
+    padding-right: 8px;
+}
+
+.backfill-interface-option ::deep .mud-typography {
+    font-size: 0.84rem;
+}
+
+.backfill-option-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--backfill-line);
+    border-radius: 8px;
+    background: var(--backfill-soft);
+}
+
+.backfill-option-strip span {
+    color: var(--backfill-muted);
+    font-size: 0.84rem;
+}
+
+.backfill-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.backfill-progress-panel {
+    margin-top: 18px;
+    padding: 18px 20px;
+    border: 1px solid var(--backfill-line);
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.backfill-progress-heading {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 18px 0 8px;
+    color: var(--backfill-ink);
+    font-weight: 700;
+}
+
+.patient-list {
+    margin-top: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    border-top: 1px solid var(--backfill-line);
+}
+
+.patient-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 0.85rem;
+}
+
+.patient-name {
+    margin-right: 4px;
+    color: var(--backfill-ink);
+    font-weight: 600;
+}
+
+.elapsed {
+    margin-left: 8px;
+    color: var(--backfill-muted);
+    font-size: 0.8rem;
+}
+
+.elapsed-total {
+    margin-left: 12px;
+    color: var(--backfill-muted);
+    font-size: 0.82rem;
+    font-weight: 500;
+}
+
+.backfill-error-tooltip {
+    max-width: 520px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.backfill-fail-table {
+    margin-top: 14px;
+    border: 1px solid var(--backfill-line);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+@media (max-width: 720px) {
+    .backfill-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .backfill-tab-panel {
+        padding: 16px;
+    }
+
+    .backfill-selector-head,
+    .backfill-task-header,
+    .backfill-option-strip {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .backfill-interface-list {
+        padding-left: 12px;
+    }
+}

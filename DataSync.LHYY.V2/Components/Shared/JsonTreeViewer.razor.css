@@ -1,0 +1,120 @@
+﻿.json-tree-viewer-root {
+    min-height: 0;
+}
+
+.json-tree-search-shell {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding-bottom: 8px;
+    background: var(--mud-palette-surface);
+}
+
+.json-tree-search {
+    margin: 0;
+}
+
+.json-tree-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.json-tree-node {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.json-tree-node-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    padding: 4px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+}
+
+.json-tree-node-row:hover {
+    background-color: rgba(33, 150, 243, 0.06);
+}
+
+.json-tree-node-row.is-selected {
+    background-color: rgba(33, 150, 243, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(33, 150, 243, 0.32);
+}
+
+.json-tree-toggle,
+.json-tree-toggle-placeholder {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+}
+
+.json-tree-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--mud-palette-text-secondary);
+    cursor: pointer;
+}
+
+.json-tree-toggle:hover {
+    color: var(--mud-palette-primary);
+}
+
+.json-tree-node-icon {
+    flex: 0 0 auto;
+    color: var(--mud-palette-text-secondary);
+}
+
+.json-tree-node-key {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-weight: 600;
+}
+
+.json-tree-node-value,
+.json-tree-node-meta {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.json-tree-node-value {
+    color: var(--mud-palette-text-secondary);
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 12px;
+}
+
+.json-tree-node-meta {
+    color: var(--mud-palette-text-secondary);
+    font-size: 12px;
+}
+
+.json-tree-node-type {
+    flex: 0 0 auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background-color: rgba(0, 0, 0, 0.05);
+    color: var(--mud-palette-text-secondary);
+    font-size: 10px;
+    line-height: 16px;
+}
+
+.json-tree-children {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-left: 9px;
+    padding-left: 12px;
+    border-left: 1px solid rgba(0, 0, 0, 0.08);
+}

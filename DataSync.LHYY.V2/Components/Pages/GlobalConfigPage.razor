@@ -1,0 +1,507 @@
+﻿@page "/config/global"
+@inherits BasePage
+
+<PageTitle>全局配置 - LHYY V2</PageTitle>
+
+<div class="global-config-page">
+    <header class="global-config-header">
+        <div class="global-config-title-block">
+            <MudText Typo="Typo.h4" Class="global-config-title">全局配置</MudText>
+            <MudText Typo="Typo.body2" Class="global-config-subtitle">平台级参数与 LLM 接入参数分区维护。</MudText>
+        </div>
+        <div class="global-config-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh"
+                       OnClick="ClearCache" Class="global-config-secondary-button">清除缓存</MudButton>
+        </div>
+    </header>
+
+    <section class="global-config-workspace">
+        <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="global-config-tabs" PanelClass="global-config-tab-panel">
+            <MudTabPanel Text="LLM 配置" Icon="@Icons.Material.Filled.AutoAwesome">
+                <div class="global-config-section global-config-llm-section">
+                    <div class="global-config-section-head">
+                        <div>
+                            <MudText Typo="Typo.h6" Class="global-config-section-title">LLM 接入</MudText>
+                            <MudText Typo="Typo.body2" Class="global-config-section-note">AI 新建与映射推荐只会调用当前选中的配置。</MudText>
+                        </div>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="global-config-chip">
+                            当前使用：@GetActiveProviderName()
+                        </MudChip>
+                    </div>
+
+                    <div class="global-config-provider-switch">
+                        <MudButton Variant="@GetProviderButtonVariant(LlmOptions.OnlineProvider)" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Cloud" OnClick="@(() => SelectLlmProvider(LlmOptions.OnlineProvider))">
+                            线上 API
+                        </MudButton>
+                        <MudButton Variant="@GetProviderButtonVariant(LlmOptions.LocalProvider)" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Computer" OnClick="@(() => SelectLlmProvider(LlmOptions.LocalProvider))">
+                            本地模型
+                        </MudButton>
+                    </div>
+
+                    <div class="global-config-profile-grid">
+                        <section class="@GetProfileClass(LlmOptions.OnlineProvider)">
+                            <div class="global-config-profile-head">
+                                <MudText Typo="Typo.subtitle1" Class="global-config-profile-title">线上 API</MudText>
+                                <MudText Typo="Typo.caption" Class="global-config-section-note">兼容 OpenAI Chat Completions 的云端接口。</MudText>
+                            </div>
+                            <div class="global-config-llm-grid">
+                                <div class="global-config-field global-config-field-wide">
+                                    <MudTextField @bind-Value="_onlineLlmConfig.BaseUrl" Label="BaseUrl" Required="true"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
+                                </div>
+                                <div class="global-config-field">
+                                    <MudTextField @bind-Value="_onlineLlmConfig.Model" Label="模型" Required="true"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Memory" />
+                                </div>
+                                <div class="global-config-field global-config-field-wide">
+                                    <MudTextField @bind-Value="_onlineLlmConfig.ApiKey" Label="ApiKey"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  InputType="@(_showLlmApiKey ? InputType.Text : InputType.Password)"
+                                                  Adornment="Adornment.End" AdornmentIcon="@GetApiKeyAdornmentIcon()"
+                                                  OnAdornmentClick="ToggleLlmApiKeyVisible" />
+                                </div>
+                                <div class="global-config-field">
+                                    <MudNumericField T="int" @bind-Value="_onlineLlmConfig.TimeoutSeconds" Label="超时（秒）"
+                                                     Min="1" Max="600" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                     Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Timer" />
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="@GetProfileClass(LlmOptions.LocalProvider)">
+                            <div class="global-config-profile-head">
+                                <MudText Typo="Typo.subtitle1" Class="global-config-profile-title">本地模型</MudText>
+                                <MudText Typo="Typo.caption" Class="global-config-section-note">例如 Ollama 的本地 OpenAI 兼容地址。</MudText>
+                            </div>
+                            <div class="global-config-llm-grid global-config-local-grid">
+                                <div class="global-config-field global-config-field-wide">
+                                    <MudTextField @bind-Value="_localLlmConfig.BaseUrl" Label="BaseUrl" Required="true"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Link" />
+                                </div>
+                                <div class="global-config-field">
+                                    <MudTextField @bind-Value="_localLlmConfig.Model" Label="模型" Required="true"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Memory" />
+                                </div>
+                                <div class="global-config-field">
+                                    <MudNumericField T="int" @bind-Value="_localLlmConfig.TimeoutSeconds" Label="超时（秒）"
+                                                     Min="1" Max="600" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                     Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Timer" />
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+
+                    <div class="global-config-save-row">
+                        <MudText Typo="Typo.caption" Class="global-config-section-note">
+                            当前生效：@GetActiveProviderName()
+                        </MudText>
+                        <div class="global-config-save-actions">
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                                       OnClick="SaveLlmConfig" Disabled="_llmSaving" Class="global-config-save-button">
+                                @(_llmSaving ? "保存中..." : "保存 LLM 配置")
+                            </MudButton>
+                        </div>
+                    </div>
+                </div>
+            </MudTabPanel>
+
+            <MudTabPanel Text="通用键值" Icon="@Icons.Material.Filled.Tune">
+                <div class="global-config-section">
+                    <div class="global-config-section-head global-config-table-head">
+                        <div>
+                            <MudText Typo="Typo.h6" Class="global-config-section-title">通用键值</MudText>
+                            <MudText Typo="Typo.body2" Class="global-config-section-note">共 @_generalItems.Count 条配置。</MudText>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddNew" Class="global-config-primary-button">新增配置</MudButton>
+                    </div>
+
+                    <MudTable Items="_generalItems" Dense="true" Hover="true" Bordered="false" Striped="false" Loading="_loading"
+                              Elevation="0" Class="global-config-table">
+                        <HeaderContent>
+                            <MudTh>配置键</MudTh>
+                            <MudTh>配置值</MudTh>
+                            <MudTh>类型</MudTh>
+                            <MudTh>说明</MudTh>
+                            <MudTh>操作</MudTh>
+                        </HeaderContent>
+                        <RowTemplate>
+                            <MudTd DataLabel="配置键" Class="global-config-key-cell">
+                                <span class="global-config-key">@context.ConfigKey</span>
+                            </MudTd>
+                            <MudTd DataLabel="配置值" Class="global-config-value-cell">@FormatConfigValue(context)</MudTd>
+                            <MudTd DataLabel="类型">
+                                <span class="global-config-type">@context.ConfigType</span>
+                            </MudTd>
+                            <MudTd DataLabel="说明" Class="global-config-desc-cell">@context.Description</MudTd>
+                            <MudTd DataLabel="操作" Class="global-config-row-actions">
+                                <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error" OnClick="@(() => Delete(context))" />
+                            </MudTd>
+                        </RowTemplate>
+                    </MudTable>
+                </div>
+            </MudTabPanel>
+        </MudTabs>
+    </section>
+</div>
+
+<MudDialog @bind-Visible="_dialogVisible" Options="_dialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_isNew ? "新增配置" : "编辑配置")</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_editItem != null)
+        {
+            <MudGrid>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_editItem.ConfigKey" Label="配置键" Required="true" Disabled="!_isNew" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_editItem.ConfigValue" Label="配置值" Lines="3"
+                                  InputType="@(IsEditingLlmApiKey ? (_showLlmApiKey ? InputType.Text : InputType.Password) : InputType.Text)"
+                                  Adornment="@(IsEditingLlmApiKey ? Adornment.End : Adornment.None)"
+                                  AdornmentIcon="@(IsEditingLlmApiKey ? GetApiKeyAdornmentIcon() : null)"
+                                  OnAdornmentClick="ToggleLlmApiKeyVisible" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="string" @bind-Value="_editItem.ConfigType" Label="类型">
+                        <MudSelectItem Value="@("string")">string</MudSelectItem>
+                        <MudSelectItem Value="@("int")">int</MudSelectItem>
+                        <MudSelectItem Value="@("bool")">bool</MudSelectItem>
+                        <MudSelectItem Value="@("json")">json</MudSelectItem>
+                    </MudSelect>
+                </MudItem>
+                <MudItem xs="12">
+                    <MudTextField @bind-Value="_editItem.Description" Label="说明" />
+                </MudItem>
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogVisible = false)">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">保存</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Inject] private ConfigService ConfigSvc { get; set; } = default!;
+
+    private static readonly HashSet<string> LlmConfigKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        LlmOptions.ActiveProviderKey,
+        LlmOptions.BaseUrlKey,
+        LlmOptions.ModelKey,
+        LlmOptions.ApiKeyKey,
+        LlmOptions.TimeoutSecondsKey,
+        LlmOptions.LocalBaseUrlKey,
+        LlmOptions.LocalModelKey,
+        LlmOptions.LocalTimeoutSecondsKey
+    };
+
+    private List<EsbGlobalConfig> _items = [];
+    private List<EsbGlobalConfig> _generalItems = [];
+    private EsbGlobalConfig? _editItem;
+    private LlmOptions _onlineLlmConfig = new();
+    private LlmOptions _localLlmConfig = LlmOptions.CreateLocalDefaults();
+    private string _activeLlmProvider = LlmOptions.OnlineProvider;
+    private bool _loading = true;
+    private bool _llmSaving;
+    private bool _showLlmApiKey;
+    private bool _dialogVisible;
+    private bool _isNew;
+    private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Small, FullWidth = true };
+    private bool IsEditingLlmApiKey =>
+        string.Equals(_editItem?.ConfigKey, LlmOptions.ApiKeyKey, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            _items = await db.EsbGlobalConfigs.OrderBy(c => c.ConfigKey).ToListAsync();
+            _generalItems = _items.Where(c => !IsLlmConfigKey(c.ConfigKey)).ToList();
+            LoadLlmConfigFromItems();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void LoadLlmConfigFromItems()
+    {
+        var configs = _items
+            .Where(c => c.ConfigValue != null)
+            .GroupBy(c => c.ConfigKey, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.Last().ConfigValue!, StringComparer.OrdinalIgnoreCase);
+
+        _activeLlmProvider = GetConfigValue(configs, LlmOptions.ActiveProviderKey, LlmOptions.OnlineProvider);
+        NormalizeActiveProvider();
+
+        var onlineFallback = inj_llmOptions.Value;
+        var localFallback = LlmOptions.CreateLocalDefaults();
+        _onlineLlmConfig = new LlmOptions
+        {
+            BaseUrl = GetConfigValue(configs, LlmOptions.BaseUrlKey, onlineFallback.BaseUrl),
+            Model = GetConfigValue(configs, LlmOptions.ModelKey, onlineFallback.Model),
+            ApiKey = GetConfigValue(configs, LlmOptions.ApiKeyKey, onlineFallback.ApiKey),
+            TimeoutSeconds = GetPositiveIntValue(configs, LlmOptions.TimeoutSecondsKey, onlineFallback.TimeoutSeconds)
+        };
+        _localLlmConfig = new LlmOptions
+        {
+            BaseUrl = GetConfigValue(configs, LlmOptions.LocalBaseUrlKey, localFallback.BaseUrl),
+            Model = GetConfigValue(configs, LlmOptions.LocalModelKey, localFallback.Model),
+            TimeoutSeconds = GetPositiveIntValue(configs, LlmOptions.LocalTimeoutSecondsKey, localFallback.TimeoutSeconds)
+        };
+    }
+
+    private void AddNew()
+    {
+        _showLlmApiKey = false;
+        _editItem = new EsbGlobalConfig { ConfigType = "string" };
+        _isNew = true;
+        _dialogVisible = true;
+    }
+
+    private void Edit(EsbGlobalConfig item)
+    {
+        _showLlmApiKey = false;
+        _editItem = new EsbGlobalConfig
+        {
+            Id = item.Id,
+            ConfigKey = item.ConfigKey,
+            ConfigValue = item.ConfigValue,
+            ConfigType = item.ConfigType,
+            Description = item.Description,
+        };
+        _isNew = false;
+        _dialogVisible = true;
+    }
+
+    private async Task SaveLlmConfig()
+    {
+        if (!ValidateLlmConfig(_onlineLlmConfig, "线上 API")
+            || !ValidateLlmConfig(_localLlmConfig, "本地模型"))
+        {
+            return;
+        }
+
+        NormalizeActiveProvider();
+
+        _llmSaving = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            await UpsertGlobalConfig(db, LlmOptions.ActiveProviderKey, _activeLlmProvider, "string", "当前使用的 LLM 配置");
+            await UpsertGlobalConfig(db, LlmOptions.BaseUrlKey, _onlineLlmConfig.BaseUrl.Trim(), "string", "线上 LLM 接口基础地址");
+            await UpsertGlobalConfig(db, LlmOptions.ModelKey, _onlineLlmConfig.Model.Trim(), "string", "线上 LLM 模型名称");
+            await UpsertGlobalConfig(db, LlmOptions.ApiKeyKey, _onlineLlmConfig.ApiKey?.Trim(), "string", "线上 LLM API Key");
+            await UpsertGlobalConfig(db, LlmOptions.TimeoutSecondsKey, _onlineLlmConfig.TimeoutSeconds.ToString(), "int", "线上 LLM 请求超时时间（秒）");
+            await UpsertGlobalConfig(db, LlmOptions.LocalBaseUrlKey, _localLlmConfig.BaseUrl.Trim(), "string", "本地 LLM 接口基础地址");
+            await UpsertGlobalConfig(db, LlmOptions.LocalModelKey, _localLlmConfig.Model.Trim(), "string", "本地 LLM 模型名称");
+            await UpsertGlobalConfig(db, LlmOptions.LocalTimeoutSecondsKey, _localLlmConfig.TimeoutSeconds.ToString(), "int", "本地 LLM 请求超时时间（秒）");
+
+            await db.SaveChangesAsync();
+            ConfigSvc.ClearCache();
+            inj_snackbar.Add("LLM 配置已保存", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"LLM 配置保存失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _llmSaving = false;
+        }
+    }
+
+    private bool ValidateLlmConfig(LlmOptions options, string name)
+    {
+        if (string.IsNullOrWhiteSpace(options.BaseUrl) || string.IsNullOrWhiteSpace(options.Model))
+        {
+            inj_snackbar.Add($"{name} 的 BaseUrl 和模型不能为空", Severity.Warning);
+            return false;
+        }
+
+        if (options.TimeoutSeconds <= 0)
+        {
+            inj_snackbar.Add($"{name} 的超时时间必须大于 0", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private static async Task UpsertGlobalConfig(DataSyncDbContext db, string key, string? value, string type, string description)
+    {
+        var item = await db.EsbGlobalConfigs.FirstOrDefaultAsync(c => c.ConfigKey == key);
+        if (item == null)
+        {
+            db.EsbGlobalConfigs.Add(new EsbGlobalConfig
+            {
+                ConfigKey = key,
+                ConfigValue = value,
+                ConfigType = type,
+                Description = description
+            });
+            return;
+        }
+
+        item.ConfigValue = value;
+        item.ConfigType = type;
+        item.Description = description;
+    }
+
+    private async Task Save()
+    {
+        if (_editItem == null || string.IsNullOrWhiteSpace(_editItem.ConfigKey))
+        {
+            inj_snackbar.Add("配置键不能为空", Severity.Warning);
+            return;
+        }
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+
+            if (_isNew)
+            {
+                db.EsbGlobalConfigs.Add(_editItem);
+            }
+            else
+            {
+                var existing = await db.EsbGlobalConfigs.FindAsync(_editItem.Id);
+                if (existing != null)
+                {
+                    existing.ConfigValue = _editItem.ConfigValue;
+                    existing.ConfigType = _editItem.ConfigType;
+                    existing.Description = _editItem.Description;
+                }
+            }
+
+            await db.SaveChangesAsync();
+            ConfigSvc.ClearCache();
+            _dialogVisible = false;
+            inj_snackbar.Add("保存成功", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task Delete(EsbGlobalConfig item)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox("确认删除",
+            $"确定要删除配置 {item.ConfigKey} 吗？", yesText: "删除", cancelText: "取消");
+
+        if (confirmed != true) return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var entity = await db.EsbGlobalConfigs.FindAsync(item.Id);
+            if (entity != null)
+            {
+                db.EsbGlobalConfigs.Remove(entity);
+                await db.SaveChangesAsync();
+                ConfigSvc.ClearCache();
+                inj_snackbar.Add("删除成功", Severity.Success);
+                await LoadDataAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private void ClearCache()
+    {
+        ConfigSvc.ClearCache();
+        inj_snackbar.Add("缓存已清除", Severity.Info);
+    }
+
+    private void ToggleLlmApiKeyVisible()
+    {
+        _showLlmApiKey = !_showLlmApiKey;
+    }
+
+    private void SelectLlmProvider(string provider)
+    {
+        _activeLlmProvider = provider;
+        NormalizeActiveProvider();
+    }
+
+    private void NormalizeActiveProvider()
+    {
+        if (!string.Equals(_activeLlmProvider, LlmOptions.LocalProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            _activeLlmProvider = LlmOptions.OnlineProvider;
+            return;
+        }
+
+        _activeLlmProvider = LlmOptions.LocalProvider;
+    }
+
+    private Variant GetProviderButtonVariant(string provider) =>
+        string.Equals(_activeLlmProvider, provider, StringComparison.OrdinalIgnoreCase)
+            ? Variant.Filled
+            : Variant.Outlined;
+
+    private string GetProfileClass(string provider)
+    {
+        var isActive = string.Equals(_activeLlmProvider, provider, StringComparison.OrdinalIgnoreCase);
+        return isActive ? "global-config-profile global-config-profile-active" : "global-config-profile";
+    }
+
+    private string GetActiveProviderName() =>
+        string.Equals(_activeLlmProvider, LlmOptions.LocalProvider, StringComparison.OrdinalIgnoreCase)
+            ? "本地模型"
+            : "线上 API";
+
+    private string GetApiKeyAdornmentIcon() =>
+        _showLlmApiKey ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility;
+
+    private static bool IsLlmConfigKey(string configKey) => LlmConfigKeys.Contains(configKey);
+
+    private string FormatConfigValue(EsbGlobalConfig item)
+    {
+        if (string.Equals(item.ConfigKey, LlmOptions.ApiKeyKey, StringComparison.OrdinalIgnoreCase)
+            && !_showLlmApiKey
+            && !string.IsNullOrWhiteSpace(item.ConfigValue))
+        {
+            return "********";
+        }
+
+        return item.ConfigValue ?? "";
+    }
+
+    private static string GetConfigValue(Dictionary<string, string> configs, string key, string? defaultValue)
+    {
+        return configs.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : defaultValue ?? "";
+    }
+
+    private static int GetPositiveIntValue(Dictionary<string, string> configs, string key, int defaultValue)
+    {
+        var value = GetConfigValue(configs, key, defaultValue.ToString());
+        return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
+    }
+}

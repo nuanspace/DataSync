@@ -1,0 +1,45 @@
+.pending-sync-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.pending-sync-quick-filter {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid #dbeafe;
+    background: #f8fbff;
+}
+
+.pending-sync-quick-filter-text {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.pending-sync-ellipsis {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.pending-sync-multiline {
+    max-width: 520px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+@media (max-width: 600px) {
+    .pending-sync-toolbar,
+    .pending-sync-quick-filter {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

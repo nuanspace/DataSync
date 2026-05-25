@@ -1,0 +1,423 @@
+﻿@page "/messages/{Id:long}"
+@inherits BasePage
+
+<PageTitle>消息详情 - LHYY V2</PageTitle>
+
+<MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+           OnClick="@(() => inj_navigationManager.NavigateTo(GetBackToListUrl()))">
+    返回列表
+</MudButton>
+
+@if (_message == null)
+{
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" Class="mt-4" />
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-4">消息不存在</MudAlert>
+    }
+}
+else
+{
+    var bodyJson = FormatJson(_message.BodyJson);
+    var rawJson = FormatJson(_message.RawJson);
+
+    <MudText Typo="Typo.h5" Class="mt-2 mb-4">消息详情 #@_message.Id</MudText>
+
+    @* 基本信息卡片 *@
+    <MudCard Class="mb-4">
+        <MudCardContent>
+            <MudGrid>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">事件代码</MudText>
+                    <MudText>@_message.TranCode - @_message.TranName</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">MessageId</MudText>
+                    <MudText Class="message-detail-break-all">@_message.MessageId</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="4">
+                    <MudText Typo="Typo.caption">状态</MudText>
+                    <MudText>
+                        @switch (_message.Status)
+                        {
+                            case MessageStatus.Pending:
+                                <MudChip T="string" Color="Color.Warning">待处理</MudChip>
+                                break;
+                            case MessageStatus.Processing:
+                                <MudChip T="string" Color="Color.Info">处理中</MudChip>
+                                break;
+                            case MessageStatus.Success:
+                                <MudChip T="string" Color="Color.Success">成功</MudChip>
+                                break;
+                            case MessageStatus.Failed:
+                                <MudChip T="string" Color="Color.Error">失败</MudChip>
+                                break;
+                            case MessageStatus.Filtered:
+                                <MudChip T="string" Color="Color.Secondary">已过滤</MudChip>
+                                break;
+                            case MessageStatus.Unmatched:
+                                <MudChip T="string" Color="Color.Default">未匹配</MudChip>
+                                break;
+                            case MessageStatus.PartialSuccess:
+                                <MudChip T="string" Color="Color.Info">部分成功</MudChip>
+                                break;
+                        }
+                    </MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">来源系统</MudText>
+                    <MudText>@(_message.AppId ?? "-")</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">来源机构</MudText>
+                    <MudText>@(_message.OrgId ?? "-")</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">重试次数</MudText>
+                    <MudText>@_message.RetryCount</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">接收时间</MudText>
+                    <MudText>@_message.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">病案号</MudText>
+                    <MudText>@(string.IsNullOrWhiteSpace(_message.Mrn) ? "-" : _message.Mrn)</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">事件开始时间</MudText>
+                    <MudText>@(_message.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</MudText>
+                </MudItem>
+            </MudGrid>
+
+            @if (_message.PatientId.HasValue)
+            {
+                <MudGrid Class="mt-2">
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption">患者 ID</MudText>
+                        <MudText>@_message.PatientId</MudText>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudText Typo="Typo.caption">事件 ID</MudText>
+                        <MudText>@(_message.EventId?.ToString() ?? "-")</MudText>
+                    </MudItem>
+                </MudGrid>
+            }
+
+            @if (!string.IsNullOrEmpty(_message.ErrorMessage))
+            {
+                <MudAlert Severity="Severity.Error" Class="mt-4">@_message.ErrorMessage</MudAlert>
+            }
+        </MudCardContent>
+        <MudCardActions>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Tune"
+                       OnClick="UseMessageForInterfaceConfig">
+                用于接口配置
+            </MudButton>
+            @if (_message.Status == MessageStatus.Failed)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
+                           OnClick="RetryMessage" Disabled="_retrying">
+                    重试
+                </MudButton>
+            }
+        </MudCardActions>
+    </MudCard>
+
+    @* Body JSON *@
+    <MudExpansionPanels Class="mb-4">
+        <MudExpansionPanel Text="Body JSON">
+            <div class="message-detail-json-actions">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
+                           OnClick='@(() => OpenJsonDialog("Body JSON", bodyJson))'>
+                    树形查看
+                </MudButton>
+            </div>
+            <MudTextField T="string" Value="@bodyJson" Lines="15"
+                          ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
+        </MudExpansionPanel>
+        <MudExpansionPanel Text="原始 JSON">
+            <div class="message-detail-json-actions">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
+                           OnClick='@(() => OpenJsonDialog("原始 JSON", rawJson))'>
+                    树形查看
+                </MudButton>
+            </div>
+            <MudTextField T="string" Value="@rawJson" Lines="15"
+                          ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+
+    <MudDialog @bind-Visible="_jsonDialogVisible" Options="_jsonDialogOptions">
+        <TitleContent>
+            <MudText Typo="Typo.h6">@_jsonDialogTitle</MudText>
+        </TitleContent>
+        <DialogContent>
+            <MudText Typo="Typo.caption" Class="message-detail-json-dialog-tip">
+                点击左侧箭头可展开或收起节点
+            </MudText>
+            <MudPaper Outlined="true" Class="message-detail-json-dialog">
+                <JsonTreeViewer JsonText="@_jsonDialogContent" MaxNodesToRender="0" MaxArrayItemsToRender="0" />
+            </MudPaper>
+        </DialogContent>
+        <DialogActions>
+            <MudButton OnClick="CloseJsonDialog">关闭</MudButton>
+        </DialogActions>
+    </MudDialog>
+
+    @if (_requestLogDetail?.Items.Count > 1)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">请求内明细</MudText>
+        <MudText Typo="Typo.caption" Class="mb-2 d-block">
+            成功 @_requestLogDetail.Processed · 过滤 @_requestLogDetail.Filtered · 重复 @_requestLogDetail.Duplicated · 失败 @_requestLogDetail.Failed · 未匹配 @_requestLogDetail.Unmatched
+        </MudText>
+        <MudTable Items="_requestLogDetail.Items" Dense="true" Hover="true" Bordered="true" Striped="true" Class="mb-4">
+            <HeaderContent>
+                <MudTh>索引</MudTh>
+                <MudTh>接口代码</MudTh>
+                <MudTh>结果</MudTh>
+                <MudTh>说明</MudTh>
+                <MudTh>处理明细</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@(string.IsNullOrWhiteSpace(context.RecordIndex) ? "-" : context.RecordIndex)</MudTd>
+                <MudTd>@(string.IsNullOrWhiteSpace(context.TranCode) ? "-" : context.TranCode)</MudTd>
+                <MudTd>@context.Status</MudTd>
+                <MudTd Class="message-detail-process-detail">@context.Message</MudTd>
+                <MudTd Class="message-detail-process-detail">
+                    @if (context.Steps.Count == 0)
+                    {
+                        <span>-</span>
+                    }
+                    else
+                    {
+                        <div class="message-detail-item-steps">
+                            @foreach (var step in context.Steps)
+                            {
+                                <div class="message-detail-item-step">
+                                    <MudIcon Icon="@(step.IsSuccess ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                             Color="@(step.IsSuccess ? Color.Success : Color.Error)"
+                                             Size="Size.Small" />
+                                    <span class="message-detail-item-step-text">@FormatStepDetail(step)</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    @* 处理日志 *@
+    @if (_stepDetails.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">
+            处理日志
+            @if (_summaryLog != null)
+            {
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(_summaryLog.IsSuccess ? Color.Success : Color.Error)" Class="ml-2">
+                    @_summaryLog.Step
+                </MudChip>
+                <MudText Typo="Typo.caption" Class="ml-2" Style="display:inline;">
+                    总耗时 @(_summaryLog.ElapsedMs)ms · @_summaryLog.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                </MudText>
+            }
+        </MudText>
+        <MudTable Items="_stepDetails" Dense="true" Hover="true" Bordered="true" Striped="true">
+            <HeaderContent>
+                <MudTh>步骤</MudTh>
+                <MudTh>结果</MudTh>
+                <MudTh>耗时(ms)</MudTh>
+                <MudTh>详情</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Step</MudTd>
+                <MudTd>
+                    @if (context.IsSuccess)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
+                    }
+                </MudTd>
+                <MudTd>@context.ElapsedMs</MudTd>
+                <MudTd Class="message-detail-process-detail">@context.Detail</MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@code {
+    [Parameter] public long Id { get; set; }
+    [SupplyParameterFromQuery(Name = "tranCode")] public string? QueryTranCode { get; set; }
+    [SupplyParameterFromQuery(Name = "status")] public string? QueryStatus { get; set; }
+    [SupplyParameterFromQuery(Name = "startDate")] public string? QueryStartDate { get; set; }
+    [SupplyParameterFromQuery(Name = "endDate")] public string? QueryEndDate { get; set; }
+    [SupplyParameterFromQuery(Name = "mrn")] public string? QueryMrn { get; set; }
+    [SupplyParameterFromQuery(Name = "eventStartDate")] public string? QueryEventStartDate { get; set; }
+    [SupplyParameterFromQuery(Name = "eventEndDate")] public string? QueryEventEndDate { get; set; }
+    [Inject] private MessageQueryService QueryService { get; set; } = default!;
+
+    private EsbMessage? _message;
+    private EsbProcessLog? _summaryLog;
+    private RequestProcessLogDetail? _requestLogDetail;
+    private List<ProcessStepInfo> _stepDetails = [];
+    private bool _loading = true;
+    private bool _retrying;
+    private bool _jsonDialogVisible;
+    private string _jsonDialogTitle = "";
+    private string _jsonDialogContent = "";
+    private readonly DialogOptions _jsonDialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        try
+        {
+            _message = await QueryService.GetMessageByIdAsync(Id);
+            if (_message != null)
+            {
+                var logs = await QueryService.GetProcessLogsAsync(Id);
+                // 取最后一条汇总记录，解析其 Detail JSON 为步骤列表
+                _summaryLog = logs.LastOrDefault();
+                if (_summaryLog != null && !string.IsNullOrEmpty(_summaryLog.Detail))
+                {
+                    try
+                    {
+                        _requestLogDetail = System.Text.Json.JsonSerializer.Deserialize<RequestProcessLogDetail>(_summaryLog.Detail);
+                        if (_requestLogDetail?.Steps.Count > 0)
+                            _stepDetails = _requestLogDetail.Steps;
+                    }
+                    catch
+                    {
+                        _requestLogDetail = null;
+                    }
+
+                    if (_requestLogDetail == null)
+                    {
+                        try
+                        {
+                            _stepDetails = System.Text.Json.JsonSerializer.Deserialize<List<ProcessStepInfo>>(_summaryLog.Detail) ?? [];
+                        }
+                        catch
+                        {
+                            // 兼容旧格式：无法反序列化时显示为单步
+                            _stepDetails = [new ProcessStepInfo
+                            {
+                                Step = _summaryLog.Step,
+                                IsSuccess = _summaryLog.IsSuccess,
+                                ElapsedMs = _summaryLog.ElapsedMs,
+                                Detail = _summaryLog.Detail,
+                            }];
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载消息详情失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void UseMessageForInterfaceConfig()
+    {
+        inj_navigationManager.NavigateTo($"/config/wizard?messageId={Id}");
+    }
+
+    private async Task RetryMessage()
+    {
+        _retrying = true;
+        try
+        {
+            var success = await QueryService.RetryMessageAsync(Id);
+            if (success)
+            {
+                inj_snackbar.Add("已重新提交处理", Severity.Success);
+                _message = await QueryService.GetMessageByIdAsync(Id);
+            }
+            else
+            {
+                inj_snackbar.Add("重试失败，消息状态不允许重试", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"重试失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _retrying = false;
+        }
+    }
+
+    private void OpenJsonDialog(string title, string content)
+    {
+        _jsonDialogTitle = title;
+        _jsonDialogContent = content;
+        _jsonDialogVisible = true;
+    }
+
+    private void CloseJsonDialog()
+    {
+        _jsonDialogVisible = false;
+    }
+
+    private static string FormatJson(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return "";
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(json);
+            return System.Text.Json.JsonSerializer.Serialize(doc, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static string FormatStepDetail(ProcessStepInfo step)
+    {
+        var detail = string.IsNullOrWhiteSpace(step.Detail)
+            ? (step.IsSuccess ? "成功" : "失败")
+            : step.Detail;
+
+        return $"{step.Step}：{detail}（{step.ElapsedMs}ms）";
+    }
+
+    private string GetBackToListUrl()
+    {
+        var query = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(QueryTranCode))
+            query.Add($"tranCode={Uri.EscapeDataString(QueryTranCode)}");
+        if (!string.IsNullOrWhiteSpace(QueryStatus))
+            query.Add($"status={Uri.EscapeDataString(QueryStatus)}");
+        if (!string.IsNullOrWhiteSpace(QueryStartDate))
+            query.Add($"startDate={Uri.EscapeDataString(QueryStartDate)}");
+        if (!string.IsNullOrWhiteSpace(QueryEndDate))
+            query.Add($"endDate={Uri.EscapeDataString(QueryEndDate)}");
+        if (!string.IsNullOrWhiteSpace(QueryMrn))
+            query.Add($"mrn={Uri.EscapeDataString(QueryMrn)}");
+        if (!string.IsNullOrWhiteSpace(QueryEventStartDate))
+            query.Add($"eventStartDate={Uri.EscapeDataString(QueryEventStartDate)}");
+        if (!string.IsNullOrWhiteSpace(QueryEventEndDate))
+            query.Add($"eventEndDate={Uri.EscapeDataString(QueryEventEndDate)}");
+
+        return query.Count == 0 ? "/messages" : $"/messages?{string.Join("&", query)}";
+    }
+}

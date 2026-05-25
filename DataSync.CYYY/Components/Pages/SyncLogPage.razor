@@ -1,0 +1,26 @@
+﻿@page "/logs"
+@inherits BasePage
+
+<PageTitle>页面跳转中</PageTitle>
+
+<MudPaper Class="pa-6">
+    <MudText Typo="Typo.h6" Class="mb-2">页面已迁移</MudText>
+    <MudText Typo="Typo.body1" Class="mb-4">
+        原“推送日志”入口已并入“待同步对象”流程，正在跳转。
+    </MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward"
+               OnClick="GoToPendingSync">
+        前往待同步对象
+    </MudButton>
+</MudPaper>
+
+@code {
+    protected override Task OnPageInitializedAsync()
+    {
+        GoToPendingSync();
+        return Task.CompletedTask;
+    }
+
+    private void GoToPendingSync()
+        => inj_navigationManager.NavigateTo("/pending-sync");
+}

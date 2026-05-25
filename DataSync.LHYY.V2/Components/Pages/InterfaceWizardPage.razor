@@ -1,0 +1,843 @@
+﻿@page "/config/wizard"
+@inherits BasePage
+
+<PageTitle>接口映射工作台 - LHYY V2</PageTitle>
+
+<div class="workbench-root" @onclick="HandleWorkbenchBackgroundClick">
+<MudPaper Elevation="0" Class="workbench-toolbar-shell mb-1">
+    <div class="workbench-toolbar-main">
+        <div class="workbench-toolbar-heading">
+            <MudText Typo="Typo.h6">接口映射工作台</MudText>
+        </div>
+
+        <div class="workbench-toolbar-stage">
+            <div class="workbench-toolbar-select">
+                <MudSelect T="int?" Value="_selectedConfigId" ValueChanged="OnInterfaceSelected" Label="选择接口" Placeholder="请选择..." Clearable="true" HelperText="@($"共 {_allInterfaces.Count} 个接口")">
+                    @foreach (var cfg in _allInterfaces)
+                    {
+                        <MudSelectItem T="int?" Value="@((int?)cfg.Id)">@cfg.TranCode - @cfg.TranName</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            @if (_selectedConfig != null)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="workbench-toolbar-selected-chip">@_selectedConfig.TranCode</MudChip>
+                <div class="workbench-toolbar-counts">
+                    <span>已有 @_existingMappingCount</span>
+                    <span>有效 @ConfiguredMappingCount</span>
+                    @if (PendingMappingCount > 0)
+                    {
+                        <span class="workbench-count-warning">待补全 @PendingMappingCount</span>
+                    }
+                    @if (InvalidMappingCount > 0)
+                    {
+                        <span class="workbench-count-error">无效 @InvalidMappingCount</span>
+                    }
+                </div>
+
+                <div class="workbench-toolbar-filter-inline">
+                    <MudText Typo="Typo.caption">过滤 @EnabledInterfaceFilterCount 开 / @DisabledInterfaceFilterCount 关</MudText>
+                    <MudButton Variant="Variant.Text" Color="Color.Default" StartIcon="@Icons.Material.Filled.FilterAlt" Disabled="@(!CanEditInterfaceFilters)" OnClick="@(() => _interfaceFilterDialogVisible = true)">接口过滤</MudButton>
+                </div>
+            }
+
+            <div class="workbench-toolbar-actions">
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="@(() => _projectDocumentsVisible = true)">项目文档</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Tune" Disabled="@(_selectedConfig == null)" OnClick="@(() => _settingsDialogVisible = true)">工作台设置</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Preview" Disabled="@(BuildPreviewMappings().Count == 0)" OnClick="@(() => _previewDialogVisible = true)">整体预览</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!_canSaveWorkbench)" OnClick="SaveAll">@(_saving ? "保存中..." : "保存工作台")</MudButton>
+            </div>
+        </div>
+    </div>
+    @if (_selectedConfig != null)
+    {
+        <div class="workbench-toolbar-meta workbench-toolbar-meta-compact">
+            <MudText Typo="Typo.caption" Class="workbench-meta-item">LicenseCode @(_defaultLicenseCode ?? "未配置")</MudText>
+            @if (_parsedJson != null || HasSampleAnalysisPreview)
+            {
+                @if (_sampleAnalysisLoading)
+                {
+                    <MudText Typo="Typo.caption" Class="workbench-meta-item">正在分析样本...</MudText>
+                }
+                else if (!string.IsNullOrWhiteSpace(_sampleAnalysisError))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Error" Class="workbench-meta-item">样本分析失败：@_sampleAnalysisError</MudText>
+                }
+                else
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(_sampleSelectedInterfaceMatched ? Color.Success : Color.Warning)" Class="workbench-meta-chip">
+                        当前接口@(_sampleSelectedInterfaceMatched ? "已命中" : "未命中")
+                    </MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(_sampleMatchedTranCodes.Count > 0 ? Color.Info : Color.Default)" Class="workbench-meta-chip">
+                        @GetSampleMatchedInterfacesSummaryText()
+                    </MudChip>
+                    <MudText Typo="Typo.caption" Class="workbench-meta-item">幂等键：@GetSampleIdempotentKeyText()</MudText>
+                    <MudText Typo="Typo.caption" Class="workbench-meta-item">上游消息号：@GetSampleSourceMessageIdText()</MudText>
+                }
+            }
+        </div>
+    }
+</MudPaper>
+
+@if (_selectedConfig == null)
+{
+    <div class="workbench-empty-state">
+        <MudIcon Icon="@Icons.Material.Filled.TouchApp" Style="font-size:64px;" Color="Color.Secondary" />
+        <MudText Typo="Typo.h6" Color="Color.Secondary">请选择接口</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">从上方下拉框选择一个接口后即可开始配置映射。</MudText>
+    </div>
+}
+else if (string.IsNullOrWhiteSpace(_selectedConfig.SampleJson))
+{
+    <div class="workbench-empty-state">
+        <MudIcon Icon="@Icons.Material.Filled.Warning" Style="font-size:64px;" Color="Color.Warning" />
+        <MudText Typo="Typo.h6" Color="Color.Secondary">样例 JSON 为空</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">当前接口的 sample_json 为空，无法进入映射工作台。</MudText>
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.ArrowForward" OnClick="@(() => inj_navigationManager.NavigateTo("/config/interfaces"))">前往接口配置页补充</MudButton>
+    </div>
+}
+else
+{
+    <div class="workbench-columns">
+        <div class="workbench-col workbench-col-json">@RenderJsonPanel()</div>
+        <div class="workbench-col workbench-col-target">@RenderTargetPanel()</div>
+        <div class="workbench-col workbench-col-detail">@RenderDetailPanel()</div>
+    </div>
+}
+
+<MappingEditDialog Visible="_editDialogVisible" VisibleChanged="OnEditDialogVisibleChanged" EditItem="_editDialogItem" Title="编辑映射" JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" JsonTreeLayout="JsonTreeLayout.SidePanel" DialogMaxWidth="MaxWidth.Large" MappingTargetEditable="false" UseTargetFieldSelector="false" LicenseCode="@_defaultLicenseCode" ShowIsRequired="true" ShowIsEnabled="true" ShowFilterRules="true" ShowSubCardArrayPathEditor="false" FilterRules="_editDialogFilterRules" FilterRulesChanged="v => _editDialogFilterRules = v" OnSave="OnEditDialogSave" />
+
+<MudDialog @bind-Visible="_settingsDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">工作台设置</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">这些设置只影响当前工作台的映射流程，不展示接口详情。</MudText>
+        @if (_existingMappingCount > 0)
+        {
+            <div class="workbench-mode-group mb-4">
+                <MudText Typo="Typo.body2">保存模式</MudText>
+                <MudRadioGroup T="bool" @bind-Value="_isRebuildMode">
+                    <MudRadio T="bool" Value="false" Color="Color.Primary" Dense="true">增量补充</MudRadio>
+                    <MudRadio T="bool" Value="true" Color="Color.Warning" Dense="true">清空重建</MudRadio>
+                </MudRadioGroup>
+            </div>
+        }
+        else
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-4">当前接口还没有历史映射，保存时会按新建映射处理。</MudAlert>
+        }
+        <MudSwitch T="bool" @bind-Value="_autoAdvanceAfterPathPick" Color="Color.Primary" Label="配完后自动跳下一题" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _settingsDialogVisible = false)">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_interfaceFilterDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">接口过滤</MudText></TitleContent>
+    <DialogContent>
+        @if (!CanEditInterfaceFilters)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true">当前接口的样例 JSON 为空，暂不支持编辑接口过滤。</MudAlert>
+        }
+        else
+        {
+            <FilterRuleEditor Rules="_filterRules" RulesChanged="v => _filterRules = v" JsonText="@_editableJson" ShowScope="true" />
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _interfaceFilterDialogVisible = false)">关闭</MudButton>
+    </DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_saveJsonConfirmVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall })">
+    <TitleContent><MudText Typo="Typo.h6">确认保存</MudText></TitleContent>
+    <DialogContent><MudText>确定将修改后的 JSON 保存到数据库吗？此操作会覆盖原始 `sample_json`。</MudText></DialogContent>
+    <DialogActions><MudButton OnClick="@(() => _saveJsonConfirmVisible = false)">取消</MudButton><MudButton Color="Color.Warning" Variant="Variant.Filled" OnClick="ConfirmSaveJsonToDatabase">确认保存</MudButton></DialogActions>
+</MudDialog>
+
+<MudDialog Visible="_llmDialogVisible" VisibleChanged="OnLlmDialogVisibleChanged" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">@GetActiveSuggestionDialogTitle()</MudText></TitleContent>
+    <DialogContent>
+        @if (_llmError != null)
+        {
+            <MudAlert Severity="Severity.Error" Dense="true">@_llmError</MudAlert>
+        }
+        else if (_llmSuggestions.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">暂无可确认的 LLM 建议。</MudAlert>
+        }
+        else
+        {
+            var groups = GetCurrentSuggestionGroups();
+            <div class="workbench-summary-chips mb-3">
+                <MudChip T="string" Color="Color.Info" Variant="Variant.Outlined">@GetSuggestionScopeText()</MudChip>
+                @if (IsSingleFieldSuggestionMode) { <MudChip T="string" Color="Color.Secondary" Variant="Variant.Outlined">@GetActiveSuggestionTargetText()</MudChip> }
+                <MudChip T="string" Color="Color.Success" Variant="Variant.Outlined">已选 @SelectedSuggestionCount 条</MudChip>
+                <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined">共 @_llmSuggestions.Count 条</MudChip>
+            </div>
+            <div class="suggestion-panel-toolbar mb-3">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@GetActiveSuggestionDialogHintText()</MudText>
+                <div class="suggestion-toolbar-actions">
+                    <MudCheckBox T="bool" Value="AllSuggestionsSelected" ValueChanged="ToggleAllSuggestions" Dense="true" Label="全选" />
+                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small" OnClick="AcceptAllSuggestions">全选建议</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small" OnClick="RejectAllSuggestions">清空选择</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" OnClick="AcceptHighConfidenceSuggestions">仅保留高置信度</MudButton>
+                </div>
+            </div>
+            <div class="suggestion-dialog-body">
+                @foreach (var group in groups)
+                {
+                    <MudPaper Outlined="true" Class="suggestion-group-shell">
+                        <div class="suggestion-group-header">
+                            <div>
+                                <div class="d-flex align-center gap-2 flex-wrap">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@group.Color">@group.Title</MudChip>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@GetSuggestionGroupSelectedCount(group)/@group.Items.Count 已选</MudText>
+                                    @if (IsSubCardSuggestionGroup(group))
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@GetSuggestionGroupArrayPathColor(group)">@GetSuggestionGroupArrayPathText(group)</MudChip>
+                                    }
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(group.Subtitle))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@group.Subtitle</MudText>
+                                }
+                            </div>
+                            <div class="suggestion-toolbar-actions">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => SetSuggestionGroupSelection(group.Key, true))">全选本组</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => SetSuggestionGroupSelection(group.Key, false))">清空本组</MudButton>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Primary" OnClick="@(() => ApplySuggestionGroup(group.Key))" Disabled="@(!CanApplySuggestionGroup(group))">应用本组</MudButton>
+                            </div>
+                        </div>
+                        @if (HasSuggestionGroupArrayPathConflict(group))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前子卡建议包含多个不同的 ArrayPath，请重新生成或缩小范围后再应用。</MudAlert>
+                        }
+                        else if (HasSuggestionGroupMissingArrayPath(group))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">当前子卡建议没有可用的 ArrayPath，这组建议暂时不能直接应用。</MudAlert>
+                        }
+                        <div class="suggestion-group-items">
+                            @foreach (var item in group.Items)
+                            {
+                                <MudPaper Outlined="true" Class="suggestion-item-shell">
+                                    <div class="suggestion-item-header">
+                                        <MudCheckBox T="bool" Value="item.IsSelected" ValueChanged="v => item.IsSelected = v" Dense="true" />
+                                        <MudText Typo="Typo.body2" Style="font-weight:600;">@item.DisplayName</MudText>
+                                        <MudText Typo="Typo.caption" Color="GetTargetColor(item.MappingTarget)">@GetSuggestionCategoryText(item)</MudText>
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@GetPathScopeText(item.MappingTarget, item.CardId, item.ArrayPath, item.SourcePath)</MudChip>
+                                        <MudText Typo="Typo.caption" Color="@(item.Confidence >= 0.8 ? Color.Success : item.Confidence >= 0.5 ? Color.Warning : Color.Default)">@item.Confidence.ToString("P0")</MudText>
+                                    </div>
+                                    <div class="suggestion-item-body">
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">源路径：@GetSuggestionDisplaySourcePath(item)</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">样本值：@GetSuggestionSampleValue(item)</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">值处理：@GetSuggestionValueHint(item)</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(item.CardName))
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">所属子卡：@item.CardName</MudText>
+                                        }
+                                        @if (!string.IsNullOrWhiteSpace(item.Reason))
+                                        {
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">理由：@item.Reason</MudText>
+                                        }
+                                    </div>
+                                </MudPaper>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+            </div>
+        }
+    </DialogContent>
+    <DialogActions><MudButton OnClick="DiscardSuggestions">关闭不应用</MudButton><MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApplySelectedSuggestions" Disabled="@(!CanApplyCurrentSuggestions)">应用到当前接口 (@SelectedSuggestionCount)</MudButton></DialogActions>
+</MudDialog>
+
+<MudDialog @bind-Visible="_previewDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">整体预览</MudText></TitleContent>
+    <DialogContent>
+        @if (_parsedJson != null && BuildPreviewMappings().Count > 0) { <MappingPreviewPanel JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" Mappings="BuildPreviewMappings()" /> }
+        else { <MudAlert Severity="Severity.Info" Dense="true">当前没有可预览的有效映射。</MudAlert> }
+    </DialogContent>
+    <DialogActions><MudButton OnClick="@(() => _previewDialogVisible = false)">关闭</MudButton></DialogActions>
+</MudDialog>
+
+<ProjectDocumentDialog Visible="_projectDocumentsVisible"
+                       VisibleChanged="OnProjectDocumentsVisibleChanged"
+                       IntegrationProjectCode="@CurrentIntegrationProjectCode"
+                       IntegrationProjectName="@CurrentIntegrationProjectName"
+                       AllowManage="false" />
+
+</div>
+
+@code {
+    private RenderFragment RenderJsonPanel() => __builder =>
+    {
+        <MudPaper Elevation="1" Class="workbench-panel json-panel" Style="display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+            <div class="json-panel-top" style="flex:0 0 auto;">
+                <div class="workbench-panel-header json-panel-header">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.DataObject" Color="Color.Primary" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2">JSON 结构</MudText>
+                    </div>
+                    <div class="json-panel-status">
+                        @if (_jsonValidationError != null)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
+                            <MudText Typo="Typo.caption" Color="Color.Error">格式错误</MudText>
+                        }
+                        else if (_parsedJson != null)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                            <MudText Typo="Typo.caption" Color="Color.Success">有效</MudText>
+                        }
+                        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@(_jsonEditorExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" OnClick="@(() => _jsonEditorExpanded = !_jsonEditorExpanded)">
+                            @(_jsonEditorExpanded ? "收起原始 JSON" : "展开原始 JSON")
+                        </MudButton>
+                    </div>
+                </div>
+                @if (_pathPickMode == PathPickMode.ActiveRow)
+                {
+                    <div class="json-pick-hint json-pick-hint-active">
+                        <MudIcon Icon="@Icons.Material.Filled.AdsClick" Size="Size.Small" />
+                        <span>正在选择：<b>@GetCurrentPathPickPromptText()</b></span>
+                        <span class="json-pick-hint-action">点击下方 JSON 节点</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="json-pick-hint">
+                        <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" />
+                        <span>先选目标字段，再点源路径</span>
+                    </div>
+                }
+                @if (_jsonEditorExpanded)
+                {
+                    <MudPaper Outlined="true" Class="json-editor-shell mb-3">
+                        <MudTextField T="string" Value="@_editableJson" ValueChanged="OnJsonTextChanged" Label="原始 JSON（可修改）" Lines="10" Variant="Variant.Outlined" DebounceInterval="500" />
+                        <div class="json-editor-actions">
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Code" OnClick="FormatJson" Disabled="@(_parsedJson == null)">格式化</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResetJsonToOriginal">重置</MudButton>
+                            <MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveJsonToDatabase">保存到数据库</MudButton>
+                            @if (!string.IsNullOrWhiteSpace(_jsonValidationError))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Error">格式错误：@_jsonValidationError</MudText>
+                            }
+                        </div>
+                    </MudPaper>
+                }
+            </div>
+            <MudPaper Outlined="true" Class="json-tree-shell" Style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:8px;overflow:hidden;">
+                <div class="json-tree-scroll-body" style="flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;">
+                    <JsonTreeViewer JsonText="@_editableJson" MaxNodesToRender="0" MaxArrayItemsToRender="0" ShowSearch="true" UseArrayBrackets="@UseArrayBracketsInWorkbenchTree" PreferFirstArrayItemAsRoot="true" SelectedPath="@_selectedJsonTreePath" SelectionVersion="@_selectedJsonTreeVersion" OnPathSelected="OnJsonPathSelected" />
+                </div>
+            </MudPaper>
+        </MudPaper>
+    };
+
+    private RenderFragment RenderTargetPanel() => __builder =>
+    {
+        <MudPaper Elevation="1" Class="workbench-panel target-panel" Style="display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;">
+            <div class="workbench-panel-header target-panel-header">
+                <div class="target-panel-title-block">
+                    <div class="d-flex align-center gap-2">
+                        <MudIcon Icon="@Icons.Material.Filled.ListAlt" Color="Color.Info" Size="Size.Small" />
+                        <MudText Typo="Typo.subtitle2">目标字段区</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@GetCurrentTargetProgressText()</MudText>
+                </div>
+                <MudTooltip Text="根据当前样本生成映射建议">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="RunLlmSuggest" Disabled="@(!CanRunLlmSuggest)" Class="llm-header-button">@(_llmLoading ? "分析中..." : (IsQuestionWorkbenchMode ? "LLM 当前节点" : "LLM 批量"))</MudButton>
+                </MudTooltip>
+            </div>
+            <div class="target-type-tabs mb-3">
+                <MudButton Variant="@GetGenerateTargetButtonVariant(MappingTarget.Patient)" Color="@GetTargetColor(MappingTarget.Patient)" Size="Size.Small" OnClick="@(() => OnGenerateTargetChanged(MappingTarget.Patient))">Patient</MudButton>
+                <MudButton Variant="@GetGenerateTargetButtonVariant(MappingTarget.Event)" Color="@GetTargetColor(MappingTarget.Event)" Size="Size.Small" OnClick="@(() => OnGenerateTargetChanged(MappingTarget.Event))">Event</MudButton>
+                <MudButton Variant="@GetGenerateTargetButtonVariant(MappingTarget.Question)" Color="@GetTargetColor(MappingTarget.Question)" Size="Size.Small" OnClick="@(() => OnGenerateTargetChanged(MappingTarget.Question))">Question</MudButton>
+            </div>
+            <div class="target-panel-body" style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;">
+            @if (IsQuestionWorkbenchMode)
+            {
+                @if (_llmError != null) { <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_llmError</MudAlert> }
+                <MudPaper Outlined="true" Class="pa-3 question-workspace-shell" Style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;">
+                    @if (_cardsLoading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-2" />
+                        <MudText Typo="Typo.caption">正在加载表单结构...</MudText>
+                    }
+                    else if (!string.IsNullOrEmpty(_formTreeError))
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true">@_formTreeError</MudAlert>
+                    }
+                    else if (ActiveFormOptions.Count == 0)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">当前 LicenseCode 下未加载到表单。</MudAlert>
+                    }
+                    else
+                    {
+                        @if (_formTreeTabs.Count > 1)
+                        {
+                            <MudChipSet T="string" SelectionMode="SelectionMode.SingleSelection" SelectedValue="_selectedEventType" SelectedValueChanged="OnEventTypeChanged" Class="mb-2">
+                                @foreach (var tab in _formTreeTabs)
+                                {
+                                    <MudChip T="string" Value="@tab.EventType" Variant="Variant.Outlined" Color="Color.Dark">@tab.EventType</MudChip>
+                                }
+                            </MudChipSet>
+                        }
+                        <MudGrid Spacing="2" Class="question-workspace-grid" Style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-wrap:nowrap;align-items:stretch;">
+                            <MudItem xs="12" sm="5" md="4" Style="display:flex;min-height:0;height:100%;">
+                                <MudPaper Outlined="true" Class="question-form-list-shell" Style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;">
+                                    <div class="question-form-list-body" style="flex:1 1 auto;min-height:0;height:100%;overflow-y:auto;overflow-x:hidden;">
+                                        <MudList T="string" SelectedValue="_selectedFormId" SelectedValueChanged="OnFormChanged" Color="Color.Primary" Dense="true" Style="width:100%;">
+                                            @foreach (var form in ActiveFormOptions)
+                                            {
+                                                var summary = GetFormStatusSummary(form);
+                                                <MudListItem Value="@form.Id" Icon="@Icons.Material.Filled.Description">
+                                                    <div class="question-form-list-item">
+                                                        <MudText Typo="Typo.body2">@form.Name</MudText>
+                                                        <MudText Typo="Typo.caption" Color="@GetStatusAccentColor(summary)">@summary.Mapped/@summary.Total</MudText>
+                                                    </div>
+                                                </MudListItem>
+                                            }
+                                        </MudList>
+                                    </div>
+                                </MudPaper>
+                            </MudItem>
+                            <MudItem xs="12" sm="7" md="8" Style="display:flex;min-height:0;height:100%;">
+                                <MudPaper Outlined="true" Class="question-tree-shell" Style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;overflow:hidden;">
+                                    @if (ActiveForm != null)
+                                    {
+                                        var activeSummary = GetFormStatusSummary(ActiveForm);
+                                        <div class="question-tree-header">
+                                            <div>
+                                                <MudText Typo="Typo.body2" Style="font-weight:600;">@ActiveForm.Name</MudText>
+                                            </div>
+                                            <MudText Typo="Typo.caption" Color="@GetStatusAccentColor(activeSummary)">@activeSummary.Mapped/@activeSummary.Total</MudText>
+                                        </div>
+                                        <div class="question-tree-filters">
+                                            <MudTextField @bind-Value="_targetSearchText" Label="搜索树节点" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Margin="Margin.Dense" Style="flex:1;" />
+                                            <MudSwitch T="bool" @bind-Value="_showOnlyUnmappedTargets" Color="Color.Primary" Label="仅未映射" />
+                                        </div>
+                                        @if (SelectedScopeCard != null && _selectedQuestionNodeType != null)
+                                        {
+                                            var selectedSummary = GetCardNodeStatusSummary(SelectedScopeCard, FindSubCardAncestor(SelectedScopeCard, ActiveForm.Cards));
+                                            var selectedIsSubCard = IsSubCardNode(SelectedScopeCard);
+                                            <div class="question-tree-selected-summary">
+                                                <div class="d-flex align-center gap-2 flex-wrap">
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(selectedIsSubCard ? Color.Warning : Color.Default)">@(selectedIsSubCard ? "SubCard" : "Card")</MudChip>
+                                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@SelectedScopeCard.Name</MudText>
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">已映射 @selectedSummary.Mapped/@selectedSummary.Total@(selectedSummary.Pending + selectedSummary.Unmapped > 0 ? $" · 待补 {selectedSummary.Pending + selectedSummary.Unmapped}" : "")@(selectedSummary.Invalid > 0 ? $" · 无效 {selectedSummary.Invalid}" : "")@(selectedIsSubCard ? $" · {GetSubCardArrayPathStatusText(SelectedScopeCard.CardId)}" : "")</MudText>
+                                                </div>
+                                            </div>
+                                        }
+                                        <div class="card-tree-shell" style="flex:1 1 auto;min-height:0;height:100%;overflow-y:auto;overflow-x:hidden;">
+                                            <MudTreeView T="string" Dense="true" Hover="true" ExpandOnClick="true">
+                                                @foreach (var child in FormBrowserHelper.GetOrderedChildren(ActiveForm).Where(c => c.Card != null))
+                                                {
+                                                    var card = child.Card!;
+                                                    if (IsQuestionTreeCardVisible(card, null))
+                                                    {
+                                                        @RenderCardTreeNode(card, null)
+                                                    }
+                                                }
+                                            </MudTreeView>
+                                        </div>
+                                    }
+                                </MudPaper>
+                            </MudItem>
+                        </MudGrid>
+                    }
+                </MudPaper>
+            }
+            else
+            {
+                @if (_llmError != null) { <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_llmError</MudAlert> }
+                <div class="d-flex align-center gap-2 mb-2"><MudTextField @bind-Value="_targetSearchText" Label="搜索目标字段" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" Margin="Margin.Dense" Style="flex:1;" /><MudSwitch T="bool" @bind-Value="_showOnlyUnmappedTargets" Color="Color.Primary" Label="仅未映射" /></div>
+                @if (_selectedGenerateTarget == null) { <MudAlert Severity="Severity.Info" Dense="true">请选择映射目标类型。</MudAlert> }
+                else if (VisibleTargetFields.Count == 0) { <MudAlert Severity="Severity.Info" Dense="true">当前范围内没有可显示的目标字段。</MudAlert> }
+                else
+                {
+                    <div class="target-field-list" style="flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:8px;">
+                        @foreach (var field in VisibleTargetFields)
+                        {
+                            var state = GetTargetFieldState(field); var row = FindMappingRow(field); var subtitle = GetTargetFieldSubtitle(field, row); var itemKey = GetMappingKey(field); var isActive = _activeMappingKey == itemKey; var itemClass = isActive ? "target-field-item target-field-item-active" : "target-field-item";
+                            <div @onclick="@(() => SelectTargetField(field))" @onclick:stopPropagation="true">
+                                <MudPaper Outlined="true" Class="@itemClass">
+                                    <div class="target-field-title-row">
+                                        <MudIcon Icon="@GetStateIcon(state)" Color="@GetStateColor(state)" Size="Size.Small" />
+                                        <MudText Typo="Typo.body2" Class="target-field-title">@field.DisplayName</MudText>
+                                        @if (!string.IsNullOrWhiteSpace(field.DataType)) { <MudText Typo="Typo.caption" Color="Color.Secondary">@field.DataType</MudText> }
+                                        <MudSpacer />
+                                        <MudText Typo="Typo.caption" Color="@GetStateColor(state)">@GetStateText(state)</MudText>
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(subtitle))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@subtitle</MudText>
+                                    }
+                                </MudPaper>
+                            </div>
+                        }
+                    </div>
+                }
+            }
+            </div>
+        </MudPaper>
+    };
+
+    private RenderFragment RenderQuestionScopePanel() => __builder =>
+    {
+        if (CurrentSubCardGroupCard == null || ActiveForm == null)
+        {
+            return;
+        }
+
+        var scopeCard = CurrentSubCardGroupCard;
+        var summary = GetCardNodeStatusSummary(scopeCard, scopeCard);
+        var fields = GetCurrentSubCardGroupFields().ToList();
+        var subCardFilterRules = GetSubCardFilterRules(scopeCard.CardId);
+        var subCardFilterCount = subCardFilterRules.Count;
+        var isSubCardFilterExpanded = IsSubCardFilterExpanded(scopeCard.CardId);
+
+        <div class="question-node-summary">
+            <div class="question-node-summary-header">
+                <div>
+                    <div class="d-flex align-center gap-2 flex-wrap">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">SubCard</MudChip>
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@scopeCard.Name</MudText>
+                    </div>
+                </div>
+                <MudText Typo="Typo.caption" Color="@GetStatusAccentColor(summary)">@summary.Mapped/@summary.Total</MudText>
+            </div>
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">已映射 @summary.Mapped/@summary.Total@(summary.Pending + summary.Unmapped > 0 ? $" · 待补 {summary.Pending + summary.Unmapped}" : "")@(summary.Invalid > 0 ? $" · 无效 {summary.Invalid}" : "") · @GetSubCardArrayPathStatusText(scopeCard.CardId)</MudText>
+            <PathPickTextField Value="@GetSubCardArrayPath(scopeCard.CardId)" ValueChanged="OnSelectedSubCardArrayPathChanged" Label="ArrayPath" HelperText="@GetSubCardArrayPathHelperText()" IsActive="@IsSelectedSubCardArrayPathPickActive(scopeCard.CardId)" OnActivated="@(() => ActivateSelectedSubCardArrayPath(scopeCard.CardId))" Style="width:100%;" />
+            @if (HasMixedSubCardArrayPaths(scopeCard.CardId))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">当前子卡下存在多个不同的 ArrayPath，保存前会以这里的值统一。</MudAlert>
+            }
+            else if (HasInvalidSubCardArrayPath(scopeCard.CardId))
+            {
+                <MudAlert Severity="Severity.Error" Dense="true">@GetSubCardArrayPathIssueText(scopeCard.CardId)</MudAlert>
+            }
+            <div class="subcard-filter-bar">
+                <div class="subcard-filter-main">
+                    <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" Color="@(subCardFilterCount > 0 ? Color.Warning : Color.Default)" />
+                    <div class="subcard-filter-copy">
+                        <MudText Typo="Typo.body2">过滤条件</MudText>
+                    </div>
+                </div>
+                <div class="subcard-filter-actions">
+                    @if (subCardFilterCount > 0)
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">过滤 @subCardFilterCount</MudChip>
+                    }
+                    <MudTooltip Text="展开或收起">
+                        <MudIconButton Icon="@(isSubCardFilterExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                       Size="Size.Small"
+                                       Color="Color.Default"
+                                       Disabled="@(subCardFilterCount == 0)"
+                                       OnClick="@(() => ToggleSubCardFilterExpanded(scopeCard.CardId))" />
+                    </MudTooltip>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => AddSubCardFilterRule(scopeCard.CardId))">添加</MudButton>
+                </div>
+            </div>
+            @if (isSubCardFilterExpanded && subCardFilterCount > 0)
+            {
+                <div class="subcard-filter-editor">
+                    <FilterRuleEditor Rules="@subCardFilterRules"
+                                      RulesChanged="rules => OnSubCardFilterRulesChanged(scopeCard.CardId, rules)"
+                                      ShowScope="false"
+                                      OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, idx => ActivateSubCardFilterRulePath(scopeCard.CardId, idx)))"
+                                      ActivePickIndex="@GetSubCardFilterActivePickIndex(scopeCard.CardId)" />
+                </div>
+            }
+        </div>
+
+        @if (fields.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">当前节点范围内没有可显示的字段。</MudAlert>
+        }
+        else
+        {
+            <div class="question-node-field-list">
+                @foreach (var field in fields)
+                {
+                    var row = GetQuestionFieldRow(field);
+                    var state = GetTargetFieldState(field);
+                    var isActive = IsQuestionFieldQuickEditActive(field);
+                    <MudPaper Outlined="true" Class="@(isActive ? "question-node-field-item question-node-field-item-active" : "question-node-field-item")">
+                        <div class="question-node-field-item-header">
+                            <div class="d-flex align-center gap-2 flex-wrap">
+                                <MudIcon Icon="@GetStateIcon(state)" Color="@GetStateColor(state)" Size="Size.Small" />
+                                <MudText Typo="Typo.body2" Style="font-weight:600;">@field.DisplayName</MudText>
+                                @if (!string.IsNullOrWhiteSpace(field.DataType))
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@field.DataType</MudText>
+                                }
+                                <MudText Typo="Typo.caption" Color="@GetStateColor(state)">@GetStateText(state)</MudText>
+                                @if ((row?.FilterRules.Count ?? 0) > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning">过滤 @row!.FilterRules.Count</MudChip>
+                                }
+                            </div>
+                        </div>
+                        <div class="path-edit-row">
+                            <div class="path-edit-field">
+                                <PathPickTextField Value="@GetQuestionFieldSourcePath(field)" ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)" Label="源路径" IsActive="@IsPathPickActive(field)" OnActivated="@(() => ActivateQuestionFieldSourcePath(field))" Style="width:100%;" />
+                            </div>
+                            <MudTooltip Text="详细设置">
+                                <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small" Color="Color.Default" OnClick="@(() => OpenQuestionFieldEditDialog(field, keepCurrentQuestionContext: true))" />
+                            </MudTooltip>
+                            <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="@(() => ClearQuestionFieldSourcePath(field))" Disabled="@(row == null || string.IsNullOrWhiteSpace(GetQuestionFieldSourcePath(field)))">清空路径</MudButton>
+                        </div>
+                        <div class="active-row-actions">
+                            @if (row != null && !string.IsNullOrWhiteSpace(row.SourcePath))
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@GetPathScopeText(row.MappingTarget, row.CardId, row.ArrayPath, row.SourcePath)</MudChip>
+                            }
+                        </div>
+                        @if (!string.IsNullOrWhiteSpace(GetQuestionFieldSourcePath(field)))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">样本值：@GetSampleValue(field)</MudText>
+                        }
+                        @if (NeedsSubCardArrayPath(field))
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">当前字段使用数组项相对路径，但子卡 ArrayPath 尚未配置，暂时无法正确预览。</MudAlert>
+                        }
+                        @if (!IsQuestionFieldPathValid(field) && !string.IsNullOrWhiteSpace(GetQuestionFieldSourcePath(field)))
+                        {
+                            <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前源路径在当前接口的样例 JSON 中无效，请重新选择。</MudAlert>
+                        }
+                    </MudPaper>
+                }
+            </div>
+        }
+    };
+
+    private RenderFragment RenderDetailPanel() => __builder =>
+    {
+        <MudPaper Elevation="1" Class="workbench-panel detail-panel" Style="display:flex;flex-direction:column;min-height:0;height:100%;overflow:hidden;">
+            <div class="workbench-panel-header"><div class="d-flex align-center gap-2"><MudIcon Icon="@Icons.Material.Filled.EditNote" Color="Color.Warning" Size="Size.Small" /><MudText Typo="Typo.subtitle2">字段编辑区</MudText></div></div>
+            <div class="detail-panel-body" style="flex:1 1 auto;min-height:0;height:100%;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;">
+                @if (IsQuestionWorkbenchMode)
+                {
+                    @if (_selectedQuestionNodeType == null || SelectedScopeCard == null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">请先在中间树里选择一个 Card、SubCard 或 Question 节点。</MudAlert>
+                    }
+                    else if (_selectedQuestionNodeType == QuestionTreeNodeType.SubCard && CurrentSubCardGroupCard != null)
+                    {
+                        <MudPaper Outlined="true" Class="detail-scope-shell pa-3" Style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;">
+                            @RenderQuestionScopePanel()
+                        </MudPaper>
+                    }
+                    else if (SelectedQuestionField == null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">当前是 Card 节点。Card 不按组展示，请在树里直接点一个 Question 后再编辑。</MudAlert>
+                    }
+                    else
+                    {
+                        var field = SelectedQuestionField!;
+                        var row = SelectedQuestionRow;
+                        var sourcePath = GetQuestionFieldSourcePath(field);
+                        var filterCount = row?.FilterRules.Count ?? 0;
+                        <div class="detail-question-layout" style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;gap:12px;">
+                            <MudPaper Outlined="true" Class="pa-3">
+                                <div class="active-row-title">
+                                    <MudTooltip Text="@GetActivePickTargetName()">
+                                        <MudChip T="string" Size="Size.Small" Color="GetTargetColor(field.MappingTarget)">@GetTargetDisplayText(field.MappingTarget)</MudChip>
+                                    </MudTooltip>
+                                </div>
+                                @if (row == null)
+                                {
+                                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">当前字段尚未创建映射。填写源路径、默认值或过滤条件后会自动加入当前接口。</MudAlert>
+                                }
+                                <div class="path-edit-row">
+                                    <div class="path-edit-field">
+                                        <PathPickTextField Value="@sourcePath" ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)" Label="源路径" HelperText="@GetSourcePathHelperText(field.MappingTarget)" IsActive="@IsPathPickActive(field)" OnActivated="@(() => ActivateQuestionFieldSourcePath(field))" Style="width:100%;" />
+                                    </div>
+                                    <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="@(() => ClearQuestionFieldSourcePath(field))" Disabled="@(row == null || string.IsNullOrWhiteSpace(sourcePath))">清空路径</MudButton>
+                                </div>
+                                <div class="active-row-actions"><MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="RunActiveFieldLlmSuggest" Disabled="@(!CanRunActiveFieldLlmSuggest)" Class="llm-inline-button">@(_llmLoading ? "分析中..." : "LLM 推荐当前字段")</MudButton><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="@(() => DeleteQuestionFieldMapping(field))" Disabled="@(row == null)">删除映射</MudButton></div>
+                                @if (!string.IsNullOrWhiteSpace(sourcePath)) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(field)</MudText> }
+                                @if (!IsQuestionFieldPathValid(field) && !string.IsNullOrWhiteSpace(sourcePath)) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前源路径在当前接口的样例 JSON 中无效，请重新选择。</MudAlert> }
+                            </MudPaper>
+                            <MudPaper Outlined="true" Class="detail-editor-shell pa-3" Style="flex:1 1 auto;min-height:0;">
+                                <MudText Typo="Typo.body2" Style="font-weight:600;" Class="mb-2">详细设置</MudText>
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="6">
+                                        <DictCodeEditor Value="@GetQuestionFieldDictCode(field)" ValueChanged="v => OnQuestionFieldDictCodeChanged(field, v)" SuggestedSourceValues="@GetQuestionFieldDictSuggestedSourceValues(field)" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudSelect T="string" Value="@GetQuestionFieldDictMatchMode(field)" ValueChanged="v => OnQuestionFieldDictMatchModeChanged(field, v)" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">
+                                            <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
+                                            <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField T="string" Value="@GetQuestionFieldDefaultValue(field)" ValueChanged="v => OnQuestionFieldDefaultValueChanged(field, v)" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                                    </MudItem>
+                                    <MudItem xs="12">
+                                        <MudTextField T="string" Value="@GetQuestionFieldValueExpression(field)" ValueChanged="v => OnQuestionFieldValueExpressionChanged(field, v)" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10" Variant="Variant.Outlined" />
+                                    </MudItem>
+                                    <MudItem xs="6">
+                                        <MudSwitch T="bool" Value="@GetQuestionFieldIsRequired(field)" ValueChanged="v => OnQuestionFieldRequiredChanged(field, v)" Color="Color.Warning" Label="必填" />
+                                    </MudItem>
+                                    <MudItem xs="6">
+                                        <MudSwitch T="bool" Value="@GetQuestionFieldIsEnabled(field)" ValueChanged="v => OnQuestionFieldEnabledChanged(field, v)" Color="Color.Primary" Label="启用" />
+                                    </MudItem>
+                                    @if (field.MappingTarget == MappingTarget.SubCard && field.CardId.HasValue)
+                                    {
+                                        <MudItem xs="12">
+                                            <MudAlert Severity="Severity.Info" Dense="true">CardId 和 ArrayPath 请到 SubCard 根节点汇总区修改。</MudAlert>
+                                        </MudItem>
+                                    }
+                                </MudGrid>
+                                <MudDivider Class="my-3" />
+                                <div class="detail-settings-header">
+                                    <MudText Typo="Typo.subtitle2">过滤条件</MudText>
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">过滤 @filterCount</MudChip>
+                                </div>
+                                <FilterRuleEditor Rules="@GetQuestionFieldFilterRules(field)" RulesChanged="rules => OnQuestionFieldFilterRulesChanged(field, rules)" ShowScope="false" OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, idx => ActivateQuestionFieldFilterRulePath(field, idx)))" ActivePickIndex="@GetQuestionFieldActiveFilterPickIndex(field)" />
+                            </MudPaper>
+                        </div>
+                    }
+                }
+                else if (SelectedStandaloneField == null)
+                {
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">请先在中间选择一个目标字段。</MudAlert>
+                }
+                else
+                {
+                    var field = SelectedStandaloneField!;
+                    var row = ActiveRow;
+                    var filterCount = row?.FilterRules.Count ?? 0;
+                    <div class="detail-question-layout" style="flex:1 1 auto;min-height:0;height:100%;display:flex;flex-direction:column;gap:12px;">
+                        <MudPaper Outlined="true" Class="pa-3">
+                            <div class="active-row-title">
+                                <MudTooltip Text="@GetActivePickTargetName()">
+                                    <MudChip T="string" Size="Size.Small" Color="GetTargetColor(field.MappingTarget)">@GetTargetDisplayText(field.MappingTarget)</MudChip>
+                                </MudTooltip>
+                            </div>
+                            @if (row == null)
+                            {
+                                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">当前字段尚未创建映射。修改任一配置后会自动加入当前接口；保存前仍需补充源路径或默认值。</MudAlert>
+                            }
+                            <div class="path-edit-row">
+                                <div class="path-edit-field">
+                                    <PathPickTextField Value="@GetActiveStandaloneSourcePath()" ValueChanged="OnActiveRowSourcePathChanged" Label="源路径" HelperText="@GetSourcePathHelperText(field.MappingTarget)" IsActive="@IsActiveRowSourcePathPick()" OnActivated="ActivateActiveRowSourcePath" Style="width:100%;" />
+                                </div>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearActiveRowSourcePath" Disabled="@(row == null || string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath()))">清空路径</MudButton>
+                            </div>
+                            <div class="active-row-actions"><MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="RunActiveFieldLlmSuggest" Disabled="@(!CanRunActiveFieldLlmSuggest)" Class="llm-inline-button">@(_llmLoading ? "分析中..." : "LLM 推荐当前字段")</MudButton><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteActiveRow" Disabled="@(row == null)">删除映射</MudButton></div>
+                            @if (!string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath())) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(row!)</MudText> }
+                            @if (!IsActiveStandalonePathValid() && !string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath())) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前源路径在当前接口的样例 JSON 中无效，请重新选择。</MudAlert> }
+                            @if (ShowActiveStandalonePendingHint()) { <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@GetActiveStandalonePendingHintText()</MudAlert> }
+                        </MudPaper>
+                        <MudPaper Outlined="true" Class="detail-editor-shell pa-3" Style="flex:1 1 auto;min-height:0;">
+                            <MudText Typo="Typo.body2" Style="font-weight:600;" Class="mb-2">详细设置</MudText>
+                            @if (row == null)
+                            {
+                                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">可以先填写字典代码、值表达式、启用/必填或过滤条件；保存前仍需补充源路径或默认值。</MudAlert>
+                            }
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="6">
+                                    <DictCodeEditor Value="@GetActiveStandaloneDictCode()" ValueChanged="OnActiveRowDictCodeChanged" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudSelect T="string" Value="@GetActiveStandaloneDictMatchMode()" ValueChanged="OnActiveRowDictMatchModeChanged" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">
+                                        <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
+                                        <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField T="string" Value="@GetActiveStandaloneDefaultValue()" ValueChanged="OnActiveRowDefaultValueChanged" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                                </MudItem>
+                                <MudItem xs="12">
+                                    <MudTextField T="string" Value="@GetActiveStandaloneValueExpression()" ValueChanged="OnActiveRowValueExpressionChanged" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10" Variant="Variant.Outlined" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudSwitch T="bool" Value="@GetActiveStandaloneIsRequired()" ValueChanged="OnActiveRowRequiredChanged" Color="Color.Warning" Label="必填" />
+                                </MudItem>
+                                <MudItem xs="6">
+                                    <MudSwitch T="bool" Value="@GetActiveStandaloneIsEnabled()" ValueChanged="OnActiveRowEnabledChanged" Color="Color.Primary" Label="启用" />
+                                </MudItem>
+                            </MudGrid>
+                            <MudDivider Class="my-3" />
+                            <div class="detail-settings-header">
+                                <MudText Typo="Typo.subtitle2">过滤条件</MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">过滤 @filterCount</MudChip>
+                            </div>
+                            <FilterRuleEditor Rules="@GetActiveStandaloneFilterRules()" RulesChanged="OnActiveRowFilterRulesChanged" ShowScope="false" />
+                        </MudPaper>
+                    </div>
+                }
+            </div>
+        </MudPaper>
+    };
+
+    private RenderFragment RenderCardTreeNode(CardNode card, CardNode? subCardAncestor) => __builder =>
+    {
+        var isSubCard = IsSubCardNode(card);
+        var currentSubCard = isSubCard ? card : subCardAncestor;
+        var summary = GetCardNodeStatusSummary(card, subCardAncestor);
+        var nodeKey = GetQuestionTreeNodeKey(card);
+        var isSelected = IsQuestionTreeNodeSelected(nodeKey);
+        var icon = isSubCard ? Icons.Material.Filled.TableChart : Icons.Material.Filled.CreditCard;
+        var typeLabel = isSubCard ? $"SubCard/{card.CardType}" : "Card";
+        <MudTreeViewItem T="string" Value="@nodeKey" @bind-Expanded="@card.IsExpanded" Icon="@icon" IconColor="@(isSelected ? Color.Success : Color.Default)">
+            <BodyContent>
+                <div class="question-tree-node @(isSelected ? "question-tree-node-selected" : null)" @onclick="@(() => SelectQuestionTreeCardNode(card))">
+                    <div class="question-tree-node-main">
+                        <MudText Typo="Typo.body2" Style="font-weight:600;">@card.Name</MudText>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(isSubCard ? Color.Warning : Color.Default)">@typeLabel</MudChip>
+                        <MudText Typo="Typo.caption" Color="@GetStatusAccentColor(summary)">@summary.Mapped/@summary.Total</MudText>
+                    </div>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@GetCardNodeMetaText(card)</MudText>
+                </div>
+            </BodyContent>
+            <ChildContent>
+                @foreach (var child in FormBrowserHelper.GetOrderedChildren(card))
+                {
+                    if (child.Card != null)
+                    {
+                        var sub = child.Card;
+                        if (IsQuestionTreeCardVisible(sub, currentSubCard))
+                        {
+                            @RenderCardTreeNode(sub, currentSubCard)
+                        }
+                    }
+                    else if (child.Question != null && IsQuestionTreeQuestionVisible(child.Question, card, currentSubCard))
+                    {
+                        @RenderTreeQuestionNode(child.Question, card, currentSubCard)
+                    }
+                }
+            </ChildContent>
+        </MudTreeViewItem>
+    };
+
+    private RenderFragment RenderTreeQuestionNode(QuestionInfo question, CardNode ownerCard, CardNode? subCardContext) => __builder =>
+    {
+        var field = CreateQuestionFieldDescriptor(question, ownerCard, subCardContext);
+        var state = GetTargetFieldState(field);
+        var nodeKey = GetQuestionTreeNodeKey(field);
+        var isSelected = IsQuestionTreeNodeSelected(nodeKey);
+        <MudTreeViewItem T="string" Value="@nodeKey" Icon="@Icons.Material.Filled.SubdirectoryArrowRight" IconColor="@(isSelected ? Color.Success : Color.Default)">
+            <BodyContent>
+                <div class="question-tree-node question-tree-leaf @(isSelected ? "question-tree-node-selected" : null)" @onclick="@(() => SelectQuestionTreeQuestion(field))" @onclick:stopPropagation="true">
+                    <div class="question-tree-node-main">
+                        <MudIcon Icon="@Icons.Material.Filled.Circle" Size="Size.Small" Color="@GetStateColor(state)" Style="font-size:10px;" />
+                        <MudText Typo="Typo.body2" Style="font-weight:500;">@field.DisplayName</MudText>
+                        @if (!string.IsNullOrWhiteSpace(field.DataType))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@field.DataType</MudText>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(GetCompactQuestionFieldSubtitle(field)))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@GetCompactQuestionFieldSubtitle(field)</MudText>
+                    }
+                </div>
+            </BodyContent>
+        </MudTreeViewItem>
+    };
+}

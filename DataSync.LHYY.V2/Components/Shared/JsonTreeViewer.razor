@@ -1,0 +1,557 @@
+﻿@using Newtonsoft.Json.Linq
+
+<div class="json-tree-viewer-root" @onclick:stopPropagation="true">
+    @if (ShowSearch && string.IsNullOrWhiteSpace(_errorMessage) && _rootNodes.Count > 0)
+    {
+        <div class="json-tree-search-shell">
+            <MudTextField T="string"
+                          Value="@_searchText"
+                          ValueChanged="OnSearchTextChanged"
+                          Placeholder="@SearchPlaceholder"
+                          Immediate="true"
+                          Clearable="true"
+                          Variant="Variant.Outlined"
+                          Margin="Margin.Dense"
+                          Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search"
+                          Class="json-tree-search" />
+        </div>
+    }
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_errorMessage</MudAlert>
+    }
+    else if (_rootNodes.Count > 0)
+    {
+        var nodesToRender = GetNodesToRender();
+        if (nodesToRender.Count > 0)
+        {
+            <div class="json-tree-list" role="tree">
+                @foreach (var node in nodesToRender)
+                {
+                    @RenderNode(node)
+                }
+            </div>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Color="Color.Tertiary">未找到匹配节点</MudText>
+        }
+    }
+    else if (!string.IsNullOrWhiteSpace(JsonText))
+    {
+        <MudText Typo="Typo.body2" Color="Color.Tertiary">JSON 为空</MudText>
+    }
+</div>
+
+@code {
+    [Parameter] public string? JsonText { get; set; }
+
+    [Parameter] public EventCallback<string> OnPathSelected { get; set; }
+
+    [Parameter] public string? SelectedPath { get; set; }
+
+    [Parameter] public int SelectionVersion { get; set; }
+
+    [Parameter] public bool UseArrayBrackets { get; set; }
+
+    [Parameter] public bool PreferFirstArrayItemAsRoot { get; set; }
+
+    [Parameter] public int MaxNodesToRender { get; set; } = DefaultMaxNodesToRender;
+
+    [Parameter] public int MaxArrayItemsToRender { get; set; }
+
+    [Parameter] public bool ShowSearch { get; set; }
+
+    [Parameter] public string SearchPlaceholder { get; set; } = "按节点名、路径或值检索";
+
+    private List<JsonTreeNode> _rootNodes = [];
+    private string? _errorMessage;
+    private string? _lastJsonText;
+    private bool _lastUseArrayBrackets;
+    private bool _lastPreferFirstArrayItemAsRoot;
+    private int _lastMaxNodesToRender;
+    private int _lastMaxArrayItemsToRender;
+    private string? _lastSelectedPath;
+    private int _lastSelectionVersion;
+    private string? _selectedNodeDomId;
+    private bool _pendingScrollToSelection;
+    private string? _searchText;
+    private readonly HashSet<string> _searchVisibleNodeDomIds = [];
+    private readonly HashSet<string> _searchExpandedNodeDomIds = [];
+
+    private const int DefaultMaxNodesToRender = 500;
+    private bool HasActiveSearch => ShowSearch && !string.IsNullOrWhiteSpace(_searchText);
+
+    protected override void OnParametersSet()
+    {
+        var treeChanged = _lastJsonText != JsonText
+            || _lastUseArrayBrackets != UseArrayBrackets
+            || _lastPreferFirstArrayItemAsRoot != PreferFirstArrayItemAsRoot
+            || _lastMaxNodesToRender != MaxNodesToRender
+            || _lastMaxArrayItemsToRender != MaxArrayItemsToRender;
+
+        if (treeChanged)
+        {
+            _lastJsonText = JsonText;
+            _lastUseArrayBrackets = UseArrayBrackets;
+            _lastPreferFirstArrayItemAsRoot = PreferFirstArrayItemAsRoot;
+            _lastMaxNodesToRender = MaxNodesToRender;
+            _lastMaxArrayItemsToRender = MaxArrayItemsToRender;
+            ParseJson();
+        }
+
+        if (treeChanged || _lastSelectedPath != SelectedPath || _lastSelectionVersion != SelectionVersion)
+        {
+            _lastSelectedPath = SelectedPath;
+            _lastSelectionVersion = SelectionVersion;
+            ApplySelection();
+        }
+
+        RefreshSearchState();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingScrollToSelection && !string.IsNullOrWhiteSpace(_selectedNodeDomId))
+        {
+            _pendingScrollToSelection = false;
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.scrollIntoViewById", _selectedNodeDomId);
+        }
+    }
+
+    private void ParseJson()
+    {
+        _rootNodes = [];
+        _errorMessage = null;
+
+        if (string.IsNullOrWhiteSpace(JsonText))
+        {
+            return;
+        }
+
+        try
+        {
+            var token = JToken.Parse(JsonText);
+            if (PreferFirstArrayItemAsRoot
+                && token is JArray array
+                && array.Count > 0
+                && array[0] is JObject or JArray)
+            {
+                token = array[0];
+            }
+
+            var nodeCount = 0;
+            _rootNodes = BuildNodes(token, "", ref nodeCount);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"JSON 解析失败: {ex.Message}";
+        }
+    }
+
+    private void ApplySelection()
+    {
+        ClearNodeSelection(_rootNodes);
+        _selectedNodeDomId = null;
+        _pendingScrollToSelection = false;
+
+        var normalizedSelectedPath = NormalizeSelectionPath(SelectedPath, UseArrayBrackets);
+        if (string.IsNullOrWhiteSpace(normalizedSelectedPath))
+        {
+            return;
+        }
+
+        if (TrySelectNode(_rootNodes, normalizedSelectedPath, UseArrayBrackets, out var selectedNode))
+        {
+            _selectedNodeDomId = selectedNode.DomId;
+            _pendingScrollToSelection = true;
+        }
+    }
+
+    private static void ClearNodeSelection(IEnumerable<JsonTreeNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            node.IsSelected = false;
+            ClearNodeSelection(node.Children);
+        }
+    }
+
+    private static bool TrySelectNode(IEnumerable<JsonTreeNode> nodes, string selectedPath, bool useArrayBrackets, out JsonTreeNode selectedNode)
+    {
+        foreach (var node in nodes)
+        {
+            if (TrySelectNode(node.Children, selectedPath, useArrayBrackets, out selectedNode))
+            {
+                node.IsExpanded = true;
+                return true;
+            }
+
+            if (string.Equals(NormalizeSelectionPath(node.Path, useArrayBrackets), selectedPath, StringComparison.OrdinalIgnoreCase))
+            {
+                node.IsSelected = true;
+                selectedNode = node;
+                return true;
+            }
+        }
+
+        selectedNode = null!;
+        return false;
+    }
+
+    private static string? NormalizeSelectionPath(string? path, bool useArrayBrackets)
+    {
+        var normalized = path?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(normalized))
+        {
+            return null;
+        }
+
+        normalized = normalized.StartsWith("$.", StringComparison.Ordinal)
+            ? normalized[2..]
+            : normalized;
+
+        return useArrayBrackets
+            ? SubCardPathHelper.NormalizeArrayPath(normalized)
+            : normalized;
+    }
+
+    private Task OnSearchTextChanged(string? value)
+    {
+        _searchText = value;
+        RefreshSearchState();
+        return Task.CompletedTask;
+    }
+
+    private void RefreshSearchState()
+    {
+        _searchVisibleNodeDomIds.Clear();
+        _searchExpandedNodeDomIds.Clear();
+
+        if (!HasActiveSearch)
+        {
+            return;
+        }
+
+        foreach (var node in _rootNodes)
+        {
+            MarkVisibleNodes(node);
+        }
+    }
+
+    private bool MarkVisibleNodes(JsonTreeNode node)
+    {
+        var selfVisible = NodeMatchesSearch(node) || node.IsSelected;
+        var hasVisibleChild = false;
+
+        foreach (var child in node.Children)
+        {
+            if (MarkVisibleNodes(child))
+            {
+                hasVisibleChild = true;
+            }
+        }
+
+        var isVisible = selfVisible || hasVisibleChild;
+        if (isVisible)
+        {
+            _searchVisibleNodeDomIds.Add(node.DomId);
+        }
+
+        if (hasVisibleChild)
+        {
+            _searchExpandedNodeDomIds.Add(node.DomId);
+        }
+
+        return isVisible;
+    }
+
+    private bool NodeMatchesSearch(JsonTreeNode node)
+    {
+        var keyword = _searchText?.Trim();
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return false;
+        }
+
+        return ContainsKeyword(node.Key, keyword)
+            || ContainsKeyword(node.Path, keyword)
+            || ContainsKeyword(node.Value, keyword);
+    }
+
+    private static bool ContainsKeyword(string? source, string keyword) =>
+        !string.IsNullOrWhiteSpace(source)
+        && source.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+
+    private List<JsonTreeNode> GetNodesToRender() =>
+        HasActiveSearch
+            ? _rootNodes.Where(IsNodeVisible).ToList()
+            : _rootNodes;
+
+    private List<JsonTreeNode> GetChildNodesToRender(JsonTreeNode node) =>
+        HasActiveSearch
+            ? node.Children.Where(IsNodeVisible).ToList()
+            : node.Children;
+
+    private bool IsNodeVisible(JsonTreeNode node) =>
+        !HasActiveSearch || _searchVisibleNodeDomIds.Contains(node.DomId);
+
+    private bool IsNodeExpanded(JsonTreeNode node) =>
+        HasActiveSearch
+            ? node.IsExpanded || _searchExpandedNodeDomIds.Contains(node.DomId)
+            : node.IsExpanded;
+
+    private List<JsonTreeNode> BuildNodes(JToken token, string parentPath, ref int nodeCount)
+    {
+        var nodes = new List<JsonTreeNode>();
+
+        if (token is JObject obj)
+        {
+            var deferredChildren = new List<(JsonTreeNode Node, JToken Value)>();
+            foreach (var prop in obj.Properties())
+            {
+                if (HasReachedNodeLimit(nodeCount))
+                {
+                    break;
+                }
+
+                var path = string.IsNullOrEmpty(parentPath) ? prop.Name : $"{parentPath}.{prop.Name}";
+                var node = CreateNodeShell(prop.Name, path, prop.Value);
+                nodes.Add(node);
+                nodeCount++;
+
+                if (prop.Value is JObject or JArray)
+                {
+                    deferredChildren.Add((node, prop.Value));
+                }
+            }
+
+            foreach (var (node, value) in deferredChildren)
+            {
+                if (HasReachedNodeLimit(nodeCount))
+                {
+                    break;
+                }
+
+                PopulateNodeChildren(node, value, ref nodeCount);
+            }
+        }
+        else if (token is JArray arr)
+        {
+            if (UseArrayBrackets)
+            {
+                if (arr.Count > 0)
+                {
+                    if (HasReachedNodeLimit(nodeCount))
+                    {
+                        return nodes;
+                    }
+
+                    var path = $"{parentPath}[]";
+                    var node = CreateNodeShell("[*]", path, arr);
+                    node.IsExpanded = true;
+                    var firstItem = arr[0];
+                    nodes.Add(node);
+                    nodeCount++;
+
+                    if (firstItem is JObject or JArray)
+                    {
+                        PopulateNodeChildren(node, firstItem, ref nodeCount);
+                    }
+                    else
+                    {
+                        var rawValue = firstItem.ToString();
+                        node.Value = $"[{arr.Count} 项] 示例: {(rawValue.Length > 40 ? rawValue[..40] + "..." : rawValue)}";
+                    }
+                }
+            }
+            else
+            {
+                var deferredChildren = new List<(JsonTreeNode Node, JToken Value)>();
+                var maxItems = GetArrayItemsToRenderCount(arr.Count);
+                for (var i = 0; i < maxItems; i++)
+                {
+                    if (HasReachedNodeLimit(nodeCount))
+                    {
+                        break;
+                    }
+
+                    var path = $"{parentPath}[{i}]";
+                    var node = CreateNodeShell($"[{i}]", path, arr[i]);
+                    nodes.Add(node);
+                    nodeCount++;
+
+                    if (arr[i] is JObject or JArray)
+                    {
+                        deferredChildren.Add((node, arr[i]));
+                    }
+                }
+
+                foreach (var (node, value) in deferredChildren)
+                {
+                    if (HasReachedNodeLimit(nodeCount))
+                    {
+                        break;
+                    }
+
+                    PopulateNodeChildren(node, value, ref nodeCount);
+                }
+            }
+        }
+
+        return nodes;
+    }
+
+    private bool HasReachedNodeLimit(int nodeCount) =>
+        MaxNodesToRender > 0 && nodeCount >= MaxNodesToRender;
+
+    private int GetArrayItemsToRenderCount(int totalCount)
+    {
+        if (totalCount <= 0)
+        {
+            return 0;
+        }
+
+        if (MaxArrayItemsToRender <= 0)
+        {
+            return totalCount;
+        }
+
+        return Math.Min(totalCount, MaxArrayItemsToRender);
+    }
+
+    private JsonTreeNode CreateNodeShell(string key, string path, JToken value)
+    {
+        var node = new JsonTreeNode
+        {
+            Key = key,
+            Path = path,
+            NodeType = GetNodeType(value),
+            DomId = $"json-tree-node-{Guid.NewGuid():N}",
+        };
+
+        if (value is JObject || value is JArray)
+        {
+            var depth = path.Count(c => c == '.') + path.Count(c => c == '[');
+            node.IsExpanded = depth < 2;
+
+            if (value is JArray arr)
+            {
+                var renderedCount = UseArrayBrackets ? Math.Min(arr.Count, 1) : GetArrayItemsToRenderCount(arr.Count);
+                node.Value = renderedCount < arr.Count
+                    ? $"[{arr.Count} 项，仅展示前 {renderedCount} 项]"
+                    : $"[{arr.Count} 项]";
+            }
+            else
+            {
+                node.Value = $"{{{((JObject)value).Properties().Count()} 字段}}";
+            }
+        }
+        else
+        {
+            var rawValue = value.ToString();
+            node.Value = rawValue.Length > 80 ? rawValue[..80] + "..." : rawValue;
+        }
+
+        return node;
+    }
+
+    private void PopulateNodeChildren(JsonTreeNode node, JToken value, ref int nodeCount)
+    {
+        node.Children = BuildNodes(value, node.Path, ref nodeCount);
+    }
+
+    private static string GetNodeType(JToken token) => token.Type switch
+    {
+        JTokenType.Object => "Object",
+        JTokenType.Array => "Array",
+        JTokenType.String => "String",
+        JTokenType.Integer or JTokenType.Float => "Number",
+        JTokenType.Boolean => "Boolean",
+        JTokenType.Null => "Null",
+        _ => "Unknown"
+    };
+
+    private static string GetNodeIcon(string nodeType) => nodeType switch
+    {
+        "Object" => Icons.Material.Filled.DataObject,
+        "Array" => Icons.Material.Filled.DataArray,
+        "String" => Icons.Material.Filled.TextFields,
+        "Number" => Icons.Material.Filled.Numbers,
+        "Boolean" => Icons.Material.Filled.ToggleOn,
+        "Null" => Icons.Material.Filled.Block,
+        _ => Icons.Material.Filled.HelpOutline,
+    };
+
+    private static void ToggleNode(JsonTreeNode node)
+    {
+        node.IsExpanded = !node.IsExpanded;
+    }
+
+    private RenderFragment RenderNode(JsonTreeNode node) => __builder =>
+    {
+        var childrenToRender = GetChildNodesToRender(node);
+        var isBranchNode = node.Children.Count > 0;
+        var canExpand = childrenToRender.Count > 0;
+        var isExpanded = canExpand && IsNodeExpanded(node);
+        var rowClass = node.IsSelected ? "json-tree-node-row is-selected" : "json-tree-node-row";
+        <div class="json-tree-node" role="treeitem" aria-expanded="@(canExpand ? isExpanded : (bool?)null)" aria-selected="@node.IsSelected">
+            <div id="@node.DomId" class="@rowClass" @onclick="@(async () => await OnNodeClicked(node))">
+                @if (canExpand)
+                {
+                    <button type="button" class="json-tree-toggle" title="@(isExpanded ? "收起" : "展开")" @onclick="() => ToggleNode(node)" @onclick:stopPropagation="true">
+                        <MudIcon Icon="@(isExpanded ? Icons.Material.Filled.KeyboardArrowDown : Icons.Material.Filled.KeyboardArrowRight)" Size="Size.Small" />
+                    </button>
+                }
+                else
+                {
+                    <span class="json-tree-toggle-placeholder"></span>
+                }
+                <MudIcon Icon="@GetNodeIcon(node.NodeType)" Size="Size.Small" Class="json-tree-node-icon" />
+                <span class="json-tree-node-key">@node.Key</span>
+                @if (isBranchNode)
+                {
+                    @if (!string.IsNullOrEmpty(node.Value))
+                    {
+                        <span class="json-tree-node-meta">@node.Value</span>
+                    }
+                }
+                else if (!string.IsNullOrEmpty(node.Value))
+                {
+                    <span class="json-tree-node-value">@node.Value</span>
+                }
+                <span class="json-tree-node-type">@node.NodeType</span>
+            </div>
+            @if (canExpand && isExpanded)
+            {
+                <div class="json-tree-children" role="group">
+                    @foreach (var child in childrenToRender)
+                    {
+                        @RenderNode(child)
+                    }
+                </div>
+            }
+        </div>
+    };
+
+    private async Task OnNodeClicked(JsonTreeNode node)
+    {
+        if (OnPathSelected.HasDelegate)
+        {
+            await OnPathSelected.InvokeAsync(node.Path);
+        }
+    }
+
+    private class JsonTreeNode
+    {
+        public string Key { get; set; } = "";
+        public string Path { get; set; } = "";
+        public string DomId { get; set; } = "";
+        public string? Value { get; set; }
+        public string NodeType { get; set; } = "Unknown";
+        public bool IsExpanded { get; set; }
+        public bool IsSelected { get; set; }
+        public List<JsonTreeNode> Children { get; set; } = [];
+    }
+}

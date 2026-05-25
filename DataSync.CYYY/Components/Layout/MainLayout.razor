@@ -1,0 +1,71 @@
+﻿@inherits LayoutComponentBase
+
+<MudThemeProvider />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="layout-shell">
+    <MudLayout Class="app-shell-layout">
+        <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Class="app-shell-drawer">
+            <MudDrawerHeader Class="app-shell-drawer-header">
+                <div class="drawer-header-row">
+                    <div class="drawer-brand">
+                        <div class="drawer-mark">DS</div>
+                        <div class="drawer-copy">
+                            <MudText Typo="Typo.subtitle1" Class="drawer-title">DataSync</MudText>
+                            <MudText Typo="Typo.caption" Class="drawer-subtitle">数据同步管理</MudText>
+                        </div>
+                    </div>
+                    <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Color="Color.Inherit"
+                                   OnClick="ToggleDrawer" Class="drawer-toggle" />
+                </div>
+                <MudText Typo="Typo.caption" Class="drawer-note">采集、轮询与推送工作台</MudText>
+            </MudDrawerHeader>
+            <MudNavMenu Class="app-shell-nav">
+                <div class="nav-section">
+                    <div class="nav-section-label">监控运维</div>
+                    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard" Class="app-shell-link">
+                        状态总览
+                    </MudNavLink>
+                    <MudNavLink Href="/pending-sync" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HourglassTop" Class="app-shell-link">
+                        待同步对象
+                    </MudNavLink>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-label">配置管理</div>
+                    <MudNavLink Href="/datalake" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Cloud" Class="app-shell-link">
+                        数据湖配置
+                    </MudNavLink>
+                    <MudNavLink Href="/ingestion" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Input" Class="app-shell-link">
+                        采集源
+                    </MudNavLink>
+                    <MudNavLink Href="/tasks" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AccountTree" Class="app-shell-link">
+                        同步任务
+                    </MudNavLink>
+                </div>
+                <div class="nav-section">
+                    <div class="nav-section-label">数据工具</div>
+                    <MudNavLink Href="/backfill" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Replay" Class="app-shell-link">
+                        数据补录
+                    </MudNavLink>
+                </div>
+            </MudNavMenu>
+        </MudDrawer>
+
+        <MudMainContent Class="app-shell-main">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit"
+                           OnClick="ToggleDrawer"
+                           Class="@($"app-shell-floating-menu{(!_drawerOpen ? " is-visible" : string.Empty)}")" />
+            <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="main-content-wrap">
+                @Body
+            </MudContainer>
+        </MudMainContent>
+    </MudLayout>
+</div>
+
+@code {
+    private bool _drawerOpen = true;
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+}

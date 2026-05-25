@@ -1,0 +1,27 @@
+﻿.pending-sync-detail-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.pending-sync-detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pending-sync-detail-ellipsis {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.pending-sync-detail-multiline {
+    max-width: 640px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}

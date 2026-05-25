@@ -1,0 +1,1228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>00 卫宁业务集成平台接口方案-总体方案概述</title>
+    <style>
+        /*总体方案概述*/
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        /* 默认宋体 */
+        body {
+            font-family: SimSun;
+            overflow-x: auto;
+            width: 100%;
+        }
+        /* 微软雅黑 */
+        .microsoft-yahei {
+            font-family: Microsoft Yahei;
+        }
+        section {
+            display: block;
+            margin: 20px 10px;
+        }
+
+        .title {
+            text-align: center;
+        }
+
+        section > table {
+            table-layout: fixed;
+            width: 100%;
+            margin: 20px 0px;
+            text-align: center;
+            word-wrap: break-word;
+            font-size: 13px;
+        }
+
+        section span {
+            text-decoration: underline;
+            color: blue;
+            cursor: pointer;
+        }
+
+        section table td {
+            padding: 5px;
+        }
+
+        .back-dedede, .back-par td {
+            background: #dedede;
+        }
+
+        .font-bold {
+            font-weight: bold;
+        }
+
+        .text-left {
+            text-align: left;
+        }
+
+        .text-center {
+            text-align: center;
+        }
+
+        .title-content {
+            padding: 20px 20px;
+            line-height: 1.8;
+        }
+
+        .yellow-highlight {
+            background-color: yellow;
+            color: blue;
+        }
+
+        .gray-highlight {
+            background-color: gray;
+            text-decoration: line-through;
+        }
+
+        .green-highlight {
+            background-color: #00ff00;
+        }
+
+        .top-img {
+            z-index: 999;
+            text-decoration: none!important;
+            color: #000!important;
+            position: fixed;
+            bottom: 50px;
+            right: 50px;
+            padding: 5px ;
+            cursor: pointer;
+            border-radius: 50%;
+            background: #ffffff;
+            font-size: 20px;
+            font-weight: bold;
+            border: 1px solid #dedede;
+            transform: rotate(-90deg);
+        }
+
+        .menu {
+            position: fixed;
+            top: 10px;
+            right: 5px;
+            z-index: 999;
+            background: #FFFFFF;
+            border: 1px solid #DEDEDE;
+            border-radius: 10px;
+            padding: 10px 15px;
+        }
+
+        .menu-ul {
+            list-style: none;
+        }
+
+        .menu-ul li {
+            margin-bottom: 5px;
+            border-bottom: 1px solid #dedede;
+            padding: 5px 0;
+            box-sizing: border-box;
+        }
+
+        .menu-ul li a, .menu-ul li h3 {
+            width: 280px;
+            display: inline-block;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: inherit;
+            text-decoration: none;
+        }
+
+        /* 滚动条样式 */
+        .menu-scrollbar::-webkit-scrollbar {
+            width: 2px;
+            height: 4px;
+        }
+
+        /* 滚动条滑块（里面小方块） */
+        .menu-scrollbar::-webkit-scrollbar-thumb {
+            border-radius: 10px;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.1);
+        }
+
+        /* 滚动条轨道 */
+        .menu-scrollbar::-webkit-scrollbar-track {
+            border-radius: 0;
+            box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.2);
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .roate {
+            transform: rotate(180deg);
+        }
+
+        #menu-template {
+            opacity: 1;
+            display: block;
+        }
+
+        .display-none {
+            display: none !important;
+        }
+
+        #menu-cz {
+            float: right;
+        }
+
+        .resizeable {
+            overflow: hidden;
+            position: relative;
+        }
+
+        .resizeable .resizer {
+            background: #fff;
+            opacity: 0;
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 4px;
+            height: 100%;
+            cursor: col-resize;
+            z-index: 1;
+            transition: all 0.25s ease;
+        }
+
+        .resizeable:hover .resizer {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body onload="menuShow()">
+<section>
+    <a href="#top" class="top-img">➨</a>
+    <div class="menu" style="max-height: 600px;overflow-y: auto;overflow-x: hidden" class="menu-scrollbar">
+        <div onclick="menuShow()" id="menu-cz" class="roate" title="点击收缩或展开"> << </div>
+        <div id="menu-template">
+            <h1 style="margin-bottom: 15px">目录</h1>
+            <ul class="menu-ul">
+                <li><h2 title="引言"><a href="#menu1">1.引言</a></h2></li>
+                <li><h2 title="总体规范"><a href="#menu2">2.总体规范</a></h2></li>
+                <li><h3 title="协定"><a href="#menu2.1">&nbsp;2.1 协定</a></h3></li>
+                <li><h3 title="术语"><a href="#menu2.2">&nbsp;2.2 术语</a></h3></li>
+                <li><h3 title="架构"><a href="#menu2.3">&nbsp;2.3 架构</a></h3></li>
+                <li><h3 title="补偿机制建议"><a href="#menu2.4">&nbsp;2.4 补偿机制建议</a></h3></li>
+                <li><h3 title="JSON关键字说明"><a href="#menu2.5">&nbsp;2.5 JSON关键字说明</a></h3></li>
+
+                <li><h2 title="引言"><a href="#menu3">3.RESTful接口规范</a></h2></li>
+                <li><h3 title="引言"><a href="#menu3.1">&nbsp;3.1 服务地址</a></h3></li>
+                <li><h3 title="引言"><a href="#menu3.2">&nbsp;3.2 参数说明</a></h3></li>
+                <li><h3 title="引言"><a href="#menu3.3">&nbsp;3.3 请求参数Head说明</a></h3></li>
+                <li><h3 title="引言"><a href="#menu3.4">&nbsp;3.4 返回参数Head说明</a></h3></li>
+                <li><h3 title="引言"><a href="#menu3.5">&nbsp;3.5 调用示例</a></h3></li>
+                <li><h3 title="引言"><a href="#menu3.6">&nbsp;3.6 参考值字典</a></h3></li>
+                <li><h4 title="引言"><a href="#menu3.6.1">&nbsp;&nbsp;3.6.1 消息类型</a></h4></li>
+                <li><h4 title="引言"><a href="#menu3.6.2">&nbsp;&nbsp;3.6.2 消息格式</a></h4></li>
+                <li><h4 title="引言"><a href="#menu3.6.3">&nbsp;&nbsp;3.6.3 加密策略</a></h4></li>
+                <li><h4 title="引言"><a href="#menu3.6.4">&nbsp;&nbsp;3.6.4 结果代码</a></h4></li>
+            </ul>
+        </div>
+    </div>
+    <h1 class="text-center" id="top">00 卫宁业务集成平台接口方案-总体方案概述</h1>
+    <br>
+    <br>
+    <h2 id="menu1">1.引言</h2>
+    <div class="title-content">该文档参考《医疗健康信息传输与交换标准v2.5.1》、《医院信息互联互通标准化成熟度测评方案（2020年版）》，根据医院实际的业务情况修改了部分字段说明。</div>
+    <div class="green-highlight" style="margin-left: 20px;margin-bottom: 20px;width: 150px;display: inline-block;">最新新增或修改内容</div>
+    <h2 id="menu2">2.总体规范</h2>
+    <h3 id="menu2.1">2.1 协定</h3>
+    <div class="title-content">1)接入平台上下游必须要遵循接口幂等性原则：<br>&nbsp;∎同一条业务消息多次发送，上游要保证多次发送的数据一致；<br>&nbsp;∎同一条业务消息多次请求，下游要保证业务只有一条数据。<br>2)接入平台必备条件：<br>&nbsp;∎上游接入方消息内容要满足平台标准定义，必填字段一定要填上，应填字段业务上有必须要传；<br>&nbsp;∎上游接入方设置超时时间要大于平台超时时间（平台默认33秒，建议大于等于35秒）；<br>&nbsp;∎下游接入方只允许提供一个API接口（推荐HTTP）；<br>&nbsp;∎下游接入方错误提示必须要能精准定位（必须按照平台定义的AckCode提示）；<br>&nbsp;∎下游接入方消息入库失败，要本地存储；<br>&nbsp;∎下游接入方字符串长度要调整大于等于发送方定义的长度，对超长的字符串先截断再存储落库（地址、诊断、临床摘要等）。<br>3)接入平台上下游职责：<br>&nbsp;∎发送方职责：负责把消息发到平台，收到平台成功返回，再继续自己后续的业务；<br>&nbsp;∎消费方职责：负责接收消息落库等处理，只要接收到消息，后续的处理过程都由消费方自已完成，如错误保障等；<br>&nbsp;∎平台方职责：负责消息格式验证，消息通路顺畅，消息不丢失，网络异常波动和消费方超时，消息重发。<br>4)未指定日期格式：<br>&nbsp;∎JSON消息默认：yyyy-MM-dd HH:mm:ss，示例：2023-03-23 14:22:49；<br>&nbsp;∎HL7消息默认：yyyyMMddHHmmss，示例：20230323142249。<br>5)基数列含义：n..m，表示最少出现n次，最多出现m次；<br>&nbsp;∎0..1：应填，最多出现一次（业务有数据必须填上，业务无则可为空）；<br>&nbsp;∎1..1：必填，最多出现一次；<br>&nbsp;∎0..n：应填，最多出现n次（业务有数据必须填上，业务无则可为空）；<br>&nbsp;∎1..n：必填，最多出现n次；<br>&nbsp;∎┗，┗━，┗━━...表示层级结构；<br>&nbsp;∎父节点0..1，子节点1..1：当出现子节点时子节点必填，反之非必填。</div>  <!-- 处理换行、Tab键 -->
+    <h3 id="menu2.2">2.2 术语</h3>
+    <div class="title-content">平台接口规范中定义的字典以接口规范为准；<br>文档中标记“用户自定义字典”的以主数据为准，没有主数据的参考现场标准体系，如：参考HIS为准。</div>  <!-- 处理换行、Tab键 -->
+    <h3 id="menu2.3">2.3 架构</h3>
+    <div class="title-content">方案概述：本文档为总体方案概述，接口整体规范为JSON格式，包括Request、Response、Head、Body等结构。<br>&nbsp;∎Request：消息请求主体内容；<br>&nbsp;∎Response：消息响应主体内容；<br>&nbsp;∎Head：Request.Head、Response.Head消息头部分；<br>&nbsp;∎Body：Request.Body、Response.Body消息主体业务部分。</div>
+    <h3 id="menu2.4">2.4 补偿机制建议</h3>
+    <div class="title-content">
+        集成平台ESB出现故障，业务系统无法通过集成平台实现业务交互，业务系统需要实现接口补偿机制如下，但不限制。<br>
+        1)业务系统发送到平台消息，需要存储到本地（建议保留14天），保障消息不丢失，并支持手动重发（可支持单条数据重发、支持某一患者数据重发、支持某一段时间内数据重发等）；<br>
+        2)所有跟平台交互的消息需要收到平台的应答，对于没有收到平台应答或应答失败的消息，需要做标记，并支持重发（建议重发1-3次），3次重发失败后保存记录，手动处理。
+    </div>
+    <h3 id="menu2.5">2.5 JSON关键字说明</h3>
+    <table border="1" cellspacing="0" cellpadding="0" id="table2.5" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">含义</td>
+            <td class="back-dedede font-bold" style="width: 100px">特殊字符</td>
+            <td class="back-dedede font-bold">示例</td>
+            <td class="back-dedede font-bold" style="width: 100px">转义后</td>
+        </tr>
+        <tr>
+            <td class="text-center">英文双引号</td>
+            <td class="text-center">"</td>
+            <td class="text-left">使用反斜杠进行转义<br>
+                {<br>
+                "Example": "\"Hello, World!\""<br>
+                }
+            </td>
+            <td class="text-center">\"</td>
+        </tr>
+        <tr>
+            <td class="text-center">反斜杠</td>
+            <td class="text-center">\</td>
+            <td class="text-left">同样使用反斜杠进行转义<br>
+                {<br>
+                "Example": "C:\\Program Files\\"<br>
+                }
+            </td>
+            <td class="text-center">\\</td>
+        </tr>
+        <tr>
+            <td class="text-center">换行字符</td>
+            <td class="text-center"></td>
+            <td class="text-left">使用反斜杠和字母n进行转义<br>
+                {<br>
+                "Example": "Hello\nWorld"<br>
+                }
+            </td>
+            <td class="text-center">\n</td>
+        </tr>
+        <tr>
+            <td class="text-center">回车字符</td>
+            <td class="text-center"></td>
+            <td class="text-left">使用反斜杠和字母r进行转义<br>
+                {<br>
+                "Example": "Hello\rWorld"<br>
+                }
+            </td>
+            <td class="text-center">\r</td>
+        </tr>
+        <tr>
+            <td class="text-center">制表符</td>
+            <td class="text-center"></td>
+            <td class="text-left">使用反斜杠和字母t进行转义<br>
+                {<br>
+                "Example": "Hello\tWorld"<br>
+                }
+            </td>
+            <td class="text-center">\t</td>
+        </tr>
+        <tr>
+            <td class="text-center">退格符</td>
+            <td class="text-center"></td>
+            <td class="text-left">使用反斜杠和字母b进行转义<br>
+                {<br>
+                "Example": "Hello\bWorld"<br>
+                }
+            </td>
+            <td class="text-center">\b</td>
+        </tr>
+        <tr>
+            <td class="text-center">换页符</td>
+            <td class="text-center"></td>
+            <td class="text-left">使用反斜杠和字母f进行转义<br>
+                {<br>
+                "Example": "Hello\fWorld"<br>
+                }
+            </td>
+            <td class="text-center">\f</td>
+        </tr>
+    </table>
+
+    <h2 id="menu3">3.RESTful接口规范</h2>
+    <h3 id="menu3.1">3.1 服务地址</h3>
+    <div class="title-content">
+        服务地址：平台提供给接入方调用的地址。<br>
+        http://服务器IP:端口号/winninghiip
+    </div>
+    <h3 id="menu3.2">3.2 参数说明</h3>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.2" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">参数名称</td>
+            <td class="back-dedede font-bold">说明</td>
+            <td class="back-dedede font-bold" style="width: 100px">示例</td>
+        </tr>
+        <tr>
+            <td class="text-left">服务器IP</td>
+            <td class="text-left">ESB RESTful WEb服务所在服务器IP地址</td>
+            <td class="text-left">192.168.1.2</td>
+        </tr>
+        <tr>
+            <td class="text-left">端口号</td>
+            <td class="text-left">ESB RESTful WEb服务端口号</td>
+            <td class="text-left">16001</td>
+        </tr>
+        <tr>
+            <td class="text-left">winninghiip</td>
+            <td class="text-left">固定值（以现场实际提供为准）</td>
+            <td class="text-left"></td>
+        </tr>
+    </table>
+    <h3 id="menu3.3">3.3 请求参数Head说明</h3>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.3">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">序号</td>
+            <td class="back-dedede font-bold" style="width: 200px">属性代码</td>
+            <td class="back-dedede font-bold" style="width: 300px">属性名称</td>
+            <td class="back-dedede font-bold" style="width: 100px">字段类型</td>
+            <td class="back-dedede font-bold" style="width: 100px">基数</td>
+            <td class="back-dedede font-bold" style="width: 300px">消息示例</td>
+            <td class="back-dedede font-bold" style="width: 100px">保留字段</td>
+            <td class="back-dedede font-bold">特殊说明</td>
+        </tr>
+            <tr>
+                <td class="text-center">1</td>
+                <td class="text-left">Version</td>
+                <td class="text-left">协议版本号</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">2.0</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">2</td>
+                <td class="text-left">TransferType</td>
+                <td class="text-left">传输类型</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">Async</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">3</td>
+                <td class="text-left">ServiceVersion</td>
+                <td class="text-left">服务内容版本号</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">1.1</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">4</td>
+                <td class="text-left">Callback</td>
+                <td class="text-left">回调地址</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">5</td>
+                <td class="text-left">LicId</td>
+                <td class="text-left">授权码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">WINNING999</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">6</td>
+                <td class="text-left">TranCode</td>
+                <td class="text-left">事件代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">7</td>
+                <td class="text-left">ContentType</td>
+                <td class="text-left">消息类型</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">text/json</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">8</td>
+                <td class="text-left">ContentEncoding</td>
+                <td class="text-left">消息格式</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">gzip</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">9</td>
+                <td class="text-left">OrgId</td>
+                <td class="text-left">服务调用方所属医疗机构代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">WinningSoft</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">10</td>
+                <td class="text-left">AreaId</td>
+                <td class="text-left">服务调用方所属院区代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">01</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">11</td>
+                <td class="text-left">AppId</td>
+                <td class="text-left">服务调用方系统代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">HIS0101</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">12</td>
+                <td class="text-left">RecOrgId</td>
+                <td class="text-left">服务提供方所属医疗机构代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">WinningSoft</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">13</td>
+                <td class="text-left">RecAreaId</td>
+                <td class="text-left">服务提供方所属院区代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">01</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">14</td>
+                <td class="text-left">RecAppId</td>
+                <td class="text-left">服务提供方系统代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">HIS0110</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">15</td>
+                <td class="text-left">Mac</td>
+                <td class="text-left">Mac地址</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">00-FF-FF-E8-5C-79</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">16</td>
+                <td class="text-left">IPAddress</td>
+                <td class="text-left">IP地址</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">192.192.1.233</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">17</td>
+                <td class="text-left">MessageId</td>
+                <td class="text-left">消息唯一ID</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">34267BE927C7416F9C041FF1A1C7811D</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">18</td>
+                <td class="text-left">AppType</td>
+                <td class="text-left">客户端类型</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">PC</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">19</td>
+                <td class="text-left">SecurityPolicy</td>
+                <td class="text-left">加密策略</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">20</td>
+                <td class="text-left">SecurityContent</td>
+                <td class="text-left">加密策略需要的内容</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">21</td>
+                <td class="text-left">Timestamp</td>
+                <td class="text-left">请求消息生成的时间戳</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">2024-05-29 10:15:02.358</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">22</td>
+                <td class="text-left">CanaryTest</td>
+                <td class="text-left">灰度测试</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">0</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+    </table>
+    <h3 id="menu3.4">3.4 返回参数Head说明</h3>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.4">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">序号</td>
+            <td class="back-dedede font-bold" style="width: 200px">属性代码</td>
+            <td class="back-dedede font-bold" style="width: 300px">属性名称</td>
+            <td class="back-dedede font-bold" style="width: 100px">字段类型</td>
+            <td class="back-dedede font-bold" style="width: 100px">基数</td>
+            <td class="back-dedede font-bold" style="width: 300px">消息示例</td>
+            <td class="back-dedede font-bold" style="width: 100px">保留字段</td>
+            <td class="back-dedede font-bold">特殊说明</td>
+        </tr>
+            <tr>
+                <td class="text-center">1</td>
+                <td class="text-left">Version</td>
+                <td class="text-left">协议版本号</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">2.0</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">2</td>
+                <td class="text-left">AckCode</td>
+                <td class="text-left">结果代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">200.5</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">3</td>
+                <td class="text-left">AckMessage</td>
+                <td class="text-left">描述或错误信息</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">申请单号不允许为空！</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">4</td>
+                <td class="text-left">AckDescription</td>
+                <td class="text-left">应答描述</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">发送方：门诊医生站，消费方：检验系统，交易代码：检验申请单新增，异常类型：数据库执行错误，消息ID：741FEC82-B310-4309-8575-B91A4B4003</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">5</td>
+                <td class="text-left">ContentType</td>
+                <td class="text-left">消息类型</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">text/json</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">6</td>
+                <td class="text-left">ContentEncoding</td>
+                <td class="text-left">消息格式</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">gzip</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">7</td>
+                <td class="text-left">OrgId</td>
+                <td class="text-left">服务调用方所属医疗机构代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">WinningSoft</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">8</td>
+                <td class="text-left">AreaId</td>
+                <td class="text-left">服务调用方所属院区代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">01</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">9</td>
+                <td class="text-left">AppId</td>
+                <td class="text-left">服务调用方系统代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">HIS0110</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">10</td>
+                <td class="text-left">RecOrgId</td>
+                <td class="text-left">服务提供方所属医疗机构代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">WinningSoft</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">11</td>
+                <td class="text-left">RecAreaId</td>
+                <td class="text-left">服务提供方所属院区代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left">01</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">12</td>
+                <td class="text-left">RecAppId</td>
+                <td class="text-left">服务提供方系统代码</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">HIS0101</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">13</td>
+                <td class="text-left">MessageId</td>
+                <td class="text-left">消息唯一ID</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">34267BE927C7416F9C041FF1A1C7811D</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">14</td>
+                <td class="text-left">SecurityPolicy</td>
+                <td class="text-left">加密策略</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">15</td>
+                <td class="text-left">SecurityContent</td>
+                <td class="text-left">加密策略需要的内容</td>
+                <td class="text-center">String</td>
+                <td class="text-center">0..1</td>
+                <td class="text-left"> </td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+            <tr>
+                <td class="text-center">16</td>
+                <td class="text-left">Timestamp</td>
+                <td class="text-left">请求消息生成的时间戳</td>
+                <td class="text-center">String</td>
+                <td class="text-center">1..1</td>
+                <td class="text-left">2024-03-29 10:15:02.652</td>
+                <td></td><!-- 保留字段 -->
+                <td class="text-left"></td>
+            </tr>
+    </table>
+    <h3 id="menu3.5">3.5 调用示例</h3>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.5" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">接口说明</td>
+            <td class="text-left">个人信息新增</td>
+        </tr>
+        <tr>
+            <td class="back-dedede font-bold">请求地址</td>
+            <td class="text-left">http://192.168.1.2:16001/winninghiip</td>
+        </tr>
+        <tr>
+            <td class="back-dedede font-bold">请求方式</td>
+            <td class="text-left">POST</td>
+        </tr>
+        <tr>
+            <td class="back-dedede font-bold">内容类型</td>
+            <td class="text-left">application/json;charset=UTF-8</td>
+        </tr>
+        <tr>
+            <td class="back-dedede font-bold">请求消息</td>
+            <td class="text-left">
+                <textarea class="microsoft-yahei" rows="30" style="width: 100%;background: #dedede;">{
+    "Request": {
+        "Head": {
+            "Version": "2.0",
+            "TransferType": "Async",
+            "ServiceVersion": "1.1",
+            "Callback": " ",
+            "LicId": "WINNING999",
+            "TranCode": "PID0101",
+            "ContentType": "text/json",
+            "ContentEncoding": "gzip",
+            "OrgId": "WinningSoft",
+            "AreaId": "01",
+            "AppId": "HIS0101",
+            "RecOrgId": "WinningSoft",
+            "RecAreaId": "01",
+            "RecAppId": "HIS0110",
+            "Mac": "00-FF-FF-E8-5C-79",
+            "IPAddress": "192.192.1.233",
+            "MessageId": "5afaf938-1946-4d99-ba6b-a481fae407ac",
+            "AppType": "PC",
+            "SecurityPolicy": " ",
+            "SecurityContent": " ",
+            "Timestamp": "2025-07-01 15:20:33.525",
+            "CanaryTest": "0"
+        },
+        "Body": "// 此处省略具体文本（原有契约的入参）"
+    }
+}</textarea>
+            </td>
+        </tr>
+        <tr>30
+            <td class="back-dedede font-bold">应答消息</td>
+            <td class="text-left">
+                <textarea class="microsoft-yahei" rows="30" style="width: 100%;background: #dedede;">{
+    "Response": {
+        "Head": {
+            "Version": "2.0",
+            "AckCode": "200.5",
+            "AckMessage": "申请单号不允许为空！",
+            "AckDescription": "发送方：门诊医生站，消费方：检验系统，交易代码：检验申请单新增，异常类型：数据库执行错误，消息ID：741FEC82-B310-4309-8575-B91A4B4003",
+            "ContentType": "text/json",
+            "ContentEncoding": "gzip",
+            "OrgId": "WinningSoft",
+            "AreaId": "01",
+            "AppId": "HIS0110",
+            "RecOrgId": "WinningSoft",
+            "RecAreaId": "01",
+            "RecAppId": "HIS0101",
+            "MessageId": "cdd97505-3b56-4954-989d-851c09c2e67f",
+            "SecurityPolicy": " ",
+            "SecurityContent": " ",
+            "Timestamp": "2025-07-01 15:20:33.525",
+            "TranCode": "PID0101"
+        },
+        "Body": "// 此处省略具体文本（原有契约的出参）"
+    }
+}</textarea>
+            </td>
+        </tr>
+    </table>
+    <h3 id="menu3.6">3.6 参考值字典</h3>
+    <h4 id="menu3.6.1">3.6.1 消息类型</h4>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.6.1" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">值</td>
+            <td class="back-dedede font-bold">说明</td>
+        </tr>
+        <tr>
+            <td class="text-left">text/json</td>
+            <td class="text-left">JSON格式</td>
+        </tr>
+        <tr>
+            <td class="text-left">text/HL7</td>
+            <td class="text-left">HL7格式</td>
+        </tr>
+    </table>
+    <h4 id="menu3.6.2">3.6.2 消息格式</h4>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.6.2" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">值</td>
+            <td class="back-dedede font-bold">说明</td>
+        </tr>
+        <tr>
+            <td class="text-left">gzip</td>
+            <td class="text-left">表示采用了gzip压缩</td>
+        </tr>
+    </table>
+    <h4 id="menu3.6.3">3.6.3 加密策略</h4>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.6.3" style="width: 800px;">
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">值</td>
+            <td class="back-dedede font-bold">说明</td>
+        </tr>
+        <tr>
+            <td class="text-left">AES</td>
+            <td class="text-left">使用AES加密算法<br>
+                (ECB模式，密钥与位移相同，都是16位，Java语言补码方式为PKCS5Padding，对应.NET应该是PKCS7补码，且加密后的二进制数据转为base64编码方式传输)<br>
+                密钥需转换成16进制字符串，如：Winning123456789，对应16进制密钥为57696e6e696e67313233343536373839</td>
+        </tr>
+    </table>
+    <h4 id="menu3.6.4">3.6.4 结果代码</h4>
+    <table border="1" cellspacing="0" cellpadding="0" id="table3.6.4" style="width: 800px;">
+
+        <tr>
+            <td class="back-dedede font-bold" style="width: 100px">值</td>
+            <td class="back-dedede font-bold">说明</td>
+        </tr>
+            <tr>
+                <td class="text-left">100</td>
+                <td class="text-left">成功，表示技术和业务上均成功</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;100.1</td>
+                <td class="text-left">成功，表示技术和业务上均成功，并且接收方返回有数据，比如：患者登记成功返回档案ID</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;100.2</td>
+                <td class="text-left">成功，表示技术和业务上均成功，并且接收方没有返回数据，比如：患者更新成功不返回数据</td>
+            </tr>
+            <tr>
+                <td class="text-left">101</td>
+                <td class="text-left">成功，表示技术上交互成功，但业务发生异常：例如医生站撤销医嘱提示已审核不可撤销等</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.1</td>
+                <td class="text-left">没有查到患者信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.2</td>
+                <td class="text-left">没有查到就诊信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.3</td>
+                <td class="text-left">没有查到医嘱信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.4</td>
+                <td class="text-left">没有查到费用信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.5</td>
+                <td class="text-left">重复记录费用信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.6</td>
+                <td class="text-left">医嘱处于无效状态</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.7</td>
+                <td class="text-left">医嘱操作流程无效</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.8</td>
+                <td class="text-left">医技报告编码重复</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.9</td>
+                <td class="text-left">确费项目数量异常</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.10</td>
+                <td class="text-left">没有有效的预约记录</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.11</td>
+                <td class="text-left">没有有效的排班信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.12</td>
+                <td class="text-left">操作员信息不能为空</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.13</td>
+                <td class="text-left">手机号为空或错误,请至窗口核对</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.14</td>
+                <td class="text-left">患者已经进入黑名单，不能预约</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.15</td>
+                <td class="text-left">患者已经预约过该医生，不能重复预约</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.16</td>
+                <td class="text-left">同一天的预约次数不能超过规定的</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.17</td>
+                <td class="text-left">没有找到有效的排班信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.18</td>
+                <td class="text-left">没有找到有效的号序信息</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.19</td>
+                <td class="text-left">该号序已被其他患者占用</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.20</td>
+                <td class="text-left">查询排班的时间范围不规范</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.21</td>
+                <td class="text-left">没找到有效的患者住院单</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.22</td>
+                <td class="text-left">病人已住院，无法撤销</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.23</td>
+                <td class="text-left">获取药品系统模式出错</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.24</td>
+                <td class="text-left">药房代码为空,或者不存在该药房</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.25</td>
+                <td class="text-left">当前处方正在被收费处调阅，不允许修改</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.26</td>
+                <td class="text-left">处方状态无效，更新状态失败</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.27</td>
+                <td class="text-left">医嘱费用计算金额不一致</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.28</td>
+                <td class="text-left">医嘱数据落库失败，请检查项目是否设置正确</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.29</td>
+                <td class="text-left">未找到相应的申请单信息,可能已经收费或确认</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.30</td>
+                <td class="text-left">该申请单已经收费,已更新退费标志</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.31</td>
+                <td class="text-left">该申请单已经收费或确认，不能作废</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;101.32</td>
+                <td class="text-left">项目已经医技确认,若需退费请先取消医技确认再进行退费</td>
+            </tr>
+            <tr>
+                <td class="text-left">200</td>
+                <td class="text-left">协议错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;200.1</td>
+                <td class="text-left">消息根节点错误(Request节点)</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;200.2</td>
+                <td class="text-left">消息头错误(Head节点)</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;200.3</td>
+                <td class="text-left">消息体错误(Body节点)</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;200.4</td>
+                <td class="text-left">版本号缺失或错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;200.5</td>
+                <td class="text-left">参数错误（具体错误详情见描述信息节点，可能包含多个参数错误）</td>
+            </tr>
+            <tr>
+                <td class="text-left">201</td>
+                <td class="text-left">客户端安全类错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;201.1</td>
+                <td class="text-left">帐号或密码错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;201.2</td>
+                <td class="text-left">帐号过期</td>
+            </tr>
+            <tr>
+                <td class="text-left">300</td>
+                <td class="text-left">服务端错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;300.1</td>
+                <td class="text-left">程序错误（具体错误详情见描述信息节点）</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;300.2</td>
+                <td class="text-left">数据库执行错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">400</td>
+                <td class="text-left">未知错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">500</td>
+                <td class="text-left">ESB错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;500.1</td>
+                <td class="text-left">路由报错</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;500.2</td>
+                <td class="text-left">连接服务提供者系统失败</td>
+            </tr>
+            <tr>
+                <td class="text-left">600</td>
+                <td class="text-left">连接超时错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;600.1</td>
+                <td class="text-left">平台连接超时错误</td>
+            </tr>
+            <tr>
+                <td class="text-left">&nbsp;600.2</td>
+                <td class="text-left">业务连接超时错误</td>
+            </tr>
+    </table>
+</section>
+<script>
+    function menuShow() {
+        let template = document.getElementById('menu-template')
+        let cz = document.getElementById('menu-cz')
+        if (cz.className.indexOf('roate') == -1) {
+            cz.className = 'roate'
+            template.className = ''
+        } else {
+            cz.className = ''
+            template.className = 'display-none'
+        }
+    }
+
+    //    增加水印
+    let watermark = {}
+
+    let setWatermark = (str) => {
+        let id = '1.23452384164.123412416';
+
+        if (document.getElementById(id) !== null) {
+            document.body.removeChild(document.getElementById(id));
+        }
+
+        //创建一个画布
+        let can = document.createElement('canvas');
+        //设置画布的长宽
+        can.width = 500;
+        can.height = 200;
+
+        let cans = can.getContext('2d');
+        //旋转角度
+        cans.rotate(-12 * Math.PI / 180);
+        cans.font = '20px Vedana';
+        //设置填充绘画的颜色、渐变或者模式
+        cans.fillStyle = 'rgba(0, 0, 0, 0.2)';
+        //设置文本内容的当前对齐方式
+        cans.textAlign = 'left';
+        //设置在绘制文本时使用的当前文本基线
+        cans.textBaseline = 'Middle';
+        cans.transform = "rotate(-15deg)";
+        //cans.style.letterSpacing = "16px";
+
+        //在画布上绘制填色的文本（输出的文本，开始绘制文本的X坐标位置，开始绘制文本的Y坐标位置）
+        //cans.fillText(str, can.width / 8, can.height / 2);
+        //超过换行
+        getTextCanvas(cans, str, can.width / 8, can.height / 2, 30, 340, 2);
+
+        let div = document.createElement('div');
+        div.id = id;
+        div.style.pointerEvents = 'none';
+        div.style.top = '30px';
+        div.style.left = '0px';
+        div.style.position = 'fixed';
+        div.style.zIndex = '100000';
+        div.style.width = document.documentElement.clientWidth + 'px';
+        div.style.height = document.documentElement.clientHeight + 'px';
+        div.style.background = 'url(' + can.toDataURL('image/png') + ') left top repeat';
+        document.body.appendChild(div);
+        return id;
+    }
+
+    let getTextCanvas = (ctx, content, drawX, drawY, lineHeight, lineMaxWidth, lineNum) => {
+        var drawTxt = ''; // 当前绘制的内容
+        var drawLine = 1; // 第几行开始绘制
+        var drawIndex = 0; // 当前绘制内容的索引
+        // 判断内容是否可以一行绘制完毕
+        if (ctx.measureText(content).width <= lineMaxWidth) {
+            ctx.fillText(content.substring(drawIndex, i), drawX, drawY);
+        } else {
+            for (var i = 0; i < content.length; i++) {
+                drawTxt += content[i];
+                if (ctx.measureText(drawTxt).width >= lineMaxWidth) {
+                    if (drawLine >= lineNum) {
+                        ctx.fillText(content.substring(drawIndex, i) + '..', drawX, drawY);
+                        break;
+                    } else {
+                        ctx.fillText(content.substring(drawIndex, i + 1), drawX, drawY);
+                        drawIndex = i + 1;
+                        drawLine += 1;
+                        drawY += lineHeight;
+                        drawTxt = '';
+                    }
+                } else {
+                    // 内容绘制完毕，但是剩下的内容宽度不到lineMaxWidth
+                    if (i === content.length - 1) {
+                        ctx.fillText(content.substring(drawIndex), drawX, drawY);
+                    }
+                }
+            }
+        }
+    }
+
+    // document.addEventListener('copy', function(e) {
+    //     e.preventDefault();
+    // });
+    document.addEventListener('contextmenu', function(e) {
+        e.preventDefault();
+    });
+    // document.addEventListener('selectstart', function(e) {
+    //     e.preventDefault();
+    // });
+
+    // 该方法只允许调用一次
+    watermark.set = (str) => {
+        let id = setWatermark(str);
+        setInterval(() => {
+            if (document.getElementById(id) === null) {
+                id = setWatermark(str);
+            }
+        }, 500);
+        window.onresize = () => {
+            setWatermark(str);
+        };
+    }
+
+    watermark.set('卫宁健康：WiNEX集成平台')
+</script>
+</body>
+</html>

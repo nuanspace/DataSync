@@ -1,0 +1,46 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+
+    <link href="_content/MudBlazor/MudBlazor.min.css" rel="stylesheet" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["DataSync.LHYY.V2.styles.css"]" />
+
+    <HeadOutlet @rendermode="InteractiveServer" />
+</head>
+
+<body>
+    <Routes @rendermode="InteractiveServer" />
+
+    <script>
+        window.dataSync = window.dataSync || {};
+        window.dataSync.scrollIntoViewById = function (id) {
+            const element = document.getElementById(id);
+            if (!element) {
+                return;
+            }
+
+            element.scrollIntoView({ block: "center", inline: "nearest", behavior: "auto" });
+        };
+        window.dataSync.openPath = function (path) {
+            if (!path) {
+                return;
+            }
+
+            const normalized = path.replace(/\\/g, "/");
+            const uri = /^[A-Za-z]:\//.test(normalized)
+                ? "file:///" + normalized
+                : "file://" + normalized;
+
+            window.open(uri, "_blank");
+        };
+    </script>
+    <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="_framework/blazor.web.js"></script>
+</body>
+
+</html>

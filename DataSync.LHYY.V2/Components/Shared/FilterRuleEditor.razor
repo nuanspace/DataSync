@@ -1,0 +1,259 @@
+﻿@using Newtonsoft.Json.Linq
+
+<div class="filter-rule-editor">
+    <div class="filter-rule-toolbar">
+        <div class="filter-rule-summary">
+            <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" />
+            <MudText Typo="Typo.body2">@(Rules.Count == 0 ? "未配置过滤条件" : $"已配置 {Rules.Count} 条过滤条件 / {GetRuleGroupCount()} 组")</MudText>
+        </div>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Add" OnClick="AddRule">
+            添加条件
+        </MudButton>
+    </div>
+
+    @if (Rules.Count == 0)
+    {
+        <div class="filter-rule-empty">
+            <MudIcon Icon="@Icons.Material.Filled.FilterAltOff" Size="Size.Large" />
+            <MudText Typo="Typo.body2">当前没有过滤条件</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">保存后该字段会直接按映射写入。</MudText>
+        </div>
+    }
+    else
+    {
+        <div class="filter-rule-list">
+            @foreach (var (rule, index) in Rules.Select((r, i) => (r, i)))
+            {
+                var idx = index;
+                <div class="@GetRuleItemClass(rule, idx)">
+                    <div class="filter-rule-index">
+                        <span>@(idx + 1)</span>
+                    </div>
+
+                    <div class="filter-rule-content">
+                        <div class="filter-rule-line">
+                            <div class="filter-rule-group">
+                                <MudNumericField T="int" @bind-Value="rule.RuleGroup" Label="组号" Min="1" Margin="Margin.Dense" />
+                            </div>
+
+                            <div class="filter-rule-path">
+                                @if (OnRequestPathPick.HasDelegate)
+                                {
+                                    <PathPickTextField @bind-Value="rule.SourcePath" Label="源路径"
+                                                       HelperText="支持 [] 数组语法"
+                                                       IsActive="@(ActivePickIndex == idx)"
+                                                       OnActivated="@(() => OnRequestPathPick.InvokeAsync(idx))" />
+                                }
+                                else
+                                {
+                                    <div class="filter-rule-path-picker">
+                                        <PathPickTextField @bind-Value="rule.SourcePath" Label="源路径"
+                                                           HelperText="支持 [] 数组语法"
+                                                           IsActive="@(_jsonPickerIndex == idx)"
+                                                           OnActivated="@(() => ActivateLocalJsonPicker(idx))"
+                                                           Style="flex:1;" />
+                                        @if (!string.IsNullOrWhiteSpace(JsonText))
+                                        {
+                                            <MudTooltip Text="从 JSON 树选择路径">
+                                                <MudIconButton Icon="@Icons.Material.Filled.AccountTree" Size="Size.Small"
+                                                               Color="@(_jsonPickerIndex == idx ? Color.Warning : Color.Primary)"
+                                                               OnClick="@(() => ToggleJsonPicker(idx))" />
+                                            </MudTooltip>
+                                            <MudPopover Open="@(_jsonPickerIndex == idx)" Fixed="true"
+                                                        AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight">
+                                                <MudPaper Outlined="true" Elevation="8" Class="pa-2"
+                                                          Style="width:400px;max-height:350px;overflow-y:auto;">
+                                                    <div class="d-flex justify-space-between align-center mb-1">
+                                                        <MudText Typo="Typo.caption" Color="Color.Secondary">点击节点选取路径</MudText>
+                                                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                                                       OnClick="CloseLocalJsonPicker" />
+                                                    </div>
+                                                    <JsonTreeViewer JsonText="@JsonText" UseArrayBrackets="true" PreferFirstArrayItemAsRoot="true"
+                                                                   SelectedPath="@_localSelectedPath"
+                                                                   SelectionVersion="@_localSelectedPathVersion"
+                                                                   OnPathSelected="@(path => OnPickPath(idx, path))" />
+                                                </MudPaper>
+                                            </MudPopover>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            <div class="filter-rule-operator">
+                                <MudSelect T="string" @bind-Value="rule.Operator" Label="运算符" Dense="true" Margin="Margin.Dense">
+                                    @foreach (var op in _operators)
+                                    {
+                                        <MudSelectItem Value="@op.Key">@op.Value</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </div>
+
+                            <div class="filter-rule-value">
+                                <MudTextField @bind-Value="rule.CompareValue" Label="比较值" Margin="Margin.Dense"
+                                              Disabled="@IsCompareValueDisabled(rule.Operator)"
+                                              HelperText="多值用逗号分隔" />
+                            </div>
+
+                            @if (ShowScope && rule.SourcePath.Contains("[]"))
+                            {
+                                <div class="filter-rule-scope">
+                                    <MudSelect T="FilterScope" @bind-Value="rule.FilterScope" Label="作用范围" Dense="true" Margin="Margin.Dense">
+                                        <MudSelectItem Value="FilterScope.MessageCheck">消息判断</MudSelectItem>
+                                        <MudSelectItem Value="FilterScope.RowFilter">行过滤</MudSelectItem>
+                                    </MudSelect>
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="filter-rule-actions">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@(rule.IsEnabled ? Color.Success : Color.Default)">
+                            @(rule.IsEnabled ? "启用" : "停用")
+                        </MudChip>
+                        <MudTooltip Text="启用或停用">
+                            <MudSwitch @bind-Value="rule.IsEnabled" Color="Color.Primary" />
+                        </MudTooltip>
+                        <MudTooltip Text="删除条件">
+                            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => RemoveRule(idx))" />
+                        </MudTooltip>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>
+    /// 规则列表（双向绑定）
+    /// </summary>
+    [Parameter]
+    public List<EsbFilterRule> Rules { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<List<EsbFilterRule>> RulesChanged { get; set; }
+
+    /// <summary>
+    /// 可选 JSON 文本，用于路径选择器
+    /// </summary>
+    [Parameter]
+    public string? JsonText { get; set; }
+
+    /// <summary>
+    /// 是否显示作用范围（映射级不需要）
+    /// </summary>
+    [Parameter]
+    public bool ShowScope { get; set; } = true;
+
+    /// <summary>
+    /// SidePanel 模式下请求左侧树选路径的回调（传入规则索引）
+    /// </summary>
+    [Parameter]
+    public EventCallback<int> OnRequestPathPick { get; set; }
+
+    /// <summary>
+    /// 当前正在选取路径的规则索引（-1 表示无）
+    /// </summary>
+    [Parameter]
+    public int ActivePickIndex { get; set; } = -1;
+
+    private int _jsonPickerIndex = -1;
+    private string? _localSelectedPath;
+    private int _localSelectedPathVersion;
+
+    private static readonly Dictionary<string, string> _operators = new()
+    {
+        ["eq"] = "等于",
+        ["neq"] = "不等于",
+        ["contains"] = "包含",
+        ["not_contains"] = "不包含",
+        ["starts_with"] = "以…开头",
+        ["ends_with"] = "以…结尾",
+        ["in"] = "在列表中",
+        ["not_in"] = "不在列表中",
+        ["gt"] = "大于",
+        ["lt"] = "小于",
+        ["gte"] = "大于等于",
+        ["lte"] = "小于等于",
+        ["is_empty"] = "为空",
+        ["is_not_empty"] = "不为空",
+        ["regex"] = "正则匹配",
+    };
+
+    private string GetRuleItemClass(EsbFilterRule rule, int index)
+    {
+        var classes = new List<string> { "filter-rule-item" };
+
+        if (!rule.IsEnabled)
+            classes.Add("filter-rule-item-disabled");
+
+        if (ActivePickIndex == index || _jsonPickerIndex == index)
+            classes.Add("filter-rule-item-active");
+
+        return string.Join(" ", classes);
+    }
+
+    private static bool IsCompareValueDisabled(string? op)
+        => string.Equals(op, "is_empty", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(op, "is_not_empty", StringComparison.OrdinalIgnoreCase);
+
+    private int GetRuleGroupCount() =>
+        Rules.Select(r => NormalizeRuleGroup(r.RuleGroup)).Distinct().Count();
+
+    private static int NormalizeRuleGroup(int ruleGroup) => ruleGroup <= 0 ? 1 : ruleGroup;
+
+    private async Task AddRule()
+    {
+        Rules.Add(new EsbFilterRule { Operator = "eq", RuleGroup = 1, IsEnabled = true });
+        await RulesChanged.InvokeAsync(Rules);
+    }
+
+    private async Task RemoveRule(int index)
+    {
+        Rules.RemoveAt(index);
+        if (_jsonPickerIndex == index) _jsonPickerIndex = -1;
+        else if (_jsonPickerIndex > index) _jsonPickerIndex--;
+        await RulesChanged.InvokeAsync(Rules);
+    }
+
+    private void ToggleJsonPicker(int index)
+    {
+        if (_jsonPickerIndex == index)
+        {
+            _jsonPickerIndex = -1;
+            _localSelectedPath = null;
+            _localSelectedPathVersion++;
+            return;
+        }
+
+        ActivateLocalJsonPicker(index);
+    }
+
+    private void ActivateLocalJsonPicker(int index)
+    {
+        _jsonPickerIndex = index;
+        _localSelectedPath = index >= 0 && index < Rules.Count ? Rules[index].SourcePath : null;
+        _localSelectedPathVersion++;
+    }
+
+    private void CloseLocalJsonPicker()
+    {
+        _jsonPickerIndex = -1;
+        _localSelectedPath = null;
+        _localSelectedPathVersion++;
+    }
+
+    private async Task OnPickPath(int index, string path)
+    {
+        if (index < Rules.Count)
+        {
+            Rules[index].SourcePath = path;
+            _jsonPickerIndex = -1;
+            _localSelectedPath = null;
+            _localSelectedPathVersion++;
+            await RulesChanged.InvokeAsync(Rules);
+        }
+    }
+}

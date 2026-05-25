@@ -1,0 +1,146 @@
+﻿@inherits LayoutComponentBase
+@implements IDisposable
+@inject IntegrationProjectService IntegrationProjectService
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout Class="shell-layout">
+    <MudAppBar Elevation="0" Class="shell-appbar">
+        <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                       OnClick="ToggleDrawer" Class="shell-menu-button" />
+        <div class="shell-brand" title="@_projectHeaderTitle">
+            <div class="shell-brand-heading">
+                <MudText Typo="Typo.subtitle1" Class="shell-brand-title">@_currentProjectName</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Class="shell-project-chip">
+                    @_currentProjectCode
+                </MudChip>
+            </div>
+            <MudText Typo="Typo.caption" Class="shell-brand-subtitle">数据接入同步平台 V2</MudText>
+        </div>
+        <MudSpacer />
+    </MudAppBar>
+
+    <MudDrawer @bind-Open="_drawerOpen" Elevation="0" Class="shell-drawer">
+        <MudDrawerHeader Class="shell-drawer-header">
+            <div class="shell-drawer-brand">
+                <MudText Typo="Typo.body2" Class="shell-drawer-kicker">DataSync</MudText>
+                <MudText Typo="Typo.h6" Class="shell-drawer-title">@_currentProjectName</MudText>
+                <MudText Typo="Typo.caption" Class="shell-drawer-subtitle">数据接入同步平台 V2</MudText>
+            </div>
+        </MudDrawerHeader>
+        <MudNavMenu>
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dashboard">
+                状态总览
+            </MudNavLink>
+            <MudNavLink Href="/config/overview" Icon="@Icons.Material.Filled.GridView">
+                配置总览
+            </MudNavLink>
+            <MudNavLink Href="/config/wizard" Icon="@Icons.Material.Filled.AutoFixHigh">
+                引导式映射
+            </MudNavLink>
+            <MudNavLink Href="/config/interfaces" Icon="@Icons.Material.Filled.Api">
+                接口配置
+            </MudNavLink>
+            <MudNavLink Href="/messages" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">
+                消息日志
+            </MudNavLink>
+            <MudNavGroup Title="配置管理" Icon="@Icons.Material.Filled.Settings" Expanded="false">
+                <MudNavLink Href="/projects" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Workspaces">
+                    接入项目
+                </MudNavLink>
+                <MudNavLink Href="/config/dicts" Icon="@Icons.Material.Filled.Book">
+                    字典管理
+                </MudNavLink>
+                <MudNavLink Href="/config/filters" Icon="@Icons.Material.Filled.FilterAlt">
+                    过滤规则
+                </MudNavLink>
+                <MudNavLink Href="/config/global" Icon="@Icons.Material.Filled.Tune">
+                    全局配置
+                </MudNavLink>
+                <MudNavLink Href="/database-upgrade" Icon="@Icons.Material.Filled.SystemUpdateAlt">
+                    数据库升级
+                </MudNavLink>
+            </MudNavGroup>
+            <MudNavLink Href="/form-browser" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.FindInPage">
+                表单浏览器
+            </MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+
+    <MudMainContent Class="shell-main">
+        <MudContainer MaxWidth="MaxWidth.False" Class="shell-content">
+            <div class="shell-page-frame">
+                @Body
+            </div>
+        </MudContainer>
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen = true;
+    private string _currentProjectCode = "DEFAULT";
+    private string _currentProjectName = "默认接入项目";
+    private string _projectHeaderTitle => $"{_currentProjectName}（{_currentProjectCode}）";
+    private static readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#0F6B7D",
+            Secondary = "#59748A",
+            Background = "#F3F7FA",
+            BackgroundGray = "#E9EFF4",
+            Surface = "#FFFFFF",
+            AppbarBackground = "#0E3A5B",
+            AppbarText = "#F4FBFF",
+            DrawerBackground = "#F9FBFD",
+            DrawerText = "#163042",
+            DrawerIcon = "#0F6B7D",
+            TextPrimary = "#102033",
+            TextSecondary = "#5A7085",
+            Info = "#0B84B8",
+            Success = "#1F8A70",
+            Warning = "#C47A1F",
+            Error = "#C44438"
+        }
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        inj_navigationManager.LocationChanged += OnLocationChanged;
+        await RefreshCurrentProjectAsync();
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        await InvokeAsync(async () =>
+        {
+            await RefreshCurrentProjectAsync();
+            StateHasChanged();
+        });
+    }
+
+    private async Task RefreshCurrentProjectAsync()
+    {
+        try
+        {
+            var currentProject = await IntegrationProjectService.GetCurrentProjectAsync();
+            _currentProjectCode = currentProject?.ProjectCode ?? await IntegrationProjectService.GetCurrentProjectCodeAsync();
+            _currentProjectName = string.IsNullOrWhiteSpace(currentProject?.ProjectName) ? _currentProjectCode : currentProject.ProjectName;
+        }
+        catch
+        {
+            _currentProjectCode = "维护";
+            _currentProjectName = "数据库维护";
+        }
+    }
+
+    public void Dispose()
+    {
+        inj_navigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

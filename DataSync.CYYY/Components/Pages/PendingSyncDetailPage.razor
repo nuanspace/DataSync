@@ -1,0 +1,276 @@
+﻿@page "/pending-sync/{Id:long}"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>待同步对象详情</PageTitle>
+
+<div class="pending-sync-detail-toolbar">
+    <MudText Typo="Typo.h5">待同步对象详情</MudText>
+    <div class="pending-sync-detail-actions">
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="BackToList">
+            返回列表
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync">
+            刷新
+        </MudButton>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <MudPaper Class="pa-6">
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    </MudPaper>
+}
+else if (!string.IsNullOrWhiteSpace(_loadError))
+{
+    <MudAlert Severity="Severity.Error">@_loadError</MudAlert>
+}
+else if (_item != null)
+{
+    <MudPaper Class="pa-4 mb-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-3">对象概览</MudText>
+        <MudSimpleTable Dense="true" Hover="true" Bordered="false" Striped="false">
+            <tbody>
+                <tr><td>任务</td><td>@(_task?.Name ?? _item.TaskCode)</td></tr>
+                <tr><td>任务编码</td><td>@_item.TaskCode</td></tr>
+                <tr><td>采集源</td><td>@_item.SourceServerCode</td></tr>
+                <tr><td>对象状态</td><td>@GetStatusLabel(_item.Status)</td></tr>
+                <tr><td>触发记录单推</td><td>@GetTriggerPushStatusLabel(_item)</td></tr>
+                <tr><td>患者ID</td><td>@(_hisPatId ?? "-")</td></tr>
+                <tr><td>就诊号</td><td>@(_visitSn ?? "-")</td></tr>
+                <tr><td>对象键</td><td><div class="pending-sync-detail-multiline">@(_item.ObjectKey == "" ? "-" : _item.ObjectKey)</div></td></tr>
+                <tr><td>重试次数</td><td>@_item.RetryCount</td></tr>
+                <tr><td>单推完成</td><td>@FormatDateTime(_item.TriggerPushDoneAt)</td></tr>
+                <tr><td>最近开始</td><td>@FormatDateTime(_item.LastStartedAt)</td></tr>
+                <tr><td>最近完成</td><td>@FormatDateTime(_item.LastCompletedAt)</td></tr>
+                <tr><td>更新时间</td><td>@_item.UpdatedAt.ToString("yyyy-MM-dd HH:mm:ss")</td></tr>
+                <tr><td>触发记录键</td><td><div class="pending-sync-detail-multiline">@_item.SourceRecordKey</div></td></tr>
+                <tr><td>单推错误</td><td><div class="pending-sync-detail-multiline">@(_item.TriggerPushError ?? "-")</div></td></tr>
+                <tr><td>对象错误</td><td><div class="pending-sync-detail-multiline">@(_item.LastError ?? "-")</div></td></tr>
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+
+    <MudPaper Class="pa-4" Elevation="1">
+        <MudText Typo="Typo.h6" Class="mb-3">接口执行明细</MudText>
+
+        @if (!string.IsNullOrWhiteSpace(_detailMessage))
+        {
+            <MudAlert Severity="Severity.Info" Class="mb-3">
+                @_detailMessage
+            </MudAlert>
+        }
+
+        @if (_logs.Count > 0)
+        {
+            <MudTable Items="_logs" Dense="true" Hover="true" Bordered="true">
+                <HeaderContent>
+                    <MudTh>时间</MudTh>
+                    <MudTh>接口</MudTh>
+                    <MudTh>阶段</MudTh>
+                    <MudTh>结果</MudTh>
+                    <MudTh>触发方式</MudTh>
+                    <MudTh>错误信息</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.CreatedAt.ToString("MM-dd HH:mm:ss.fff")</MudTd>
+                    <MudTd>@context.InterfaceName</MudTd>
+                    <MudTd>@GetLogStage(context)</MudTd>
+                    <MudTd>
+                        <MudChip T="string" Color="@(context.Success ? Color.Success : Color.Error)" Size="Size.Small">
+                            @(context.Success ? "成功" : "失败")
+                        </MudChip>
+                    </MudTd>
+                    <MudTd>@context.TriggerType</MudTd>
+                    <MudTd>
+                        @if (!string.IsNullOrWhiteSpace(context.ErrorMessage))
+                        {
+                            <MudTooltip Arrow="true">
+                                <TooltipContent>
+                                    <div class="pending-sync-detail-multiline">@context.ErrorMessage</div>
+                                </TooltipContent>
+                                <ChildContent>
+                                    <div class="pending-sync-detail-ellipsis" @onclick="() => CopyToClipboardAsync(context.ErrorMessage!)">
+                                        @context.ErrorMessage
+                                    </div>
+                                </ChildContent>
+                            </MudTooltip>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter]
+    public long Id { get; set; }
+
+    private bool _loading = true;
+    private string? _loadError;
+    private string? _detailMessage;
+    private PendingSyncItem? _item;
+    private SyncTask? _task;
+    private List<SyncLog> _logs = [];
+    private string? _hisPatId;
+    private string? _visitSn;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+        await base.OnParametersSetAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        _detailMessage = null;
+        _item = null;
+        _task = null;
+        _logs = [];
+        _hisPatId = null;
+        _visitSn = null;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            _item = await db.PendingSyncItems
+                .AsNoTracking()
+                .FirstOrDefaultAsync(item => item.Id == Id, CancellationToken);
+
+            if (_item == null)
+            {
+                _loadError = $"未找到待同步对象，ID={Id}";
+                return;
+            }
+
+            _task = await db.SyncTasks
+                .AsNoTracking()
+                .FirstOrDefaultAsync(task => task.Code == _item.TaskCode, CancellationToken);
+
+            if (_task == null)
+            {
+                _detailMessage = "未找到当前任务配置，无法完整关联接口执行明细。";
+                return;
+            }
+
+            _hisPatId = string.IsNullOrWhiteSpace(_item.HisPatId) ? null : _item.HisPatId;
+            _visitSn = string.IsNullOrWhiteSpace(_item.PatVisitSn) ? null : _item.PatVisitSn;
+
+            if (string.IsNullOrWhiteSpace(_hisPatId))
+            {
+                var triggerRecord = PendingSyncService.DeserializeTriggerRecord(_item.TriggerRecordJson);
+                if (triggerRecord == null)
+                {
+                    _detailMessage = "触发记录快照解析失败，无法关联接口执行明细。";
+                    return;
+                }
+
+                _hisPatId = GetTriggerValue(triggerRecord, _task.PatientIdField);
+                _visitSn = string.IsNullOrWhiteSpace(_task.VisitSnField)
+                    ? null
+                    : GetTriggerValue(triggerRecord, _task.VisitSnField);
+            }
+
+            if (string.IsNullOrWhiteSpace(_hisPatId))
+            {
+                _detailMessage = $"触发记录中缺少患者字段 [{_task.PatientIdField}]，无法关联接口执行明细。";
+                return;
+            }
+
+            var logService = new SyncLogService(ContextFactory);
+            _logs = await logService.QueryRelatedLogsAsync(
+                _item.TaskCode,
+                _hisPatId,
+                _visitSn,
+                _item.SourceRecordKey,
+                100,
+                CancellationToken);
+
+            if (_logs.Count == 0)
+            {
+                _detailMessage = _item.Status == PendingSyncStatuses.Success
+                    ? "当前对象已标记成功，但暂无接口执行明细。请优先检查该任务是否配置了启用接口。"
+                    : "当前对象暂无接口执行明细，说明本轮可能尚未进入接口执行阶段。";
+            }
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void BackToList()
+        => inj_navigationManager.NavigateTo("/pending-sync");
+
+    private static string FormatDateTime(DateTime? value)
+        => value?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+
+    private static string GetStatusLabel(string status)
+        => status switch
+        {
+            PendingSyncStatuses.Pending => "待执行",
+            PendingSyncStatuses.Waiting => "等待条件",
+            PendingSyncStatuses.Running => "执行中",
+            PendingSyncStatuses.Failed => "失败",
+            PendingSyncStatuses.Success => "成功",
+            PendingSyncStatuses.Skipped => "跳过",
+            _ => status
+        };
+
+    private static string GetTriggerPushStatusLabel(PendingSyncItem item)
+    {
+        if (item.TriggerPushDone)
+            return "已完成";
+
+        if (!string.IsNullOrWhiteSpace(item.TriggerPushError))
+            return "失败";
+
+        return "未执行";
+    }
+
+    private static string GetLogStage(SyncLog log)
+    {
+        if (string.Equals(log.InterfaceName, "本地触发记录", StringComparison.Ordinal))
+            return log.Success ? "触发记录推送" : "触发记录推送失败";
+
+        if (log.Success)
+            return "完成";
+
+        if (string.IsNullOrWhiteSpace(log.ErrorMessage))
+            return "失败";
+
+        if (log.ErrorMessage.StartsWith("[数据湖查询]"))
+            return "查询失败";
+
+        if (log.ErrorMessage.StartsWith("[推送]"))
+            return "推送失败";
+
+        return "失败";
+    }
+
+    private static string? GetTriggerValue(Dictionary<string, object> record, string fieldName)
+    {
+        if (!record.TryGetValue(fieldName, out var value))
+            return null;
+
+        return value switch
+        {
+            JsonElement element => element.ToString(),
+            _ => value?.ToString()
+        };
+    }
+
+    private async Task CopyToClipboardAsync(string text)
+    {
+        await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", text);
+        inj_snackbar.Add("已复制到剪贴板", Severity.Success);
+    }
+}
