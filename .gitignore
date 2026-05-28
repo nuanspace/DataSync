@@ -383,6 +383,8 @@ publish-*/
 *.bak
 *.bak.*
 *.bak*.sql
+*.backup
+**/DatabaseBackups/
 **/blobs/
 /DataSync.LHYY.V2/manifest.json
 /DataSync.LHYY.V2/index.json

@@ -41,6 +41,18 @@ public class Program
                 return;
             }
 
+            if (MessageArchiveTool.IsCommand(args))
+            {
+                Environment.ExitCode = await MessageArchiveTool.RunAsync(args);
+                return;
+            }
+
+            if (MessagePerfTool.IsCommand(args))
+            {
+                Environment.ExitCode = await MessagePerfTool.RunAsync(args);
+                return;
+            }
+
             var builder = WebApplication.CreateBuilder(args);
 
             // Blazor

@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Npgsql;
 using System.Diagnostics;
 using System.Text;
+using DataSync.LHYY.V2.Tools;
 
 namespace DataSync.LHYY.V2.Services;
 
@@ -169,23 +170,7 @@ public sealed class DatabaseUpgradeService
         NpgsqlConnection connection,
         UpgradeScript script,
         CancellationToken cancellationToken)
-    {
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
-        try
-        {
-            await using (var command = new NpgsqlCommand(script.Sql, connection, transaction) { CommandTimeout = 0 })
-            {
-                await command.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-        }
-        catch
-        {
-            await transaction.RollbackAsync(CancellationToken.None);
-            throw;
-        }
-    }
+        => await SqlScriptExecutionHelper.ExecuteAsync(connection, script.Sql, cancellationToken);
 
     private async Task<string> BackupDatabaseAsync(
         string connectionString,

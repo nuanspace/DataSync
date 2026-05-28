@@ -21,7 +21,7 @@
 	<ItemGroup>
 		<PackageReference Include="Bio.Core" Version="0.3.507.3" />
 		<PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
-		<PackageReference Include="MudBlazor" Version="8.14.0" />
+		<PackageReference Include="MudBlazor" Version="8.15.0" />
 		<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
 		<PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
 		<PackageReference Include="NLog.Web.AspNetCore" Version="6.0.5" />
@@ -30,6 +30,9 @@
 	<ItemGroup>
 		<None Update="init_database.sql" CopyToOutputDirectory="PreserveNewest" />
 		<None Update="Scripts\**\*.sql" CopyToOutputDirectory="PreserveNewest" />
+		<None Update="DatabaseUpgrades\**\*.sql" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<None Update="upgrade_esb_messages_performance.bat" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<None Update="ProjectDocuments\EsbMessagesPerformanceManualUpgrade.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	</ItemGroup>
 
 </Project>

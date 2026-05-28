@@ -1,4 +1,5 @@
 ﻿using DataSync.LHYY.V2.Models.Entities;
+using DataSync.LHYY.V2.Models.Dto;
 using Microsoft.EntityFrameworkCore;
 
 namespace DataSync.LHYY.V2.Data;
@@ -21,10 +22,17 @@ public class DataSyncDbContext : DbContext
     public DbSet<EsbIntegrationProject> EsbIntegrationProjects => Set<EsbIntegrationProject>();
     public DbSet<EsbIntegrationProjectConfig> EsbIntegrationProjectConfigs => Set<EsbIntegrationProjectConfig>();
     public DbSet<EsbIntegrationProjectDocument> EsbIntegrationProjectDocuments => Set<EsbIntegrationProjectDocument>();
+    public DbSet<EsbMessageListItem> EsbMessageListItems => Set<EsbMessageListItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("lhyy");
+
+        modelBuilder.Entity<EsbMessageListItem>(e =>
+        {
+            e.HasNoKey();
+            e.ToView("esb_messages_all", "lhyy");
+        });
 
         // esb_messages 索引
         modelBuilder.Entity<EsbMessage>(e =>

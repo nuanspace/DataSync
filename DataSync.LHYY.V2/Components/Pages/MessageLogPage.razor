@@ -10,6 +10,10 @@
     批量重试失败消息
 </MudButton>
 
+<MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-3">
+    未设置接收开始/结束时间时，默认查询近 @_hotRetentionDays 天热数据；需要查看历史数据请指定接收时间范围。
+</MudAlert>
+
 <MudPaper Class="pa-4 mb-4">
     <MudGrid>
         <MudItem xs="12" sm="2">
@@ -89,7 +93,7 @@
     </MudGrid>
 </MudPaper>
 
-<MudTable ServerData="ServerReload" @ref="_table" Dense="true" Hover="true" Bordered="true" Striped="true"
+<MudTable T="EsbMessageListItem" ServerData="ServerReload" @ref="_table" Dense="true" Hover="true" Bordered="true" Striped="true"
           Loading="_loading" RowsPerPage="20">
     <HeaderContent>
         <MudTh>ID</MudTh>
@@ -170,10 +174,12 @@
     [SupplyParameterFromQuery(Name = "eventStartDate")] public string? QueryEventStartDate { get; set; }
     [SupplyParameterFromQuery(Name = "eventEndDate")] public string? QueryEventEndDate { get; set; }
 
-    private MudTable<EsbMessage>? _table;
+    private MudTable<EsbMessageListItem>? _table;
     private bool _loading;
     private bool _batchRetrying;
+    private int _hotRetentionDays = 30;
     private List<string> _tranCodes = [];
+    private string? _lastTranCodeRangeSignature;
 
     private string? _filterTranCode;
     private MessageStatus? _filterStatus;
@@ -189,14 +195,16 @@
 
     protected override async Task OnPageInitializedAsync()
     {
-        _tranCodes = await QueryService.GetDistinctTranCodesAsync();
         ApplyFiltersFromQuery();
+        _hotRetentionDays = await QueryService.GetHotRetentionDaysAsync();
+        await ReloadTranCodesIfNeededAsync();
         _lastQuerySignature = GetQuerySignature();
     }
 
     protected override async Task OnParametersSetAsync()
     {
         ApplyFiltersFromQuery();
+        await ReloadTranCodesIfNeededAsync();
 
         var querySignature = GetQuerySignature();
         if (_lastQuerySignature == querySignature)
@@ -207,7 +215,7 @@
             await _table.ReloadServerData();
     }
 
-    private async Task<TableData<EsbMessage>> ServerReload(TableState state, CancellationToken ct)
+    private async Task<TableData<EsbMessageListItem>> ServerReload(TableState state, CancellationToken ct)
     {
         _loading = true;
         try
@@ -223,7 +231,7 @@
                 _filterEventStartTime,
                 _filterEventEndTime);
 
-            return new TableData<EsbMessage> { Items = items, TotalItems = totalCount };
+            return new TableData<EsbMessageListItem> { Items = items, TotalItems = totalCount };
         }
         finally
         {
@@ -399,6 +407,16 @@
 
     private string GetQuerySignature() =>
         $"{QueryTranCode}|{QueryStatus}|{QueryStartDate}|{QueryEndDate}|{QueryMrn}|{QueryEventStartDate}|{QueryEventEndDate}";
+
+    private async Task ReloadTranCodesIfNeededAsync()
+    {
+        var signature = $"{_filterStartTime:O}|{_filterEndTime:O}";
+        if (string.Equals(_lastTranCodeRangeSignature, signature, StringComparison.Ordinal))
+            return;
+
+        _tranCodes = await QueryService.GetDistinctTranCodesAsync(_filterStartTime, _filterEndTime);
+        _lastTranCodeRangeSignature = signature;
+    }
 
     private string GetBatchRetryScopeText()
     {

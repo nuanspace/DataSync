@@ -157,23 +157,7 @@ public static class DatabaseUpgradeTool
     }
 
     private static async Task ExecuteScriptAsync(NpgsqlConnection connection, UpgradeScript script)
-    {
-        await using var transaction = await connection.BeginTransactionAsync();
-        try
-        {
-            await using (var command = new NpgsqlCommand(script.Sql, connection, transaction) { CommandTimeout = 0 })
-            {
-                await command.ExecuteNonQueryAsync();
-            }
-
-            await transaction.CommitAsync();
-        }
-        catch
-        {
-            await transaction.RollbackAsync();
-            throw;
-        }
-    }
+        => await SqlScriptExecutionHelper.ExecuteAsync(connection, script.Sql);
 
     private static async Task<string> BackupDatabaseAsync(string connectionString, string rootPath, string? configuredPgDumpPath)
     {

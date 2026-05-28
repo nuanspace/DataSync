@@ -233,10 +233,11 @@ public class ProjectDocumentService
 
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
         using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
-        var buffer = new char[maxChars];
-        var readCount = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
-        var text = new string(buffer, 0, readCount);
-        if (!reader.EndOfStream)
+        var readLimit = Math.Max(1, maxChars);
+        var buffer = new char[readLimit + 1];
+        var readCount = await reader.ReadBlockAsync(buffer.AsMemory(0, buffer.Length));
+        var text = new string(buffer, 0, Math.Min(readCount, readLimit));
+        if (readCount > readLimit)
         {
             text += Environment.NewLine + Environment.NewLine + "......（内容过长，已截断预览）";
         }
