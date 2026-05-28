@@ -498,7 +498,7 @@ public class GenericMessageProcessor
             return (dbEvent, null);
         }
 
-        return (null, BuildMissingEventResult(config, dbPatient.id, "缺少事件时间且未能按住院号/住院次数定位住院时间"));
+        return (null, BuildMissingEventResult(config, dbPatient.id, "缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间"));
     }
 
     private static ProcessResult BuildMissingEventResult(EsbInterfaceConfig config, Guid patientId, string message)

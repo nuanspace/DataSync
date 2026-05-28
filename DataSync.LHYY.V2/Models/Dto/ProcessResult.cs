@@ -10,6 +10,7 @@ public class ProcessResult
 {
     public bool IsSuccess { get; set; }
     public bool IsFiltered { get; set; }
+    public bool IsBusinessSkipped { get; set; }
     public string Message { get; set; } = "";
     public Guid? PatientId { get; set; }
     public Guid? EventId { get; set; }
@@ -66,6 +67,9 @@ public class ProcessResult
 
     public static ProcessResult Filtered(string? reason = null)
         => new() { IsFiltered = true, Message = reason ?? "被过滤规则跳过" };
+
+    public static ProcessResult BusinessSkipped(string reason)
+        => new() { IsFiltered = true, IsBusinessSkipped = true, Message = reason };
 
     public static ProcessResult Deferred(string message)
         => new() { Message = message, OverrideStatus = MessageStatus.Pending };

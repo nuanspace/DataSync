@@ -2,6 +2,7 @@
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
 using Microsoft.EntityFrameworkCore;
+using Newtonsoft.Json.Linq;
 
 namespace DataSync.LHYY.V2.Services;
 
@@ -105,6 +106,7 @@ public class MessageQueryService
             .Skip(page * pageSize)
             .Take(pageSize)
             .ToListAsync();
+        await FillMissingQueryFieldsAsync(db, items, currentProjectCode);
 
         return (items, totalCount);
     }
@@ -234,6 +236,86 @@ public class MessageQueryService
         }
 
         return query;
+    }
+
+    private static async Task FillMissingQueryFieldsAsync(
+        DataSyncDbContext db,
+        List<EsbMessage> items,
+        string? currentProjectCode)
+    {
+        var tranCodes = items
+            .Where(NeedsQueryFieldFallback)
+            .Select(m => m.TranCode)
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (tranCodes.Count == 0)
+            return;
+
+        var configs = await db.EsbInterfaceConfigs
+            .AsNoTracking()
+            .WhereInProjectOrGlobal(currentProjectCode)
+            .Where(c => tranCodes.Contains(c.TranCode))
+            .ToListAsync();
+        var configByCode = configs
+            .GroupBy(c => c.TranCode, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                g => g.Key,
+                g => g.OrderByDescending(c => string.Equals(c.IntegrationProjectCode, currentProjectCode, StringComparison.OrdinalIgnoreCase)).First(),
+                StringComparer.OrdinalIgnoreCase);
+
+        foreach (var message in items.Where(NeedsQueryFieldFallback))
+        {
+            if (!configByCode.TryGetValue(message.TranCode, out var config))
+                continue;
+
+            if (MessageJsonHelper.TryParseToken(message.RawJson, out var root, out _))
+                ApplyQueryFields(message, config, root);
+
+            if (NeedsQueryFieldFallback(message))
+                ApplyBodyJsonQueryFields(message, config);
+        }
+    }
+
+    private static bool NeedsQueryFieldFallback(EsbMessage message) =>
+        string.IsNullOrWhiteSpace(message.Mrn) ||
+        string.IsNullOrWhiteSpace(message.VisitNo) ||
+        string.IsNullOrWhiteSpace(message.InpatientNo) ||
+        !message.ResolvedEventTime.HasValue;
+
+    private static void ApplyBodyJsonQueryFields(EsbMessage message, EsbInterfaceConfig config)
+    {
+        if (!MessageJsonHelper.TryParseToken(message.BodyJson ?? "", out var body, out _))
+            return;
+
+        var wrappedBody = new JObject
+        {
+            ["Request"] = new JObject
+            {
+                ["Body"] = body
+            }
+        };
+        ApplyQueryFields(message, config, wrappedBody);
+
+        if (NeedsQueryFieldFallback(message))
+            ApplyQueryFields(message, config, body);
+    }
+
+    private static void ApplyQueryFields(EsbMessage message, EsbInterfaceConfig config, JToken root)
+    {
+        var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, config.MainRecordArrayPath);
+
+        if (string.IsNullOrWhiteSpace(message.Mrn))
+            message.Mrn = MessageJsonHelper.ReadString(root, config.MrnSourcePath, mainContext);
+
+        if (!message.ResolvedEventTime.HasValue)
+            message.ResolvedEventTime = MessageJsonHelper.ReadDateTime(root, config.EventStartTimeSourcePath, mainContext);
+
+        if (string.IsNullOrWhiteSpace(message.VisitNo))
+            message.VisitNo = MessageJsonHelper.ReadString(root, config.VisitNoSourcePath, mainContext);
+
+        if (string.IsNullOrWhiteSpace(message.InpatientNo))
+            message.InpatientNo = MessageJsonHelper.ReadString(root, config.InpatientNoSourcePath, mainContext);
     }
 }
 

@@ -25,6 +25,7 @@ public class EsbReceiverService
     private readonly InterfaceRecognitionService _recognitionService;
     private readonly IdempotentKeyService _idempotentKeyService;
     private readonly MessageExecutionService _messageExecutionService;
+    private readonly BioCoreIntegrationService _bioCore;
     private readonly ILogger<EsbReceiverService> _logger;
 
     public EsbReceiverService(
@@ -33,6 +34,7 @@ public class EsbReceiverService
         InterfaceRecognitionService recognitionService,
         IdempotentKeyService idempotentKeyService,
         MessageExecutionService messageExecutionService,
+        BioCoreIntegrationService bioCore,
         ILogger<EsbReceiverService> logger)
     {
         _contextFactory = contextFactory;
@@ -40,6 +42,7 @@ public class EsbReceiverService
         _recognitionService = recognitionService;
         _idempotentKeyService = idempotentKeyService;
         _messageExecutionService = messageExecutionService;
+        _bioCore = bioCore;
         _logger = logger;
     }
 
@@ -177,6 +180,11 @@ public class EsbReceiverService
         message.ErrorMessage = BuildRequestErrorMessage(summary, finalStatus);
         message.PatientId = summary.PatientId;
         message.EventId = summary.EventId;
+        if (!message.ResolvedEventTime.HasValue && summary.EventId.HasValue)
+        {
+            var dbEvent = await _bioCore.GetEventByIdAsync(summary.EventId.Value);
+            message.ResolvedEventTime = dbEvent?.event_start_time;
+        }
         message.ProcessedAt = DateTime.Now;
         message.ProcessingStartedAt = null;
         if (incrementRetryOnFailure && finalStatus == MessageStatus.Failed)
@@ -728,7 +736,24 @@ public class EsbReceiverService
                 if (!message.ResolvedEventTime.HasValue)
                     message.ResolvedEventTime = MessageJsonHelper.ReadDateTime(item.Payload, config.EventStartTimeSourcePath, mainContext);
 
-                if (!string.IsNullOrWhiteSpace(message.Mrn) && message.ResolvedEventTime.HasValue)
+                if (string.IsNullOrWhiteSpace(message.VisitNo))
+                {
+                    var visitNo = MessageJsonHelper.ReadString(item.Payload, config.VisitNoSourcePath, mainContext);
+                    if (!string.IsNullOrWhiteSpace(visitNo))
+                        message.VisitNo = visitNo;
+                }
+
+                if (string.IsNullOrWhiteSpace(message.InpatientNo))
+                {
+                    var inpatientNo = MessageJsonHelper.ReadString(item.Payload, config.InpatientNoSourcePath, mainContext);
+                    if (!string.IsNullOrWhiteSpace(inpatientNo))
+                        message.InpatientNo = inpatientNo;
+                }
+
+                if (!string.IsNullOrWhiteSpace(message.Mrn) &&
+                    message.ResolvedEventTime.HasValue &&
+                    !string.IsNullOrWhiteSpace(message.VisitNo) &&
+                    !string.IsNullOrWhiteSpace(message.InpatientNo))
                     return;
             }
         }

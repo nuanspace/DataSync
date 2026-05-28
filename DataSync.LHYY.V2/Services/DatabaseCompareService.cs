@@ -110,12 +110,12 @@ public sealed class DatabaseCompareService
         CancellationToken cancellationToken)
     {
         var result = await BuildCompareResultAsync(sourceConnection, targetConnection, schemas, includeDrop, cancellationToken);
-        var sql = string.Join(Environment.NewLine + Environment.NewLine, result.Differences
-            .Where(item => !string.IsNullOrWhiteSpace(item.Sql))
-            .Select(item => item.Sql));
-
-        if (!string.IsNullOrWhiteSpace(sql))
-            await ExecuteNonQueryAsync(targetConnection, sql, cancellationToken);
+        var appliedSqlCount = 0;
+        foreach (var item in result.Differences.Where(item => !string.IsNullOrWhiteSpace(item.Sql)))
+        {
+            await ExecuteNonQueryAsync(targetConnection, item.Sql, cancellationToken);
+            appliedSqlCount++;
+        }
 
         var syncedTables = new List<string>();
         foreach (var table in dataSyncTables)
@@ -124,7 +124,7 @@ public sealed class DatabaseCompareService
             syncedTables.Add($"{table.Schema}.{table.Table}（{GetDataSyncModeName(table.Mode)}）");
         }
 
-        return new DatabaseCompareExecuteResult(backupFile, result.Differences.Count(item => !string.IsNullOrWhiteSpace(item.Sql)), syncedTables);
+        return new DatabaseCompareExecuteResult(backupFile, appliedSqlCount, syncedTables);
     }
 
     private async Task<DatabaseCompareResult> BuildCompareResultAsync(

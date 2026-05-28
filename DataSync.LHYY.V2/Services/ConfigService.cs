@@ -235,14 +235,25 @@ public class ConfigService
     {
         var errors = new List<string>();
 
-        if (string.IsNullOrWhiteSpace(config.MrnSourcePath))
-            errors.Add("未配置病案号路径（MrnSourcePath）");
-
         var hasEventIntent =
             !string.IsNullOrWhiteSpace(config.EventTypeName) ||
             !string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) ||
             !string.IsNullOrWhiteSpace(config.VisitNoSourcePath) ||
             !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath);
+        var hasMrnPath = !string.IsNullOrWhiteSpace(config.MrnSourcePath);
+        var hasVisitIdentityPath =
+            !string.IsNullOrWhiteSpace(config.VisitNoSourcePath) ||
+            !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath);
+
+        if (config.HandlerType == HandlerType.GenericQuestionWriteBack)
+        {
+            if (!hasMrnPath && !hasVisitIdentityPath)
+                errors.Add("未配置病案号路径、就诊号/住院号路径或住院次数路径");
+        }
+        else if (!hasMrnPath)
+        {
+            errors.Add("未配置病案号路径（MrnSourcePath）");
+        }
 
         if (RequiresStandardEventIdentity(config) &&
             hasEventIntent &&
@@ -250,12 +261,13 @@ public class ConfigService
             string.IsNullOrWhiteSpace(config.VisitNoSourcePath) &&
             string.IsNullOrWhiteSpace(config.InpatientNoSourcePath))
         {
-            errors.Add("已配置事件处理时，至少需要配置事件开始时间路径、住院次数路径或住院号路径之一");
+            errors.Add("已配置事件处理时，至少需要配置事件开始时间路径、就诊号/住院号路径或住院次数路径之一");
         }
 
         if (hasEventIntent &&
             !config.AllowMissingEventTime &&
-            string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath))
+            string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) &&
+            !(config.HandlerType == HandlerType.GenericQuestionWriteBack && hasVisitIdentityPath))
         {
             errors.Add("未允许缺失事件时间时，需配置事件开始时间路径");
         }
@@ -265,7 +277,7 @@ public class ConfigService
             string.IsNullOrWhiteSpace(config.VisitNoSourcePath) &&
             string.IsNullOrWhiteSpace(config.InpatientNoSourcePath))
         {
-            errors.Add("允许缺少事件时间时，至少需要配置住院次数路径或住院号路径");
+            errors.Add("允许缺少事件时间时，至少需要配置就诊号/住院号路径或住院次数路径");
         }
 
         if (config.ReceiveMode == ReceiveMode.Direct &&

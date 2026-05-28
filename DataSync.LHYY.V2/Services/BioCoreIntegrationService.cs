@@ -743,6 +743,17 @@ public class BioCoreIntegrationService
                 p.is_valid == true);
     }
 
+    public async Task<patient?> GetPatientByIdAsync(Guid patientId, Guid hospitalId, Guid projectId)
+    {
+        await using var db = await _cubeDbContextFactory.CreateDbContextAsync();
+        return await db.Set<patient>()
+            .FirstOrDefaultAsync(p =>
+                p.id == patientId &&
+                p.hospital_id == hospitalId &&
+                p.project_id == projectId &&
+                p.is_valid == true);
+    }
+
     public async Task<patient_event?> GetEventByIdAsync(Guid eventId)
     {
         await using var db = await _cubeDbContextFactory.CreateDbContextAsync();

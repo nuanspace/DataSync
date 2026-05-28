@@ -16,44 +16,14 @@
                OnClick="@(() => _aiDialogVisible = true)" Class="mb-4 ml-2 llm-action-button">AI 新建</MudButton>
 }
 
-<MudTable Items="_items" Dense="true" Hover="true" Bordered="true" Striped="true" Loading="_loading">
-    <HeaderContent>
-        <MudTh>排序</MudTh>
-        <MudTh>事件代码</MudTh>
-        <MudTh>事件名称</MudTh>
-        <MudTh>启用</MudTh>
-        <MudTh>处理器</MudTh>
-        <MudTh>事件类型</MudTh>
-        <MudTh>说明</MudTh>
-        <MudTh>操作</MudTh>
-    </HeaderContent>
-    <RowTemplate>
-        <MudTd>@context.SortOrder</MudTd>
-        <MudTd><MudText Typo="Typo.body2"><b>@context.TranCode</b></MudText></MudTd>
-        <MudTd>@context.TranName</MudTd>
-        <MudTd>
-            @if (context.IsEnabled)
-            {
-                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-            }
-            else
-            {
-                <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Default" Size="Size.Small" />
-            }
-        </MudTd>
-        <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
-        <MudTd>@context.EventTypeName</MudTd>
-        <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
-        <MudTd>
-            <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
-                           OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))"
-                           Title="映射引导" />
-            <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
-            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                           OnClick="@(() => Delete(context))" />
-        </MudTd>
-    </RowTemplate>
-</MudTable>
+<MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" PanelClass="pt-3">
+    <MudTabPanel Text="@EnabledTabText" Icon="@Icons.Material.Filled.CheckCircle">
+        @InterfaceTable(_enabledItems, "暂无启用接口")
+    </MudTabPanel>
+    <MudTabPanel Text="@DisabledTabText" Icon="@Icons.Material.Filled.Cancel">
+        @InterfaceTable(_disabledItems, "暂无未启用接口")
+    </MudTabPanel>
+</MudTabs>
 
 @* AI 新建对话框 *@
 <MudDialog @bind-Visible="_aiDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
@@ -161,6 +131,8 @@
     [SupplyParameterFromQuery(Name = "createFromMessageId")] public long? QueryCreateFromMessageId { get; set; }
 
     private List<EsbInterfaceConfig> _items = [];
+    private List<EsbInterfaceConfig> _enabledItems = [];
+    private List<EsbInterfaceConfig> _disabledItems = [];
     private EsbInterfaceConfig? _editItem;
     private bool _loading = true;
     private bool _dialogVisible;
@@ -216,7 +188,10 @@
     // 当前编辑项是否有 SampleJson
     private bool _hasSampleJson => !string.IsNullOrWhiteSpace(_editItem?.SampleJson);
     private bool _supportsEventIdentity => _editItem != null && RequiresEventStartTimePath(_editItem.HandlerType);
-    private bool _showVisitIdentityFields => _supportsEventIdentity && SelectedEventIdentityMode != EventIdentityModeOption.RequireEventTime;
+    private bool _showVisitIdentityFields => _supportsEventIdentity;
+    private bool _isMrnPathRequired => _editItem?.HandlerType != HandlerType.GenericQuestionWriteBack;
+    private string EnabledTabText => $"启用接口 ({_enabledItems.Count})";
+    private string DisabledTabText => $"未启用接口 ({_disabledItems.Count})";
 
     private ReceiveMode SelectedReceiveMode
     {
@@ -307,7 +282,7 @@
             PathPickTarget.Mrn => "当前正在为病案号路径选取节点。",
             PathPickTarget.EventTime => "当前正在为事件开始时间路径选取节点。",
             PathPickTarget.VisitNo => "当前正在为住院次数路径选取节点。",
-            PathPickTarget.InpatientNo => "当前正在为住院号路径选取节点。",
+            PathPickTarget.InpatientNo => "当前正在为就诊号/住院号路径选取节点。",
             PathPickTarget.SourceMessageId => "当前正在为上游消息号路径选取节点。",
             PathPickTarget.MainRecordArray => "当前正在为主记录数组路径选取节点，请尽量点击数组节点。",
             PathPickTarget.FilterRule => $"当前正在为过滤规则 #{_pickFilterRuleIndex + 1} 选取源路径。",
@@ -315,6 +290,51 @@
             PathPickTarget.IdempotentKeyPart => $"当前正在为幂等键片段 #{_pickIdempotentKeyPartIndex + 1} 选取源路径。",
             _ => "当前未选择路径目标。"
         };
+
+    private RenderFragment InterfaceTable(List<EsbInterfaceConfig> items, string emptyText) => __builder =>
+    {
+        <MudTable Items="@items" Dense="true" Hover="true" Bordered="true" Striped="true" Loading="_loading">
+            <HeaderContent>
+                <MudTh>排序</MudTh>
+                <MudTh>事件代码</MudTh>
+                <MudTh>事件名称</MudTh>
+                <MudTh>启用</MudTh>
+                <MudTh>处理器</MudTh>
+                <MudTh>事件类型</MudTh>
+                <MudTh>说明</MudTh>
+                <MudTh>操作</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SortOrder</MudTd>
+                <MudTd><MudText Typo="Typo.body2"><b>@context.TranCode</b></MudText></MudTd>
+                <MudTd>@context.TranName</MudTd>
+                <MudTd>
+                    @if (context.IsEnabled)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Default" Size="Size.Small" />
+                    }
+                </MudTd>
+                <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
+                <MudTd>@context.EventTypeName</MudTd>
+                <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
+                <MudTd>
+                    <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
+                                   OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))"
+                                   Title="映射引导" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => Delete(context))" />
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@emptyText</MudText>
+            </NoRecordsContent>
+        </MudTable>
+    };
 
     /// <summary>表单内容（SidePanel 和普通两种布局复用）</summary>
     private RenderFragment EditFormContent => __builder =>
@@ -373,14 +393,14 @@
                 {
                     <PathPickTextField @bind-Value="_editItem!.MrnSourcePath"
                                        Label="病案号路径"
-                                       HelperText="可手填；也可配合左侧 JSON 树点选路径"
+                                       HelperText="@GetMrnPathHelperText()"
                                        IsActive="@(_pathPickTarget == PathPickTarget.Mrn)"
                                        OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.Mrn))" />
                 }
                 else
                 {
-                    <MudTextField @bind-Value="_editItem!.MrnSourcePath" Label="病案号路径" Required="true"
-                                      HelperText="消息 JSON 中病案号的路径；主记录字段可写 $main.mrn，根字段可写 $.patient.mrn" Placeholder="$main.mrn" />
+                    <MudTextField @bind-Value="_editItem!.MrnSourcePath" Label="病案号路径" Required="@_isMrnPathRequired"
+                                      HelperText="@GetMrnPathHelperText()" Placeholder="$main.mrn" />
                 }
             </MudItem>
             @if (_supportsEventIdentity)
@@ -402,19 +422,34 @@
                     {
                         <PathPickTextField @bind-Value="_editItem!.EventStartTimeSourcePath"
                                            Label="事件开始时间路径"
-                                           HelperText="能直接定位住院事件的时间字段"
+                                           HelperText="能直接定位住院事件的时间字段；没有时可用下方就诊号/住院号或住院次数回查"
                                            IsActive="@(_pathPickTarget == PathPickTarget.EventTime)"
                                            OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.EventTime))" />
                     }
                     else
                     {
                         <MudTextField @bind-Value="_editItem!.EventStartTimeSourcePath" Label="事件开始时间路径"
-                                      HelperText="能直接定位住院事件的时间字段；主记录字段可写 $main.ADMISSION_TIME" Placeholder="$main.ADMISSION_TIME" />
+                                      HelperText="能直接定位住院事件的时间字段；没有时可用下方就诊号/住院号或住院次数回查" Placeholder="$main.ADMISSION_TIME" />
                     }
                 </MudItem>
             }
             @if (_showVisitIdentityFields)
             {
+                <MudItem xs="12" sm="6">
+                    @if (_hasSampleJson)
+                    {
+                        <PathPickTextField @bind-Value="_editItem!.InpatientNoSourcePath"
+                                           Label="就诊号/住院号路径"
+                                           HelperText="缺少事件时间时用于回查住院事件"
+                                           IsActive="@(_pathPickTarget == PathPickTarget.InpatientNo)"
+                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.InpatientNo))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_editItem!.InpatientNoSourcePath" Label="就诊号/住院号路径"
+                                      HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.INPATIENT_NO" Placeholder="$main.INPATIENT_NO" />
+                    }
+                </MudItem>
                 <MudItem xs="12" sm="6">
                     @if (_hasSampleJson)
                     {
@@ -428,21 +463,6 @@
                     {
                         <MudTextField @bind-Value="_editItem!.VisitNoSourcePath" Label="住院次数路径"
                                       HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.VISIT_NO" Placeholder="$main.VISIT_NO" />
-                    }
-                </MudItem>
-                <MudItem xs="12" sm="6">
-                    @if (_hasSampleJson)
-                    {
-                        <PathPickTextField @bind-Value="_editItem!.InpatientNoSourcePath"
-                                           Label="住院号路径"
-                                           HelperText="缺少事件时间时用于回查住院事件"
-                                           IsActive="@(_pathPickTarget == PathPickTarget.InpatientNo)"
-                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.InpatientNo))" />
-                    }
-                    else
-                    {
-                        <MudTextField @bind-Value="_editItem!.InpatientNoSourcePath" Label="住院号路径"
-                                      HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.INPATIENT_NO" Placeholder="$main.INPATIENT_NO" />
                     }
                 </MudItem>
             }
@@ -573,6 +593,8 @@
                 .OrderBy(c => c.SortOrder)
                 .ThenBy(c => c.TranCode)
                 .ToList();
+            _enabledItems = _items.Where(c => c.IsEnabled).ToList();
+            _disabledItems = _items.Where(c => !c.IsEnabled).ToList();
         }
         catch (Exception ex)
         {
@@ -727,13 +749,26 @@
         };
 
     private string GetEventIdentityModeHelperText()
-        => SelectedEventIdentityMode switch
+    {
+        if (_editItem?.HandlerType == HandlerType.GenericQuestionWriteBack &&
+            SelectedEventIdentityMode == EventIdentityModeOption.RequireEventTime)
+        {
+            return "优先使用事件开始时间；未配置时会按就诊号/住院号或住院次数回查，仍找不到就失败。";
+        }
+
+        return SelectedEventIdentityMode switch
         {
             EventIdentityModeOption.RequireEventTime => "消息里必须直接带事件开始时间；取不到就失败。",
-            EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就只处理患者。",
-            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就转待处理。",
-            _ => "允许缺少事件时间；会先按住院号/住院次数回查，仍找不到就报错。"
+            EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就只处理患者。",
+            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就转待处理。",
+            _ => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就报错。"
         };
+    }
+
+    private string GetMrnPathHelperText()
+        => _editItem?.HandlerType == HandlerType.GenericQuestionWriteBack
+            ? "有病案号就填写；没有病案号时可留空，但必须填写就诊号/住院号路径或住院次数路径"
+            : "消息 JSON 中病案号的路径；主记录字段可写 $main.mrn，根字段可写 $.patient.mrn";
 
     private static bool RequiresEventStartTimePath(HandlerType handlerType)
         => handlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack;

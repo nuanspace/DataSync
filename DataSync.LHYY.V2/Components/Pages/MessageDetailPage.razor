@@ -88,6 +88,14 @@ else
                     <MudText>@(string.IsNullOrWhiteSpace(_message.Mrn) ? "-" : _message.Mrn)</MudText>
                 </MudItem>
                 <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">就诊号/住院号</MudText>
+                    <MudText>@(string.IsNullOrWhiteSpace(_message.InpatientNo) ? "-" : _message.InpatientNo)</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
+                    <MudText Typo="Typo.caption">住院次数</MudText>
+                    <MudText>@(string.IsNullOrWhiteSpace(_message.VisitNo) ? "-" : _message.VisitNo)</MudText>
+                </MudItem>
+                <MudItem xs="12" sm="3">
                     <MudText Typo="Typo.caption">事件开始时间</MudText>
                     <MudText>@(_message.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</MudText>
                 </MudItem>

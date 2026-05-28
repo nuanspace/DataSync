@@ -96,6 +96,8 @@
         <MudTh>事件代码</MudTh>
         <MudTh>事件名称</MudTh>
         <MudTh>病案号</MudTh>
+        <MudTh>就诊号/住院号</MudTh>
+        <MudTh>住院次数</MudTh>
         <MudTh>事件开始时间</MudTh>
         <MudTh>MessageId</MudTh>
         <MudTh>状态</MudTh>
@@ -112,6 +114,8 @@
         <MudTd>@context.TranCode</MudTd>
         <MudTd>@context.TranName</MudTd>
         <MudTd>@(string.IsNullOrWhiteSpace(context.Mrn) ? "-" : context.Mrn)</MudTd>
+        <MudTd>@(string.IsNullOrWhiteSpace(context.InpatientNo) ? "-" : context.InpatientNo)</MudTd>
+        <MudTd>@(string.IsNullOrWhiteSpace(context.VisitNo) ? "-" : context.VisitNo)</MudTd>
         <MudTd>@(context.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</MudTd>
         <MudTd Style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">@context.MessageId</MudTd>
         <MudTd>

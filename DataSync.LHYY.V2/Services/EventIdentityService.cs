@@ -16,12 +16,26 @@ public class EventIdentityService
         _contextFactory = contextFactory;
     }
 
-    public async Task<EsbEventIdentity?> FindByVisitIdentityAsync(string? integrationProjectCode, string mrn, string? inpatientNo, string? visitNo)
+    public async Task<EsbEventIdentity?> FindByVisitIdentityAsync(
+        string? integrationProjectCode,
+        string? mrn,
+        string? inpatientNo,
+        string? visitNo,
+        string? eventTypeName = null)
     {
+        if (string.IsNullOrWhiteSpace(inpatientNo) && string.IsNullOrWhiteSpace(visitNo))
+            return null;
+
         await using var db = await _contextFactory.CreateDbContextAsync();
         var query = db.EsbEventIdentities
             .AsNoTracking()
-            .Where(x => x.IntegrationProjectCode == integrationProjectCode && x.Mrn == mrn);
+            .Where(x => x.IntegrationProjectCode == integrationProjectCode);
+
+        if (!string.IsNullOrWhiteSpace(mrn))
+            query = query.Where(x => x.Mrn == mrn);
+
+        if (!string.IsNullOrWhiteSpace(eventTypeName))
+            query = query.Where(x => x.EventTypeName == eventTypeName);
 
         if (!string.IsNullOrWhiteSpace(inpatientNo) && !string.IsNullOrWhiteSpace(visitNo))
         {
