@@ -306,6 +306,9 @@ public static class MessageArchiveTool
                 }
             }
 
+            if (!options.DryRun)
+                await SynchronizeIdentitySequencesAsync(connection);
+
             Console.WriteLine($"迁移完成：消息 {totalMessages} 条，处理日志 {totalLogs} 条，阈值 {threshold:yyyy-MM-dd HH:mm:ss}。");
             return 0;
         }
@@ -337,6 +340,28 @@ public static class MessageArchiveTool
         if (hotLogs + archiveLogs != allLogs)
             throw new InvalidOperationException("处理日志统一视图数量不等于热表与归档表之和。");
 
+        var duplicatedMessageIdsAcrossHotAndArchive = await ExecuteScalarLongAsync(connection, null, """
+            SELECT COUNT(*)
+            FROM (
+                SELECT id FROM lhyy.esb_messages
+                INTERSECT
+                SELECT id FROM lhyy.esb_messages_archive
+            ) d;
+            """);
+        if (duplicatedMessageIdsAcrossHotAndArchive > 0)
+            throw new InvalidOperationException($"热表与归档消息存在重复 ID：{duplicatedMessageIdsAcrossHotAndArchive} 个。");
+
+        var duplicatedLogIdsAcrossHotAndArchive = await ExecuteScalarLongAsync(connection, null, """
+            SELECT COUNT(*)
+            FROM (
+                SELECT id FROM lhyy.esb_process_log
+                INTERSECT
+                SELECT id FROM lhyy.esb_process_log_archive
+            ) d;
+            """);
+        if (duplicatedLogIdsAcrossHotAndArchive > 0)
+            throw new InvalidOperationException($"热表与归档处理日志存在重复 ID：{duplicatedLogIdsAcrossHotAndArchive} 个。");
+
         var duplicateMessages = await ExecuteScalarLongAsync(connection, null, """
             SELECT COUNT(*)
             FROM (
@@ -360,6 +385,8 @@ public static class MessageArchiveTool
             """);
         if (duplicateLogs > 0)
             throw new InvalidOperationException($"归档处理日志存在重复数据：{duplicateLogs} 组。");
+
+        await SynchronizeIdentitySequencesAsync(connection);
 
         Console.WriteLine("校验通过。");
         return 0;
@@ -563,6 +590,44 @@ public static class MessageArchiveTool
                 LIMIT 1
             );
             """, ("threshold", threshold));
+    }
+
+    private static async Task SynchronizeIdentitySequencesAsync(NpgsqlConnection connection)
+    {
+        await SynchronizeIdentitySequenceAsync(
+            connection,
+            "lhyy.esb_messages",
+            "lhyy.esb_messages_archive");
+        await SynchronizeIdentitySequenceAsync(
+            connection,
+            "lhyy.esb_process_log",
+            "lhyy.esb_process_log_archive");
+    }
+
+    private static async Task SynchronizeIdentitySequenceAsync(
+        NpgsqlConnection connection,
+        string hotTableName,
+        string archiveTableName)
+    {
+        var sequenceName = await ExecuteScalarStringAsync(
+            connection,
+            null,
+            "SELECT pg_get_serial_sequence(@tableName, 'id');",
+            ("tableName", hotTableName));
+        if (string.IsNullOrWhiteSpace(sequenceName))
+            return;
+
+        var maxId = await ExecuteScalarLongAsync(connection, null, $"""
+            SELECT GREATEST(
+                COALESCE((SELECT MAX(id) FROM {hotTableName}), 0),
+                COALESCE((SELECT MAX(id) FROM {archiveTableName}), 0),
+                1);
+            """);
+
+        await using var command = new NpgsqlCommand("SELECT setval(@sequenceName, @maxId, true);", connection);
+        command.Parameters.AddWithValue("sequenceName", sequenceName);
+        command.Parameters.AddWithValue("maxId", maxId);
+        await command.ExecuteScalarAsync();
     }
 
     private static async Task<string> EnsureRecentBackupAsync(

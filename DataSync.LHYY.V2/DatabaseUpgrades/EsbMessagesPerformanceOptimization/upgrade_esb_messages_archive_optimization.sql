@@ -233,3 +233,30 @@ WHERE NOT EXISTS (
     FROM lhyy.esb_global_config
     WHERE config_key = 'MessageHotRetentionDays'
 );
+
+DO $$
+DECLARE
+    v_sequence_name TEXT;
+    v_next_value BIGINT;
+BEGIN
+    v_sequence_name := pg_get_serial_sequence('lhyy.esb_messages', 'id');
+    IF v_sequence_name IS NOT NULL THEN
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(id) FROM lhyy.esb_messages), 0),
+            COALESCE((SELECT MAX(id) FROM lhyy.esb_messages_archive), 0),
+            1)
+        INTO v_next_value;
+        EXECUTE format('SELECT setval(%L, %s, true)', v_sequence_name, v_next_value);
+    END IF;
+
+    v_sequence_name := pg_get_serial_sequence('lhyy.esb_process_log', 'id');
+    IF v_sequence_name IS NOT NULL THEN
+        SELECT GREATEST(
+            COALESCE((SELECT MAX(id) FROM lhyy.esb_process_log), 0),
+            COALESCE((SELECT MAX(id) FROM lhyy.esb_process_log_archive), 0),
+            1)
+        INTO v_next_value;
+        EXECUTE format('SELECT setval(%L, %s, true)', v_sequence_name, v_next_value);
+    END IF;
+END;
+$$;

@@ -32,7 +32,9 @@
 		<None Update="Scripts\**\*.sql" CopyToOutputDirectory="PreserveNewest" />
 		<None Update="DatabaseUpgrades\**\*.sql" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<None Update="upgrade_esb_messages_performance.bat" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<None Update="deploy.sh" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 		<None Update="ProjectDocuments\EsbMessagesPerformanceManualUpgrade.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+		<None Update="ProjectDocuments\EsbMessagesPerformanceImplementationGuide.md" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
 	</ItemGroup>
 
 </Project>
