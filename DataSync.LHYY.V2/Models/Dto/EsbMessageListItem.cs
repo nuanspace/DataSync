@@ -28,6 +28,12 @@ public class EsbMessageListItem
     [Column("mrn")]
     public string? Mrn { get; set; }
 
+    [Column("visit_no")]
+    public string? VisitNo { get; set; }
+
+    [Column("inpatient_no")]
+    public string? InpatientNo { get; set; }
+
     [Column("resolved_event_time")]
     public DateTime? ResolvedEventTime { get; set; }
 

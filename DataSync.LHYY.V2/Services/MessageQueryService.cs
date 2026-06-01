@@ -178,6 +178,8 @@ public class MessageQueryService
                     IntegrationProjectCode = m.IntegrationProjectCode,
                     TranName = m.TranName,
                     Mrn = m.Mrn,
+                    VisitNo = m.VisitNo,
+                    InpatientNo = m.InpatientNo,
                     ResolvedEventTime = m.ResolvedEventTime,
                     Status = m.Status,
                     RetryCount = m.RetryCount,
@@ -238,6 +240,8 @@ public class MessageQueryService
                     IntegrationProjectCode = m.IntegrationProjectCode,
                     TranName = m.TranName,
                     Mrn = m.Mrn,
+                    VisitNo = m.VisitNo,
+                    InpatientNo = m.InpatientNo,
                     ResolvedEventTime = m.ResolvedEventTime,
                     Status = m.Status,
                     RetryCount = m.RetryCount,
@@ -245,6 +249,7 @@ public class MessageQueryService
                     CreatedAt = m.CreatedAt
                 })
                 .ToListAsync();
+            await FillMissingQueryFieldsAsync(db, legacyItems, currentProjectCode, useArchiveView: false);
 
             return (legacyItems, legacyTotalCount);
         }
@@ -266,7 +271,7 @@ public class MessageQueryService
             .Skip(page * pageSize)
             .Take(pageSize)
             .ToListAsync();
-        await FillMissingQueryFieldsAsync(db, items, currentProjectCode);
+        await FillMissingQueryFieldsAsync(db, items, currentProjectCode, useArchiveView: true);
 
         return (items, totalCount);
     }
@@ -473,10 +478,27 @@ public class MessageQueryService
 
     private static async Task FillMissingQueryFieldsAsync(
         DataSyncDbContext db,
-        List<EsbMessage> items,
-        string? currentProjectCode)
+        List<EsbMessageListItem> items,
+        string? currentProjectCode,
+        bool useArchiveView)
     {
-        var tranCodes = items
+        var fallbackItems = items.Where(NeedsQueryFieldFallback).ToList();
+        if (fallbackItems.Count == 0)
+            return;
+
+        var ids = fallbackItems.Select(m => m.Id).ToList();
+        var sourceQuery = useArchiveView
+            ? db.EsbMessages.FromSqlRaw(AllMessagesSql)
+            : db.EsbMessages.AsQueryable();
+        var fullMessages = await sourceQuery
+            .AsNoTracking()
+            .WhereInProjectOrGlobal(currentProjectCode)
+            .Where(m => ids.Contains(m.Id))
+            .ToListAsync();
+        if (fullMessages.Count == 0)
+            return;
+
+        var tranCodes = fullMessages
             .Where(NeedsQueryFieldFallback)
             .Select(m => m.TranCode)
             .Where(c => !string.IsNullOrWhiteSpace(c))
@@ -497,7 +519,7 @@ public class MessageQueryService
                 g => g.OrderByDescending(c => string.Equals(c.IntegrationProjectCode, currentProjectCode, StringComparison.OrdinalIgnoreCase)).First(),
                 StringComparer.OrdinalIgnoreCase);
 
-        foreach (var message in items.Where(NeedsQueryFieldFallback))
+        foreach (var message in fullMessages.Where(NeedsQueryFieldFallback))
         {
             if (!configByCode.TryGetValue(message.TranCode, out var config))
                 continue;
@@ -508,7 +530,25 @@ public class MessageQueryService
             if (NeedsQueryFieldFallback(message))
                 ApplyBodyJsonQueryFields(message, config);
         }
+
+        var fullMessageById = fullMessages.ToDictionary(m => m.Id);
+        foreach (var item in fallbackItems)
+        {
+            if (!fullMessageById.TryGetValue(item.Id, out var message))
+                continue;
+
+            item.Mrn = message.Mrn;
+            item.VisitNo = message.VisitNo;
+            item.InpatientNo = message.InpatientNo;
+            item.ResolvedEventTime = message.ResolvedEventTime;
+        }
     }
+
+    private static bool NeedsQueryFieldFallback(EsbMessageListItem message) =>
+        string.IsNullOrWhiteSpace(message.Mrn) ||
+        string.IsNullOrWhiteSpace(message.VisitNo) ||
+        string.IsNullOrWhiteSpace(message.InpatientNo) ||
+        !message.ResolvedEventTime.HasValue;
 
     private static bool NeedsQueryFieldFallback(EsbMessage message) =>
         string.IsNullOrWhiteSpace(message.Mrn) ||

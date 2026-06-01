@@ -322,9 +322,10 @@
                 <MudTd>@context.EventTypeName</MudTd>
                 <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
                 <MudTd>
-                    <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
-                                   OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))"
-                                   Title="映射引导" />
+                    <MudTooltip Text="映射引导">
+                        <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
+                                       OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))" />
+                    </MudTooltip>
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                    OnClick="@(() => Delete(context))" />
