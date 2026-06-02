@@ -195,7 +195,7 @@
                                     <MudIcon Icon="@GetPatientIcon(p)"
                                              Color="@GetPatientColor(p)"
                                              Size="Size.Small" Class="mr-1" />
-                                    <span class="patient-name">@(string.IsNullOrEmpty(p.PatName) ? p.HisPatId : p.PatName)(@p.HisPatId)</span>
+                                    <span class="patient-name">@GetPatientLabel(p)</span>
                                     @foreach (var iface in p.Interfaces)
                                     {
                                         @if (!string.IsNullOrWhiteSpace(iface.ErrorMessage))
@@ -783,6 +783,21 @@
         return string.Equals(name, iface.ServerCode, StringComparison.OrdinalIgnoreCase)
             ? name
             : $"{name}（{iface.ServerCode}）";
+    }
+
+    private static string GetPatientLabel(PatientSyncDetail patient)
+    {
+        var visitText = string.IsNullOrWhiteSpace(patient.PatVisitSn)
+            ? ""
+            : $" / 就诊号 {patient.PatVisitSn}";
+
+        if (string.IsNullOrWhiteSpace(patient.PatName) ||
+            string.Equals(patient.PatName, patient.HisPatId, StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{patient.HisPatId}{visitText}";
+        }
+
+        return $"{patient.PatName}（{patient.HisPatId}{visitText}）";
     }
 
     private static Color GetPatientColor(PatientSyncDetail patient)

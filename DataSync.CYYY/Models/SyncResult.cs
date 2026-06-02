@@ -58,6 +58,7 @@ public class BackfillProgressEvent
 public class PatientSyncDetail
 {
     public string HisPatId { get; set; } = "";
+    public string? PatVisitSn { get; set; }
     public string? PatName { get; set; }
     public bool Success { get; set; }
     public bool Skipped { get; set; }

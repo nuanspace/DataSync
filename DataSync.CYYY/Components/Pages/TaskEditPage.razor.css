@@ -527,6 +527,30 @@
     min-width: 0;
 }
 
+.interface-card-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.interface-card-title {
+    color: #102a43;
+    font-size: 1.08rem;
+    font-weight: 800;
+    line-height: 1.35;
+}
+
+.interface-card-subtitle {
+    margin-top: 4px;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 600;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
 .interface-card-caption-row {
     display: flex;
     align-items: center;
@@ -652,8 +676,36 @@
 
 .interface-card-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr) 140px;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 140px;
     gap: 12px;
+}
+
+.interface-summary-item {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    min-height: 74px;
+    padding: 12px 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(53, 80, 112, 0.1);
+    background: rgba(248, 250, 252, 0.9);
+    min-width: 0;
+}
+
+.interface-summary-item span {
+    color: #64748b;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.interface-summary-item strong {
+    color: #102a43;
+    font-size: 0.95rem;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 .interface-inline-summary {
@@ -686,6 +738,10 @@
     color: #64748b;
     font-size: 0.8125rem;
     line-height: 1.5;
+}
+
+.config-inline-summary {
+    min-height: 56px;
 }
 
 .interface-card-footer {
@@ -852,10 +908,6 @@
 
     .interface-card-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .interface-inline-summary {
-        grid-column: 1 / -1;
     }
 }
 

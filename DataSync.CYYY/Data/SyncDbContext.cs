@@ -16,6 +16,7 @@ public class SyncDbContext : DbContext
     public DbSet<IngestionSource> IngestionSources => Set<IngestionSource>();
     public DbSet<DataLakeInterface> DataLakeInterfaces => Set<DataLakeInterface>();
     public DbSet<DataLakeConfig> DataLakeConfigs => Set<DataLakeConfig>();
+    public DbSet<DatabaseResource> DatabaseResources => Set<DatabaseResource>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -34,6 +35,16 @@ public class SyncDbContext : DbContext
         modelBuilder.Entity<IngestionSource>(e =>
         {
             e.HasIndex(s => s.ServerCode).IsUnique();
+            e.HasOne(s => s.DatabaseResource)
+             .WithMany()
+             .HasForeignKey(s => s.DatabaseResourceId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // DatabaseResource
+        modelBuilder.Entity<DatabaseResource>(e =>
+        {
+            e.HasIndex(r => r.Name).IsUnique();
         });
 
         // DataLakeInterface
@@ -72,6 +83,14 @@ public class SyncDbContext : DbContext
             e.HasIndex(p => new { p.TaskCode, p.ObjectKey });
             e.HasIndex(p => new { p.TaskCode, p.Status, p.NextRetryTime });
             e.HasIndex(p => new { p.TaskCode, p.HisPatId, p.PatVisitSn, p.Status });
+        });
+
+        modelBuilder.Entity<SyncTaskInterface>(e =>
+        {
+            e.HasOne(i => i.DatabaseResource)
+             .WithMany()
+             .HasForeignKey(i => i.DatabaseResourceId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

@@ -19,8 +19,71 @@ public class IngestionSource
     [Column("server_code")]
     public string ServerCode { get; set; } = "";
 
+    /// <summary>
+    /// 来源类型：DataLake / Database
+    /// </summary>
+    [Column("source_type")]
+    public string SourceType { get; set; } = "DataLake";
+
+    [Column("database_resource_id")]
+    public int? DatabaseResourceId { get; set; }
+
+    /// <summary>
+    /// 数据库类型：SqlServer / Oracle。
+    /// </summary>
+    [Column("database_type")]
+    public string? DatabaseType { get; set; } = "SqlServer";
+
+    /// <summary>
+    /// 数据库连接串名称或完整连接串。
+    /// </summary>
+    [Column("connection_string_name")]
+    public string? ConnectionStringName { get; set; }
+
+    /// <summary>
+    /// 数据库主机，可包含端口、实例名或 Oracle 服务名。
+    /// </summary>
+    [Column("sql_server_host")]
+    public string? SqlServerHost { get; set; }
+
+    /// <summary>
+    /// 数据库名或 Oracle 服务名。
+    /// </summary>
+    [Column("sql_server_database")]
+    public string? SqlServerDatabase { get; set; }
+
+    /// <summary>
+    /// 数据库用户名。
+    /// </summary>
+    [Column("sql_server_username")]
+    public string? SqlServerUsername { get; set; }
+
+    /// <summary>
+    /// 数据库密码。
+    /// </summary>
+    [Column("sql_server_password")]
+    public string? SqlServerPassword { get; set; }
+
+    /// <summary>
+    /// 是否信任 SQL Server 证书。
+    /// </summary>
+    [Column("sql_server_trust_certificate")]
+    public bool SqlServerTrustCertificate { get; set; } = true;
+
+    /// <summary>
+    /// 数据库主查询模板，支持 @from/@to，Oracle 也可写 :from/:to。
+    /// </summary>
+    [Column("query_sql")]
+    public string? QuerySql { get; set; }
+
     [Column("time_field")]
     public string TimeField { get; set; } = "";
+
+    /// <summary>
+    /// 检查点回看分钟数，防止边界数据漏采。
+    /// </summary>
+    [Column("lookback_minutes")]
+    public int LookbackMinutes { get; set; } = 5;
 
     [Column("polling_interval_seconds")]
     public int PollingIntervalSeconds { get; set; } = 300;
@@ -70,4 +133,7 @@ public class IngestionSource
     /// </summary>
     [Column("conditions")]
     public string? Conditions { get; set; }
+
+    [ForeignKey(nameof(DatabaseResourceId))]
+    public DatabaseResource? DatabaseResource { get; set; }
 }

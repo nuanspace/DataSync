@@ -49,13 +49,11 @@ public class SyncWorker : BackgroundService
     {
         // 等待数据湖配置就绪
         {
-            using var scope = _scopeFactory.CreateScope();
-            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    if (await dlClient.HasConfigAsync(stoppingToken))
+                    if (await CanStartWithoutWaitingDataLakeAsync(stoppingToken))
                         break;
                 }
                 catch (Exception ex)
@@ -337,6 +335,21 @@ public class SyncWorker : BackgroundService
 
         _logger.LogInformation("任务 [{TaskCode}] 轮询循环已停止", taskCode);
     }
+
+    private async Task<bool> CanStartWithoutWaitingDataLakeAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var logService = scope.ServiceProvider.GetRequiredService<SyncLogService>();
+        var tasks = await logService.GetEnabledTasksAsync(ct);
+        if (tasks.Count == 0 || tasks.All(t => t.Interfaces.All(IsDatabaseInterface)))
+            return true;
+
+        var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
+        return await dlClient.HasConfigAsync(ct);
+    }
+
+    private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDatabaseSourceType(iface.SourceType);
 
     /// <summary>
     /// 每天执行一次日志清理

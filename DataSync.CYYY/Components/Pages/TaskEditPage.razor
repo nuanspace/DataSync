@@ -262,16 +262,13 @@
                             <div class="interface-card-body">
                                 <div class="interface-card-head">
                                     <div class="interface-card-title-block">
-                                        <MudAutocomplete T="string"
-                                                         Value="context.ServerCode"
-                                                         Label="目标接口"
-                                                         Variant="Variant.Outlined"
-                                                         Margin="Margin.Dense"
-                                                         SearchFunc="@SearchDataLakeInterfaces"
-                                                         ToStringFunc="@(code => FormatInterfaceDisplay(code))"
-                                                         ValueChanged="@(v => OnInterfaceServerCodeChanged(context, v))"
-                                                          Dense="true"
-                                                          CoerceValue="true" />
+                                        <div class="interface-card-title-row">
+                                            <div>
+                                                <div class="interface-card-title">@GetInterfaceDisplayName(context)</div>
+                                                <div class="interface-card-subtitle">@GetInterfaceCodeSummary(context)</div>
+                                            </div>
+                                            <span class="meta-pill">@GetInterfaceSourceTypeText(context)</span>
+                                        </div>
                                         @if (IsChildInterface(context) || HasChildInterfaces(context))
                                         {
                                             <div class="interface-card-caption-row">
@@ -337,32 +334,18 @@
                                 }
 
                                 <div class="interface-card-grid">
-                                    <MudTextField @bind-Value="context.QueryField"
-                                                  Label="@GetQueryFieldLabel(context)"
-                                                  Variant="Variant.Outlined"
-                                                  Margin="Margin.Dense" />
-                                    @if (IsChildInterface(context))
-                                    {
-                                        <div class="interface-inline-summary">
-                                            <span class="interface-inline-summary-label">上游取值</span>
-                                            <strong class="interface-inline-summary-value">@GetChildSourceSummary(context)</strong>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <MudSelect T="string"
-                                                   @bind-Value="context.QueryValueField"
-                                                   Label="触发记录取值字段"
-                                                   Variant="Variant.Outlined"
-                                                   Margin="Margin.Dense"
-                                                   Dense="true">
-                                            <MudSelectItem T="string" Value="@((string?)null)">@GetAutoQueryValueLabel(context)</MudSelectItem>
-                                            @foreach (var col in GetTriggerSourceColumns())
-                                            {
-                                                <MudSelectItem Value="@col">@col</MudSelectItem>
-                                            }
-                                        </MudSelect>
-                                    }
+                                    <div class="interface-summary-item">
+                                        <span>查询字段</span>
+                                        <strong>@GetInterfaceQueryFieldSummary(context)</strong>
+                                    </div>
+                                    <div class="interface-summary-item">
+                                        <span>取值来源</span>
+                                        <strong>@GetInterfaceValueSourceSummary(context)</strong>
+                                    </div>
+                                    <div class="interface-summary-item">
+                                        <span>数据库资源</span>
+                                        <strong>@GetInterfaceDatabaseSummary(context)</strong>
+                                    </div>
                                     <MudNumericField T="int"
                                                      Value="context.SortOrder"
                                                      ValueChanged="@(v => OnInterfaceSortOrderChanged(context, v))"
@@ -387,7 +370,7 @@
                                 <MudButton Variant="Variant.Outlined" Size="Size.Small"
                                            StartIcon="@Icons.Material.Filled.Settings"
                                            OnClick="@(() => OpenConfigDialog(context))">
-                                    补充配置
+                                    编辑配置
                                 </MudButton>
                                 <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                                OnClick="@(() => RemoveInterface(context))" />
@@ -488,7 +471,7 @@
         <MudDialog @bind-Visible="_showConfigDialog" Options="_configDialogOptions">
             <TitleContent>
                 <div class="config-dialog-title">
-                    <div class="task-panel-tag">接口附加配置</div>
+                    <div class="task-panel-tag">接口配置</div>
                     <MudText Typo="Typo.h6">@GetConfigDialogTitle()</MudText>
                 </div>
             </TitleContent>
@@ -508,6 +491,128 @@
                             <span class="config-preview-text">@GetEditingPushTargetPreview()</span>
                         </div>
                     }
+
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">查询来源</MudText>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="4">
+                                <MudSelect T="string"
+                                           Value="_editingConfigInterface.SourceType"
+                                           ValueChanged="@(v => OnInterfaceSourceTypeChanged(_editingConfigInterface, v))"
+                                           Label="来源类型"
+                                           Variant="Variant.Outlined"
+                                           Margin="Margin.Dense"
+                                           Dense="true">
+                                    <MudSelectItem Value="@(IngestionService.SourceTypeDataLake)">DataLake</MudSelectItem>
+                                    <MudSelectItem Value="@(IngestionService.SourceTypeDatabase)">数据库</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="8">
+                                <MudTextField @bind-Value="_editingConfigInterface.DisplayName"
+                                              Label="显示名称"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense" />
+                            </MudItem>
+                            @if (IsDatabaseInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_editingConfigInterface.ServerCode"
+                                                  Label="接口编码"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                            }
+                            else
+                            {
+                                <MudItem xs="12">
+                                    <MudAutocomplete T="string"
+                                                     Value="_editingConfigInterface.ServerCode"
+                                                     Label="目标接口"
+                                                     Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense"
+                                                     SearchFunc="@SearchDataLakeInterfaces"
+                                                     ToStringFunc="@(code => FormatInterfaceDisplay(code))"
+                                                     ValueChanged="@(v => OnInterfaceServerCodeChanged(_editingConfigInterface, v))"
+                                                     Dense="true"
+                                                     CoerceValue="true" />
+                                </MudItem>
+                            }
+                            @if (IsDatabaseInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField Value="@GetEffectiveDatabaseTypeText(_editingConfigInterface)"
+                                                  Label="数据库类型"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  ReadOnly="true" />
+                                </MudItem>
+                                <MudItem xs="12" sm="8">
+                                    <MudSelect T="int?"
+                                               @bind-Value="_editingConfigInterface.DatabaseResourceId"
+                                               Label="数据库资源"
+                                               HelperText="@GetDatabaseResourceHelperText(_editingConfigInterface)"
+                                               Variant="Variant.Outlined"
+                                               Margin="Margin.Dense"
+                                               Dense="true">
+                                        <MudSelectItem T="int?" Value="@((int?)null)">继承患者来源数据库资源</MudSelectItem>
+                                        @foreach (var resource in _databaseResources)
+                                        {
+                                            <MudSelectItem T="int?" Value="@((int?)resource.Id)">@GetDatabaseResourceOption(resource)</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_editingConfigInterface.QuerySql"
+                                                  Label="SQL 查询模板"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  Lines="6"
+                                                  HelperText="@GetSqlTemplateHelperText(_editingConfigInterface)" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">查询映射</MudText>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_editingConfigInterface.QueryField"
+                                              Label="@GetQueryFieldLabel(_editingConfigInterface)"
+                                              Variant="Variant.Outlined"
+                                              Margin="Margin.Dense" />
+                            </MudItem>
+                            @if (IsChildInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12" sm="6">
+                                    <div class="interface-inline-summary config-inline-summary">
+                                        <span class="interface-inline-summary-label">上游取值</span>
+                                        <strong class="interface-inline-summary-value">@GetChildSourceSummary(_editingConfigInterface)</strong>
+                                    </div>
+                                </MudItem>
+                            }
+                            else
+                            {
+                                <MudItem xs="12" sm="6">
+                                    <MudAutocomplete T="string"
+                                                     Value="_editingConfigInterface.QueryValueField"
+                                                     ValueChanged="@(v => _editingConfigInterface.QueryValueField = v)"
+                                                     Label="触发记录取值字段"
+                                                     Variant="Variant.Outlined"
+                                                     Margin="Margin.Dense"
+                                                     Dense="true"
+                                                     Clearable="true"
+                                                     CoerceValue="true"
+                                                     SearchFunc="@SearchTriggerSourceColumns"
+                                                     HelperText="@GetAutoQueryValueLabel(_editingConfigInterface)" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </div>
 
                     <div class="config-section">
                         <div class="config-section-header">
@@ -625,54 +730,57 @@
                     </div>
                 }
 
-                <div class="config-section">
-                    <div class="config-section-header">
-                        <MudText Typo="Typo.subtitle1">过滤条件</MudText>
-                    </div>
-                    @for (var i = 0; i < _editingFilters.Count; i++)
-                    {
-                        var index = i;
-                        var filter = _editingFilters[index];
-                        <div class="config-row">
-                            <MudGrid Spacing="2">
-                                <MudItem xs="12" sm="4">
-                                    <MudTextField @bind-Value="filter.Column" Label="字段名"
-                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
-                                </MudItem>
-                                <MudItem xs="12" sm="3">
-                                    <MudSelect T="string" @bind-Value="filter.Type" Label="条件类型"
-                                               Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
-                                        <MudSelectItem Value="@("eq")">eq（等于）</MudSelectItem>
-                                        <MudSelectItem Value="@("ne")">ne（不等于）</MudSelectItem>
-                                        <MudSelectItem Value="@("in")">in（包含）</MudSelectItem>
-                                        <MudSelectItem Value="@("notin")">notin（不包含）</MudSelectItem>
-                                        <MudSelectItem Value="@("gt")">gt（大于）</MudSelectItem>
-                                        <MudSelectItem Value="@("ge")">ge（大于等于）</MudSelectItem>
-                                        <MudSelectItem Value="@("lt")">lt（小于）</MudSelectItem>
-                                        <MudSelectItem Value="@("le")">le（小于等于）</MudSelectItem>
-                                        <MudSelectItem Value="@("likeright")">likeright（前缀匹配）</MudSelectItem>
-                                        <MudSelectItem Value="@("isnull")">isnull（为空）</MudSelectItem>
-                                        <MudSelectItem Value="@("isnotnull")">isnotnull（不为空）</MudSelectItem>
-                                    </MudSelect>
-                                </MudItem>
-                                <MudItem xs="12" sm="4">
-                                    <MudTextField T="string" Value="@(filter.Value?.ToString() ?? "")" Label="值"
-                                                  ValueChanged="@((string v) => { filter.Value = v; })"
-                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
-                                                  Disabled="@(filter.Type is "isnull" or "isnotnull")" />
-                                </MudItem>
-                                <MudItem xs="12" sm="1" Class="d-flex align-center justify-center">
-                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                                   OnClick="@(() => _editingFilters.RemoveAt(index))" />
-                                </MudItem>
-                            </MudGrid>
+                @if (_editingConfigInterface != null && !IsDatabaseInterface(_editingConfigInterface))
+                {
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">过滤条件</MudText>
                         </div>
-                    }
-                    <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _editingFilters.Add(new()))">
-                        添加条件
-                    </MudButton>
-                </div>
+                        @for (var i = 0; i < _editingFilters.Count; i++)
+                        {
+                            var index = i;
+                            var filter = _editingFilters[index];
+                            <div class="config-row">
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField @bind-Value="filter.Column" Label="字段名"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="3">
+                                        <MudSelect T="string" @bind-Value="filter.Type" Label="条件类型"
+                                                   Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
+                                            <MudSelectItem Value="@("eq")">eq（等于）</MudSelectItem>
+                                            <MudSelectItem Value="@("ne")">ne（不等于）</MudSelectItem>
+                                            <MudSelectItem Value="@("in")">in（包含）</MudSelectItem>
+                                            <MudSelectItem Value="@("notin")">notin（不包含）</MudSelectItem>
+                                            <MudSelectItem Value="@("gt")">gt（大于）</MudSelectItem>
+                                            <MudSelectItem Value="@("ge")">ge（大于等于）</MudSelectItem>
+                                            <MudSelectItem Value="@("lt")">lt（小于）</MudSelectItem>
+                                            <MudSelectItem Value="@("le")">le（小于等于）</MudSelectItem>
+                                            <MudSelectItem Value="@("likeright")">likeright（前缀匹配）</MudSelectItem>
+                                            <MudSelectItem Value="@("isnull")">isnull（为空）</MudSelectItem>
+                                            <MudSelectItem Value="@("isnotnull")">isnotnull（不为空）</MudSelectItem>
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField T="string" Value="@(filter.Value?.ToString() ?? "")" Label="值"
+                                                      ValueChanged="@((string v) => { filter.Value = v; })"
+                                                      Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                      Disabled="@(filter.Type is "isnull" or "isnotnull")" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="1" Class="d-flex align-center justify-center">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                       OnClick="@(() => _editingFilters.RemoveAt(index))" />
+                                    </MudItem>
+                                </MudGrid>
+                            </div>
+                        }
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _editingFilters.Add(new()))">
+                            添加条件
+                        </MudButton>
+                    </div>
+                }
             </DialogContent>
             <DialogActions>
                 <MudButton OnClick="@(() => _showConfigDialog = false)">取消</MudButton>
@@ -719,6 +827,7 @@
     // 下拉数据源
     private List<DataLakeInterface> _dataLakeInterfaces = [];
     private List<IngestionSource> _ingestionSources = [];
+    private List<DatabaseResource> _databaseResources = [];
 
     // 统一配置弹窗相关
     private SyncTaskInterface? _editingConfigInterface;
@@ -726,6 +835,7 @@
     private List<DataLakeCondition> _editingFilters = [];
     private string _editingOutputFieldsText = "";
     private bool _showConfigDialog;
+    private bool _editingNewInterface;
     private readonly DialogOptions _configDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
 
     // 过滤条件相关
@@ -758,6 +868,10 @@
                 .OrderBy(d => d.ServerCode).ToListAsync(CancellationToken);
             _ingestionSources = await db.IngestionSources
                 .OrderBy(s => s.ServerCode).ToListAsync(CancellationToken);
+            _databaseResources = await db.DatabaseResources
+                .AsNoTracking()
+                .OrderBy(r => r.Name)
+                .ToListAsync(CancellationToken);
         }
 
         if (_isEdit)
@@ -812,12 +926,12 @@
             Enabled = true,
             SortOrder = GetRecommendedSortOrderForNewInterface(),
             InterfaceKey = CreateInterfaceKey(),
+            SourceType = GetDefaultInterfaceSourceType(),
+            DatabaseType = GetDefaultInterfaceDatabaseType(),
             RouteOperator = "eq"
         };
 
-        _interfaces.Add(newInterface);
-        _pendingNewInterface = newInterface;
-        await RefreshInterfaceWorkspaceAsync();
+        await OpenConfigDialog(newInterface, true);
     }
 
     private void RemoveInterface(SyncTaskInterface item)
@@ -854,7 +968,30 @@
     {
         item.ServerCode = serverCode;
         var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == serverCode);
-        item.DisplayName = dl?.Name ?? "";
+        if (!IsDatabaseInterface(item))
+            item.DisplayName = dl?.Name ?? "";
+    }
+
+    private async Task OnInterfaceSourceTypeChanged(SyncTaskInterface item, string sourceType)
+    {
+        var normalized = NormalizeSourceType(sourceType);
+        if (string.Equals(item.SourceType, normalized, StringComparison.Ordinal))
+            return;
+
+        item.SourceType = normalized;
+        if (IsDatabaseInterface(item))
+        {
+            item.DisplayName = string.IsNullOrWhiteSpace(item.DisplayName) ? item.ServerCode : item.DisplayName;
+            item.DatabaseType = GetDefaultInterfaceDatabaseType();
+        }
+        else
+        {
+            ClearInterfaceDatabaseConnection(item);
+            item.QuerySql = null;
+            OnInterfaceServerCodeChanged(item, item.ServerCode);
+        }
+
+        await RefreshInterfaceWorkspaceAsync();
     }
 
     private Task<IEnumerable<string>> SearchDataLakeInterfaces(string value, CancellationToken token = default)
@@ -935,6 +1072,12 @@
 
             if (string.IsNullOrWhiteSpace(iface.RouteOperator))
                 iface.RouteOperator = "eq";
+
+            var originalSourceType = iface.SourceType;
+            if (string.IsNullOrWhiteSpace(iface.SourceType))
+                iface.SourceType = IngestionService.SourceTypeDataLake;
+            iface.SourceType = IngestionService.NormalizeSourceType(iface.SourceType);
+            iface.DatabaseType = IngestionService.NormalizeDatabaseType(iface.DatabaseType, originalSourceType);
         }
     }
 
@@ -1030,6 +1173,28 @@
 
     private void NormalizeInterfaceConfig(SyncTaskInterface iface)
     {
+        var originalSourceType = iface.SourceType;
+        iface.SourceType = NormalizeSourceType(iface.SourceType);
+        if (!IsDatabaseInterface(iface))
+        {
+            ClearInterfaceDatabaseConnection(iface);
+            iface.QuerySql = null;
+        }
+        else
+        {
+            iface.ConnectionStringName = null;
+            iface.FilterConditions = null;
+            var resource = GetEffectiveDatabaseResource(iface);
+            iface.DatabaseType = resource == null
+                ? IngestionService.NormalizeDatabaseType(iface.DatabaseType, originalSourceType)
+                : IngestionService.NormalizeDatabaseType(resource.DatabaseType);
+            iface.SqlServerHost = null;
+            iface.SqlServerDatabase = null;
+            iface.SqlServerUsername = null;
+            iface.SqlServerPassword = null;
+            iface.SqlServerTrustCertificate = resource?.TrustCertificate ?? true;
+        }
+
         if (IsChildInterface(iface))
         {
             iface.OutputFields = null;
@@ -1055,6 +1220,85 @@
         iface.RouteField = null;
         iface.RouteOperator = "eq";
         iface.RouteValue = null;
+    }
+
+    private string GetDefaultInterfaceSourceType()
+    {
+        var source = _ingestionSources.FirstOrDefault(s => s.ServerCode == _task.TriggerServerCode);
+        return NormalizeSourceType(source?.SourceType);
+    }
+
+    private string GetDefaultInterfaceDatabaseType()
+    {
+        var resource = GetTriggerDatabaseResource();
+        if (resource != null)
+            return IngestionService.NormalizeDatabaseType(resource.DatabaseType);
+
+        var source = _ingestionSources.FirstOrDefault(s => s.ServerCode == _task.TriggerServerCode);
+        return IngestionService.NormalizeDatabaseType(source?.DatabaseType, source?.SourceType);
+    }
+
+    private static string NormalizeSourceType(string? sourceType) =>
+        IngestionService.NormalizeSourceType(sourceType);
+
+    private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDatabaseSourceType(iface.SourceType);
+
+    private string GetInterfaceSourceTypeText(SyncTaskInterface iface) =>
+        IsDatabaseInterface(iface) ? GetEffectiveDatabaseTypeText(iface) : "DataLake";
+
+    private bool IsSqlServerDatabase(SyncTaskInterface iface) =>
+        IngestionService.IsSqlServerDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
+
+    private bool IsOracleDatabase(SyncTaskInterface iface) =>
+        IngestionService.IsOracleDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
+
+    private string GetSqlTemplateHelperText(SyncTaskInterface iface) =>
+        IsOracleDatabase(iface)
+            ? "参数可写 :queryValue，也兼容 @queryValue"
+            : "参数使用 @queryValue";
+
+    private static string GetDatabaseResourceOption(DatabaseResource resource) =>
+        $"{resource.Name}（{resource.DatabaseType} {resource.Host}/{resource.DatabaseName}）";
+
+    private string GetEffectiveDatabaseTypeText(SyncTaskInterface iface) =>
+        GetEffectiveDatabaseResource(iface)?.DatabaseType ?? "未选择";
+
+    private string GetDatabaseResourceHelperText(SyncTaskInterface iface)
+    {
+        if (iface.DatabaseResourceId.HasValue)
+            return "当前接口使用单独选择的数据库资源";
+
+        var resource = GetTriggerDatabaseResource();
+        return resource == null
+            ? "患者来源没有可继承的数据库资源，请为当前接口选择资源"
+            : $"当前继承：{resource.Name}";
+    }
+
+    private DatabaseResource? GetEffectiveDatabaseResource(SyncTaskInterface iface) =>
+        GetDatabaseResource(iface.DatabaseResourceId) ?? GetTriggerDatabaseResource();
+
+    private DatabaseResource? GetTriggerDatabaseResource()
+    {
+        var source = _ingestionSources.FirstOrDefault(s => s.ServerCode == _task.TriggerServerCode);
+        return GetDatabaseResource(source?.DatabaseResourceId);
+    }
+
+    private DatabaseResource? GetDatabaseResource(int? id) =>
+        id.HasValue ? _databaseResources.FirstOrDefault(r => r.Id == id.Value) : null;
+
+    private bool HasTriggerDatabaseConnection(SyncTaskInterface iface) =>
+        GetTriggerDatabaseResource() != null;
+
+    private static void ClearInterfaceDatabaseConnection(SyncTaskInterface iface)
+    {
+        iface.DatabaseResourceId = null;
+        iface.ConnectionStringName = null;
+        iface.SqlServerHost = null;
+        iface.SqlServerDatabase = null;
+        iface.SqlServerUsername = null;
+        iface.SqlServerPassword = null;
+        iface.SqlServerTrustCertificate = true;
     }
 
     private async Task OnTriggerServerCodeChanged(string serverCode)
@@ -1302,6 +1546,39 @@
         return string.IsNullOrWhiteSpace(iface.ServerCode) ? "当前接口" : iface.ServerCode;
     }
 
+    private string GetInterfaceCodeSummary(SyncTaskInterface iface) =>
+        string.IsNullOrWhiteSpace(iface.ServerCode)
+            ? "接口编码待配置"
+            : iface.ServerCode;
+
+    private string GetInterfaceQueryFieldSummary(SyncTaskInterface iface) =>
+        string.IsNullOrWhiteSpace(iface.QueryField)
+            ? "待配置"
+            : iface.QueryField;
+
+    private string GetInterfaceValueSourceSummary(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+            return string.IsNullOrWhiteSpace(iface.ParentResultField)
+                ? "父接口字段待配置"
+                : $"父.{iface.ParentResultField}";
+
+        return string.IsNullOrWhiteSpace(iface.QueryValueField)
+            ? GetAutoQueryValueField(iface)
+            : iface.QueryValueField;
+    }
+
+    private string GetInterfaceDatabaseSummary(SyncTaskInterface iface)
+    {
+        if (!IsDatabaseInterface(iface))
+            return "不适用";
+
+        if (iface.DatabaseResourceId.HasValue)
+            return GetDatabaseResource(iface.DatabaseResourceId)?.Name ?? "资源不存在";
+
+        return GetTriggerDatabaseResource()?.Name ?? "未选择";
+    }
+
     private List<string> GetInterfaceIssues(SyncTaskInterface iface)
     {
         if (!iface.Enabled)
@@ -1316,6 +1593,21 @@
 
         if (string.IsNullOrWhiteSpace(iface.QueryField))
             issues.Add(IsChildInterface(iface) ? "先填写当前接口关联字段" : "先填写目标接口查询字段");
+
+        if (IsDatabaseInterface(iface))
+        {
+            if (iface.DatabaseResourceId.HasValue && GetDatabaseResource(iface.DatabaseResourceId) == null)
+            {
+                issues.Add("选择的数据库资源不存在");
+            }
+            else if (!iface.DatabaseResourceId.HasValue && !HasTriggerDatabaseConnection(iface))
+            {
+                issues.Add("先选择数据库资源或配置患者来源数据库资源");
+            }
+
+            if (string.IsNullOrWhiteSpace(iface.QuerySql))
+                issues.Add("先填写 SQL 查询模板");
+        }
 
         if (IsChildInterface(iface))
         {
@@ -1448,12 +1740,12 @@
         return result;
     }
 
-    private async Task OpenConfigDialog(SyncTaskInterface iface)
+    private async Task OpenConfigDialog(SyncTaskInterface iface, bool isNew = false)
     {
         await EnsureColumnsLoadedAsync(_task.TriggerServerCode);
         _editingConfigInterface = iface;
+        _editingNewInterface = isNew;
         _editingOutputFieldsText = iface.OutputFields ?? "";
-
         // 初始化路由参数
         Dictionary<string, string>? existingParams = null;
         if (!IsChildInterface(iface) && !string.IsNullOrEmpty(iface.PushParams))
@@ -1637,6 +1929,9 @@
 
     private static int GetFilterConditionCount(SyncTaskInterface iface)
     {
+        if (IsDatabaseInterface(iface))
+            return 0;
+
         if (string.IsNullOrWhiteSpace(iface.FilterConditions)) return 0;
         try
         {
@@ -1674,7 +1969,7 @@
 
     private void BackToTaskList() => inj_navigationManager.NavigateTo("/tasks");
 
-    private void SaveConfig()
+    private async Task SaveConfig()
     {
         if (_editingConfigInterface == null) return;
 
@@ -1714,6 +2009,14 @@
         _editingConfigInterface.FilterConditions = validFilters.Count > 0
             ? JsonSerializer.Serialize(validFilters)
             : null;
+
+        if (_editingNewInterface)
+        {
+            _interfaces.Add(_editingConfigInterface);
+            _pendingNewInterface = _editingConfigInterface;
+            _editingNewInterface = false;
+            await RefreshInterfaceWorkspaceAsync();
+        }
 
         _showConfigDialog = false;
     }
@@ -1755,6 +2058,15 @@
         return _columnsCache.TryGetValue(_task.TriggerServerCode, out var cols) ? cols : [];
     }
 
+    private Task<IEnumerable<string>> SearchTriggerSourceColumns(string value, CancellationToken token = default)
+    {
+        var columns = GetTriggerSourceColumns();
+        var result = string.IsNullOrWhiteSpace(value)
+            ? columns
+            : columns.Where(c => c.Contains(value, StringComparison.OrdinalIgnoreCase)).ToList();
+        return Task.FromResult(result.AsEnumerable());
+    }
+
     private async Task EnsureColumnsLoadedAsync(string? serverCode)
     {
         if (string.IsNullOrEmpty(serverCode) || _columnsCache.ContainsKey(serverCode)) return;
@@ -1770,6 +2082,18 @@
         EnsureInterfaceKeys();
         foreach (var iface in _interfaces)
             NormalizeInterfaceConfig(iface);
+
+        var duplicateInterfaceKeys = _interfaces
+            .Where(i => !string.IsNullOrWhiteSpace(i.InterfaceKey))
+            .GroupBy(i => i.InterfaceKey)
+            .Where(g => g.Count() > 1)
+            .Select(g => GetInterfaceDisplayName(g.First()))
+            .ToList();
+        if (duplicateInterfaceKeys.Count > 0)
+        {
+            inj_snackbar.Add($"关联接口存在重复配置：{string.Join("、", duplicateInterfaceKeys.Take(3))}", Severity.Warning);
+            return;
+        }
 
         if (!_task.EnableTriggerRecordPush)
         {
@@ -1869,6 +2193,7 @@
                 : null;
 
             await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var createdInterfaces = new List<(SyncTaskInterface PageItem, SyncTaskInterface EntityItem)>();
 
             // Code 唯一性校验
             var codeExists = await db.SyncTasks
@@ -1910,51 +2235,21 @@
 
                 foreach (var iface in _interfaces)
                 {
-                    if (iface.Id > 0)
+                    var existing = iface.Id > 0
+                        ? entity.Interfaces.FirstOrDefault(i => i.Id == iface.Id)
+                        : entity.Interfaces.FirstOrDefault(i => i.InterfaceKey == iface.InterfaceKey);
+
+                    if (existing != null)
                     {
-                        var existing = entity.Interfaces.First(i => i.Id == iface.Id);
-                        existing.ServerCode = iface.ServerCode;
-                        existing.DisplayName = iface.DisplayName;
-                        existing.QueryField = iface.QueryField;
-                        existing.IsRequired = iface.IsRequired;
-                        existing.SortOrder = iface.SortOrder;
-                        existing.Enabled = iface.Enabled;
-                        existing.InterfaceKey = iface.InterfaceKey;
-                        existing.ParentInterfaceKey = iface.ParentInterfaceKey;
-                        existing.QueryValueField = iface.QueryValueField;
-                        existing.ParentResultField = iface.ParentResultField;
-                        existing.MountField = iface.MountField;
-                        existing.RouteField = iface.RouteField;
-                        existing.RouteOperator = iface.RouteOperator;
-                        existing.RouteValue = iface.RouteValue;
-                        existing.OutputFields = iface.OutputFields;
-                        existing.PushParams = iface.PushParams;
-                        existing.InjectFields = iface.InjectFields;
-                        existing.FilterConditions = iface.FilterConditions;
+                        ApplyInterfaceValues(existing, iface);
+                        iface.Id = existing.Id;
                     }
                     else
                     {
-                        entity.Interfaces.Add(new SyncTaskInterface
-                        {
-                            ServerCode = iface.ServerCode,
-                            DisplayName = iface.DisplayName,
-                            QueryField = iface.QueryField,
-                            QueryValueField = iface.QueryValueField,
-                            IsRequired = iface.IsRequired,
-                            SortOrder = iface.SortOrder,
-                            Enabled = iface.Enabled,
-                            InterfaceKey = iface.InterfaceKey,
-                            ParentInterfaceKey = iface.ParentInterfaceKey,
-                            ParentResultField = iface.ParentResultField,
-                            MountField = iface.MountField,
-                            RouteField = iface.RouteField,
-                            RouteOperator = iface.RouteOperator,
-                            RouteValue = iface.RouteValue,
-                            OutputFields = iface.OutputFields,
-                            PushParams = iface.PushParams,
-                            InjectFields = iface.InjectFields,
-                            FilterConditions = iface.FilterConditions
-                        });
+                        var created = new SyncTaskInterface();
+                        ApplyInterfaceValues(created, iface);
+                        entity.Interfaces.Add(created);
+                        createdInterfaces.Add((iface, created));
                     }
                 }
             }
@@ -1966,6 +2261,9 @@
             }
 
             await db.SaveChangesAsync(CancellationToken);
+            foreach (var (pageItem, entityItem) in createdInterfaces)
+                pageItem.Id = entityItem.Id;
+
             inj_snackbar.Add(_isEdit ? "任务更新成功" : "任务创建成功", Severity.Success);
             _removedInterfaceIds.Clear();
             CaptureOriginalTaskState();
@@ -1985,6 +2283,38 @@
         {
             _saving = false;
         }
+    }
+
+    private static void ApplyInterfaceValues(SyncTaskInterface target, SyncTaskInterface source)
+    {
+        target.ServerCode = source.ServerCode;
+        target.DisplayName = source.DisplayName;
+        target.SourceType = source.SourceType;
+        target.DatabaseResourceId = source.DatabaseResourceId;
+        target.DatabaseType = source.DatabaseType;
+        target.ConnectionStringName = source.ConnectionStringName;
+        target.SqlServerHost = source.SqlServerHost;
+        target.SqlServerDatabase = source.SqlServerDatabase;
+        target.SqlServerUsername = source.SqlServerUsername;
+        target.SqlServerPassword = source.SqlServerPassword;
+        target.SqlServerTrustCertificate = source.SqlServerTrustCertificate;
+        target.QuerySql = source.QuerySql;
+        target.QueryField = source.QueryField;
+        target.QueryValueField = source.QueryValueField;
+        target.IsRequired = source.IsRequired;
+        target.SortOrder = source.SortOrder;
+        target.Enabled = source.Enabled;
+        target.InterfaceKey = source.InterfaceKey;
+        target.ParentInterfaceKey = source.ParentInterfaceKey;
+        target.ParentResultField = source.ParentResultField;
+        target.MountField = source.MountField;
+        target.RouteField = source.RouteField;
+        target.RouteOperator = source.RouteOperator;
+        target.RouteValue = source.RouteValue;
+        target.OutputFields = source.OutputFields;
+        target.PushParams = source.PushParams;
+        target.InjectFields = source.InjectFields;
+        target.FilterConditions = source.FilterConditions;
     }
 }
 

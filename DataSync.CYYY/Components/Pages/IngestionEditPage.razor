@@ -19,64 +19,136 @@
 }
 else
 {
-    <!-- 基本信息 -->
-    <MudPaper Class="pa-4 mt-4" Elevation="1">
-        <MudText Typo="Typo.h6" Class="mb-3">基本信息</MudText>
-        <MudGrid>
-            <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_source.Name" Label="名称" Required="true" Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_source.ServerCode" Label="ServerCode" Required="true"
-                              Variant="Variant.Outlined" HelperText="数据湖接口编码，如 JHIDS-BAS-OAP-028" />
-            </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudTextField Value="@_localTableName" Label="本地表名（自动生成）" ReadOnly="true"
-                              Variant="Variant.Outlined" />
-            </MudItem>
-            <MudItem xs="12" sm="6" Class="d-flex align-center">
-                <MudSwitch @bind-Value="_source.Enabled" Label="启用" Color="Color.Success" />
-            </MudItem>
-        </MudGrid>
-    </MudPaper>
+    <div class="ingestion-edit-layout">
+        <div class="ingestion-edit-column ingestion-edit-column--left">
+            <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-3">基本信息</MudText>
+                <MudGrid>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_source.Name" Label="名称" Required="true" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_source.ServerCode" Label="ServerCode" Required="true"
+                                      Variant="Variant.Outlined" HelperText="采集源编码，如 JHIDS-BAS-OAP-028" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudSelect T="string" @bind-Value="_source.SourceType" Label="来源类型" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@(IngestionService.SourceTypeDataLake)">DataLake</MudSelectItem>
+                            <MudSelectItem Value="@(IngestionService.SourceTypeDatabase)">数据库</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField Value="@_localTableName" Label="本地表名（自动生成）" ReadOnly="true"
+                                      Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudSwitch @bind-Value="_source.Enabled" Label="启用采集源" Color="Color.Success" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
 
-    <!-- 采集配置 -->
-    <MudPaper Class="pa-4 mt-4" Elevation="1">
-        <MudText Typo="Typo.h6" Class="mb-3">采集配置</MudText>
-        <MudGrid>
-            <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="_source.TimeField" Label="时间字段" Required="true"
-                              Variant="Variant.Outlined" HelperText="增量查询的时间字段名" />
-            </MudItem>
-            <MudItem xs="12" sm="6">
-                <MudNumericField @bind-Value="_source.PollingIntervalSeconds" Label="轮询间隔(秒)"
-                                 Variant="Variant.Outlined" Min="10" />
-            </MudItem>
-            <MudItem xs="12" sm="4">
-                <MudNumericField @bind-Value="_startDisplayValue" Label="开始偏移"
-                                 Variant="Variant.Outlined" Min="1"
-                                 HelperText="开始时间 = 当前时间 - 该值" />
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudSelect @bind-Value="_startUnit" Label="单位" Variant="Variant.Outlined">
-                    <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
-                    <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="4">
-                <MudNumericField @bind-Value="_endDisplayValue" Label="结束偏移"
-                                 Variant="Variant.Outlined" Min="0"
-                                 HelperText="结束时间 = 当前时间 - 该值，0 表示当前时间" />
-            </MudItem>
-            <MudItem xs="12" sm="2">
-                <MudSelect @bind-Value="_endUnit" Label="单位" Variant="Variant.Outlined">
-                    <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
-                    <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
-                </MudSelect>
-            </MudItem>
+            <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-3">采集窗口</MudText>
+                <MudGrid>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_source.TimeField" Label="时间字段" Required="true"
+                                      Variant="Variant.Outlined" HelperText="增量查询的时间字段名" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudNumericField @bind-Value="_source.PollingIntervalSeconds" Label="轮询间隔(秒)"
+                                         Variant="Variant.Outlined" Min="10" />
+                    </MudItem>
+                    @if (IsDatabaseSource)
+                    {
+                        <MudItem xs="12">
+                            <MudNumericField @bind-Value="_source.LookbackMinutes" Label="回看分钟"
+                                             Variant="Variant.Outlined" Min="0" />
+                        </MudItem>
+                    }
+                    <MudItem xs="12" sm="8">
+                        <MudNumericField @bind-Value="_startDisplayValue" Label="开始偏移"
+                                         Variant="Variant.Outlined" Min="1"
+                                         HelperText="开始时间 = 当前时间 - 该值" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudSelect @bind-Value="_startUnit" Label="单位" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
+                            <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="8">
+                        <MudNumericField @bind-Value="_endDisplayValue" Label="结束偏移"
+                                         Variant="Variant.Outlined" Min="0"
+                                         HelperText="结束时间 = 当前时间 - 该值，0 表示当前时间" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudSelect @bind-Value="_endUnit" Label="单位" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@UnitMinutes">分钟</MudSelectItem>
+                            <MudSelectItem Value="@UnitHours">小时</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
 
-            <!-- 主键字段 -->
-            <MudItem xs="12">
+            @if (_isEdit)
+            {
+                <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                    <MudText Typo="Typo.h6" Class="mb-3">采集检查点</MudText>
+                    <div class="checkpoint-summary">
+                        <div class="checkpoint-row">
+                            <span>检查点键</span>
+                            <strong>@IngestionCheckpointKey</strong>
+                        </div>
+                        <div class="checkpoint-row">
+                            <span>上次采集到</span>
+                            <strong>@FormatCheckpointTime(_ingestionCheckpoint?.LastSuccessTime)</strong>
+                        </div>
+                    </div>
+                    <MudButton Variant="Variant.Outlined"
+                               Color="Color.Warning"
+                               StartIcon="@Icons.Material.Filled.RestartAlt"
+                               Disabled="@(_resettingCheckpoint || _ingestionCheckpoint is null)"
+                               OnClick="ResetIngestionCheckpoint"
+                               Class="mt-3">
+                        @(_resettingCheckpoint ? "重置中..." : "重置检查点")
+                    </MudButton>
+                </MudPaper>
+            }
+        </div>
+
+        <div class="ingestion-edit-column ingestion-edit-column--right">
+            @if (IsDatabaseSource)
+            {
+                <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                    <MudText Typo="Typo.h6" Class="mb-3">数据库查询</MudText>
+                    <MudGrid>
+                        <MudItem xs="12" sm="6">
+                            <MudSelect T="int?" @bind-Value="_source.DatabaseResourceId" Label="数据库资源" Variant="Variant.Outlined">
+                                @foreach (var resource in _databaseResources)
+                                {
+                                    <MudSelectItem T="int?" Value="@((int?)resource.Id)">@GetDatabaseResourceOption(resource)</MudSelectItem>
+                                }
+                            </MudSelect>
+                        </MudItem>
+                        <MudItem xs="12" sm="6">
+                            <MudTextField Value="@SelectedDatabaseTypeText"
+                                          Label="数据库类型"
+                                          ReadOnly="true"
+                                          Variant="Variant.Outlined" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField @bind-Value="_source.QuerySql"
+                                          Label="SQL 查询模板"
+                                          Variant="Variant.Outlined"
+                                          Lines="8"
+                                          HelperText="@SqlTemplateHelperText" />
+                        </MudItem>
+                    </MudGrid>
+                </MudPaper>
+            }
+
+            <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-3">主键字段</MudText>
                 <div class="pk-section">
                     <div class="pk-input-row">
                         <MudTextField @bind-Value="_pkInput" Label="主键字段 *" Variant="Variant.Outlined"
@@ -102,58 +174,60 @@ else
                         </MudText>
                     }
                 </div>
-            </MudItem>
-        </MudGrid>
-    </MudPaper>
+            </MudPaper>
 
-    <!-- 额外查询条件 -->
-    <MudPaper Class="pa-4 mt-4" Elevation="1">
-        <div class="section-header">
-            <MudText Typo="Typo.h6">额外查询条件</MudText>
-            <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
-                       OnClick="AddCondition">
-                添加条件
-            </MudButton>
-        </div>
-
-        @if (_conditions.Count == 0)
-        {
-            <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--mud-palette-text-secondary)">
-                暂无额外条件，采集时仅按时间范围查询
-            </MudText>
-        }
-        else
-        {
-            @for (var i = 0; i < _conditions.Count; i++)
+            @if (!IsDatabaseSource)
             {
-                var index = i;
-                <MudGrid Class="mt-2" Spacing="2">
-                    <MudItem xs="12" sm="4">
-                        <MudTextField @bind-Value="_conditions[index].Column" Label="字段名"
-                                      Variant="Variant.Outlined" Margin="Margin.Dense" />
-                    </MudItem>
-                    <MudItem xs="12" sm="3">
-                        <MudSelect @bind-Value="_conditions[index].Type" Label="操作类型"
-                                   Variant="Variant.Outlined" Margin="Margin.Dense">
-                            @foreach (var op in _conditionTypes)
-                            {
-                                <MudSelectItem Value="@op.Key">@op.Value</MudSelectItem>
-                            }
-                        </MudSelect>
-                    </MudItem>
-                    <MudItem xs="12" sm="4">
-                        <MudTextField @bind-Value="_conditions[index].Value" Label="值"
-                                      Variant="Variant.Outlined" Margin="Margin.Dense"
-                                      Disabled="@IsValueDisabled(_conditions[index].Type)" />
-                    </MudItem>
-                    <MudItem xs="12" sm="1" Class="d-flex align-center">
-                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                       OnClick="@(() => _conditions.RemoveAt(index))" />
-                    </MudItem>
-                </MudGrid>
+                <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                    <div class="section-header">
+                        <MudText Typo="Typo.h6">额外查询条件</MudText>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddCondition">
+                            添加条件
+                        </MudButton>
+                    </div>
+
+                    @if (_conditions.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="mt-2" Style="color: var(--mud-palette-text-secondary)">
+                            暂无额外条件，采集时仅按时间范围查询
+                        </MudText>
+                    }
+                    else
+                    {
+                        @for (var i = 0; i < _conditions.Count; i++)
+                        {
+                            var index = i;
+                            <MudGrid Class="mt-2" Spacing="2">
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField @bind-Value="_conditions[index].Column" Label="字段名"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect @bind-Value="_conditions[index].Type" Label="操作类型"
+                                               Variant="Variant.Outlined" Margin="Margin.Dense">
+                                        @foreach (var op in _conditionTypes)
+                                        {
+                                            <MudSelectItem Value="@op.Key">@op.Value</MudSelectItem>
+                                        }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="4">
+                                    <MudTextField @bind-Value="_conditions[index].Value" Label="值"
+                                                  Variant="Variant.Outlined" Margin="Margin.Dense"
+                                                  Disabled="@IsValueDisabled(_conditions[index].Type)" />
+                                </MudItem>
+                                <MudItem xs="12" sm="1" Class="d-flex align-center">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => _conditions.RemoveAt(index))" />
+                                </MudItem>
+                            </MudGrid>
+                        }
+                    }
+                </MudPaper>
             }
-        }
-    </MudPaper>
+        </div>
+    </div>
 
     <div class="ingestion-edit-actions mt-4">
         <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
@@ -175,6 +249,10 @@ else
     private bool _isEdit;
     private bool _loading = true;
     private bool _saving;
+    private bool _resettingCheckpoint;
+    private string _checkpointServerCode = "";
+    private SyncCheckpoint? _ingestionCheckpoint;
+    private List<DatabaseResource> _databaseResources = [];
     private List<ConditionItem> _conditions = [];
     private List<string> _primaryKeys = [];
     private string _pkInput = "";
@@ -187,6 +265,35 @@ else
     private string _startUnit = UnitHours;
     private int _endDisplayValue;
     private string _endUnit = UnitHours;
+
+    private bool IsDatabaseSource =>
+        IngestionService.IsDatabaseSourceType(_source.SourceType);
+
+    private bool IsSqlServerDatabase =>
+        IsDatabaseSource && IngestionService.IsSqlServerDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
+
+    private bool IsOracleDatabase =>
+        IsDatabaseSource && IngestionService.IsOracleDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
+
+    private DatabaseResource? SelectedDatabaseResource =>
+        _databaseResources.FirstOrDefault(r => r.Id == _source.DatabaseResourceId);
+
+    private string SelectedDatabaseTypeText => SelectedDatabaseResource?.DatabaseType ?? "未选择";
+
+    private string DatabaseHostLabel => IsOracleDatabase ? "Oracle 主机" : "SQL Server 主机";
+
+    private string DatabaseNameLabel => IsOracleDatabase ? "服务名" : "数据库";
+
+    private string DatabaseHostHelperText => IsOracleDatabase
+        ? "可填写主机或 host:port，端口默认 1521"
+        : "可包含端口或实例名";
+
+    private string SqlTemplateHelperText => IsOracleDatabase
+        ? "时间参数可写 :from/:to，也兼容 @from/@to"
+        : "时间参数使用 @from 和 @to";
+
+    private static string GetDatabaseResourceOption(DatabaseResource resource) =>
+        $"{resource.Name}（{resource.DatabaseType} {resource.Host}/{resource.DatabaseName}）";
 
     /// <summary>
     /// 条件编辑用临时模型
@@ -237,9 +344,21 @@ else
     private string _localTableName => string.IsNullOrWhiteSpace(_source.ServerCode)
         ? "" : IngestionService.GetLocalTableName(_source.ServerCode);
 
+    private string IngestionCheckpointKey => string.IsNullOrWhiteSpace(_checkpointServerCode)
+        ? ""
+        : $"INGEST_{_checkpointServerCode}";
+
     protected override async Task OnPageInitializedAsync()
     {
         _isEdit = Id > 0;
+
+        await using (var resourceDb = await ContextFactory.CreateDbContextAsync(CancellationToken))
+        {
+            _databaseResources = await resourceDb.DatabaseResources
+                .AsNoTracking()
+                .OrderBy(r => r.Name)
+                .ToListAsync(CancellationToken);
+        }
 
         if (_isEdit)
         {
@@ -254,10 +373,21 @@ else
             }
 
             _source = source;
+            _checkpointServerCode = source.ServerCode;
+            _source.SourceType = IngestionService.NormalizeSourceType(_source.SourceType);
+            _source.DatabaseType = IngestionService.NormalizeDatabaseType(_source.DatabaseType, source.SourceType);
+            if (_source.LookbackMinutes < 0)
+                _source.LookbackMinutes = 0;
+            await LoadIngestionCheckpointAsync();
         }
         else
         {
-            _source = new IngestionSource();
+            _source = new IngestionSource
+            {
+                SourceType = IngestionService.SourceTypeDataLake,
+                DatabaseType = IngestionService.DatabaseTypeSqlServer,
+                LookbackMinutes = 5
+            };
         }
 
         // 加载主键配置
@@ -279,6 +409,54 @@ else
         _loading = false;
     }
 
+    private async Task LoadIngestionCheckpointAsync()
+    {
+        if (string.IsNullOrWhiteSpace(IngestionCheckpointKey))
+            return;
+
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _ingestionCheckpoint = await db.SyncCheckpoints
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.TaskCode == IngestionCheckpointKey, CancellationToken);
+    }
+
+    private async Task ResetIngestionCheckpoint()
+    {
+        if (string.IsNullOrWhiteSpace(IngestionCheckpointKey))
+            return;
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "重置采集检查点",
+            $"确定要重置采集源「{_source.Name}」的检查点吗？下次采集将按开始偏移和结束偏移重新计算查询区间。",
+            yesText: "重置",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        _resettingCheckpoint = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var checkpoint = await db.SyncCheckpoints.FindAsync([IngestionCheckpointKey], CancellationToken);
+            if (checkpoint != null)
+            {
+                db.SyncCheckpoints.Remove(checkpoint);
+                await db.SaveChangesAsync(CancellationToken);
+            }
+
+            _ingestionCheckpoint = null;
+            inj_snackbar.Add("采集检查点已重置", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"重置失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _resettingCheckpoint = false;
+        }
+    }
+
     private async Task Save()
     {
         if (string.IsNullOrWhiteSpace(_source.Name) ||
@@ -286,6 +464,17 @@ else
             string.IsNullOrWhiteSpace(_source.TimeField))
         {
             inj_snackbar.Add("请填写所有必填字段", Severity.Warning);
+            return;
+        }
+
+        _source.SourceType = IngestionService.NormalizeSourceType(_source.SourceType);
+        _source.DatabaseType = IngestionService.NormalizeDatabaseType(_source.DatabaseType, _source.SourceType);
+
+        if (IsDatabaseSource &&
+            (!_source.DatabaseResourceId.HasValue ||
+             string.IsNullOrWhiteSpace(_source.QuerySql)))
+        {
+            inj_snackbar.Add("数据库采集源必须选择数据库资源并填写 SQL 查询模板", Severity.Warning);
             return;
         }
 
@@ -313,16 +502,49 @@ else
 
         _saving = true;
 
-        // 序列化条件（过滤掉字段名为空的无效行）
-        var validConditions = _conditions.Where(c => !string.IsNullOrWhiteSpace(c.Column)).ToList();
-        _source.Conditions = validConditions.Count > 0
-            ? JsonSerializer.Serialize(validConditions.Select(c => new
+        if (IsDatabaseSource)
+        {
+            var resource = SelectedDatabaseResource;
+            if (resource == null)
             {
-                column = c.Column,
-                type = c.Type,
-                value = IsValueDisabled(c.Type) ? "" : c.Value
-            }))
-            : null;
+                inj_snackbar.Add("请选择有效的数据库资源", Severity.Warning);
+                return;
+            }
+
+            _source.DatabaseType = IngestionService.NormalizeDatabaseType(resource.DatabaseType);
+            _source.Conditions = null;
+            _source.ConnectionStringName = null;
+            _source.SqlServerHost = null;
+            _source.SqlServerDatabase = null;
+            _source.SqlServerUsername = null;
+            _source.SqlServerPassword = null;
+            _source.LookbackMinutes = Math.Max(0, _source.LookbackMinutes);
+            _source.SqlServerTrustCertificate = resource.TrustCertificate;
+        }
+        else
+        {
+            _source.DatabaseResourceId = null;
+            _source.DatabaseType = IngestionService.DatabaseTypeSqlServer;
+            _source.ConnectionStringName = null;
+            _source.SqlServerHost = null;
+            _source.SqlServerDatabase = null;
+            _source.SqlServerUsername = null;
+            _source.SqlServerPassword = null;
+            _source.SqlServerTrustCertificate = true;
+            _source.QuerySql = null;
+            _source.LookbackMinutes = Math.Max(0, _source.LookbackMinutes);
+
+            // 序列化条件（过滤掉字段名为空的无效行）
+            var validConditions = _conditions.Where(c => !string.IsNullOrWhiteSpace(c.Column)).ToList();
+            _source.Conditions = validConditions.Count > 0
+                ? JsonSerializer.Serialize(validConditions.Select(c => new
+                {
+                    column = c.Column,
+                    type = c.Type,
+                    value = IsValueDisabled(c.Type) ? "" : c.Value
+                }))
+                : null;
+        }
 
         try
         {
@@ -344,7 +566,18 @@ else
 
                 entity.Name = _source.Name;
                 entity.ServerCode = _source.ServerCode;
+                entity.SourceType = _source.SourceType;
+                entity.DatabaseResourceId = _source.DatabaseResourceId;
+                entity.DatabaseType = _source.DatabaseType;
+                entity.ConnectionStringName = _source.ConnectionStringName;
+                entity.SqlServerHost = _source.SqlServerHost;
+                entity.SqlServerDatabase = _source.SqlServerDatabase;
+                entity.SqlServerUsername = _source.SqlServerUsername;
+                entity.SqlServerPassword = _source.SqlServerPassword;
+                entity.SqlServerTrustCertificate = _source.SqlServerTrustCertificate;
+                entity.QuerySql = _source.QuerySql;
                 entity.TimeField = _source.TimeField;
+                entity.LookbackMinutes = _source.LookbackMinutes;
                 entity.PollingIntervalSeconds = _source.PollingIntervalSeconds;
                 entity.StartOffsetMinutes = _source.StartOffsetMinutes;
                 entity.EndOffsetMinutes = _source.EndOffsetMinutes;
@@ -394,5 +627,8 @@ else
 
     private static string GuessUnit(int minutes)
         => minutes % 60 == 0 ? UnitHours : UnitMinutes;
+
+    private static string FormatCheckpointTime(DateTime? value)
+        => value.HasValue ? value.Value.ToString("yyyy-MM-dd HH:mm:ss") : "尚未生成";
 
 }

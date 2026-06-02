@@ -1,5 +1,7 @@
 ﻿using System.Text.Json;
+using DataSync.CYYY.Data;
 using DataSync.CYYY.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace DataSync.CYYY.Services;
 
@@ -16,28 +18,34 @@ public class SyncOrchestrator
     private const string StageFailed = "失败";
 
     private readonly DataLakeClient _dataLakeClient;
+    private readonly DatabaseQueryService _databaseQueryService;
     private readonly PushServiceFactory _pushServiceFactory;
     private readonly ApiPushService _apiPushService;
     private readonly SyncLogService _logService;
     private readonly IngestionService _ingestionService;
     private readonly LocalQueryService _localQueryService;
+    private readonly IDbContextFactory<SyncDbContext> _dbFactory;
     private readonly ILogger<SyncOrchestrator> _logger;
 
     public SyncOrchestrator(
         DataLakeClient dataLakeClient,
+        DatabaseQueryService databaseQueryService,
         PushServiceFactory pushServiceFactory,
         ApiPushService apiPushService,
         SyncLogService logService,
         IngestionService ingestionService,
         LocalQueryService localQueryService,
+        IDbContextFactory<SyncDbContext> dbFactory,
         ILogger<SyncOrchestrator> logger)
     {
         _dataLakeClient = dataLakeClient;
+        _databaseQueryService = databaseQueryService;
         _pushServiceFactory = pushServiceFactory;
         _apiPushService = apiPushService;
         _logService = logService;
         _ingestionService = ingestionService;
         _localQueryService = localQueryService;
+        _dbFactory = dbFactory;
         _logger = logger;
     }
 
@@ -112,7 +120,7 @@ public class SyncOrchestrator
 
         var hisPatId = GetStringValue(triggerRecord, task.PatientIdField);
         var visitSn = task.VisitSnField != null ? GetStringValue(triggerRecord, task.VisitSnField) : null;
-        var patName = GetStringValue(triggerRecord, "PAT_NAME");
+        var patName = GetPatientName(triggerRecord);
         var payload = BuildTriggerPushPayload(payloadRecord ?? triggerRecord);
         if (payload.Count == 0)
             throw new InvalidOperationException("触发记录无可推送的业务字段");
@@ -487,7 +495,7 @@ public class SyncOrchestrator
     {
         var hisPatId = GetStringValue(triggerRecord, task.PatientIdField);
         var visitSn = task.VisitSnField != null ? GetStringValue(triggerRecord, task.VisitSnField) : null;
-        var patName = GetStringValue(triggerRecord, "PAT_NAME");
+        var patName = GetPatientName(triggerRecord);
         var pushService = _pushServiceFactory.GetPushService(task.PushType);
         var allInterfaceDetails = new List<InterfaceSyncDetail>();
         var patientSuccess = true;
@@ -623,6 +631,7 @@ public class SyncOrchestrator
                 Patient = new PatientSyncDetail
                 {
                     HisPatId = hisPatId,
+                    PatVisitSn = visitSn,
                     PatName = patName,
                     Success = patientSuccess,
                     Skipped = patientSkipped,
@@ -838,7 +847,7 @@ public class SyncOrchestrator
                 };
             }
 
-            var childDataMap = await QueryChildDataMapAsync(compositePlans, triggerRecord, skippedReasons, ct);
+            var childDataMap = await QueryChildDataMapAsync(compositePlans, triggerRecord, task, skippedReasons, ct);
             var payloads = new List<Dictionary<string, object>>();
 
             foreach (var plan in compositePlans)
@@ -954,6 +963,10 @@ public class SyncOrchestrator
         if (errorMessage.StartsWith("[数据湖查询]", StringComparison.Ordinal))
             return StageFetchFailed;
 
+        if (errorMessage.StartsWith("[数据库查询]", StringComparison.Ordinal) ||
+            errorMessage.StartsWith("[SQL查询]", StringComparison.Ordinal))
+            return StageFetchFailed;
+
         return errorMessage.StartsWith("[推送]", StringComparison.Ordinal)
             ? StagePushFailed
             : StageFailed;
@@ -977,11 +990,12 @@ public class SyncOrchestrator
             queryValue = iface.QueryField == task.PatientIdField ? hisPatId : (visitSn ?? hisPatId);
         }
 
-        return await QueryInterfaceDataAsync(iface, [queryValue], ct);
+        return await QueryInterfaceDataAsync(iface, task, [queryValue], ct);
     }
 
     private async Task<List<Dictionary<string, object>>> QueryInterfaceDataAsync(
         SyncTaskInterface iface,
+        SyncTask task,
         IReadOnlyCollection<string> queryValues,
         CancellationToken ct)
     {
@@ -996,10 +1010,25 @@ public class SyncOrchestrator
                 return [];
 
             var allData = new List<Dictionary<string, object>>();
+            var databaseConnection = IsDatabaseInterface(iface)
+                ? await ResolveDatabaseConnectionAsync(iface, task, ct)
+                : null;
             foreach (var chunk in validValues.Chunk(200))
             {
-                var conditions = BuildQueryConditions(iface, chunk);
-                var chunkData = await _dataLakeClient.QueryAllPagesAsync(iface.ServerCode, conditions, ct);
+                var chunkData = IsDatabaseInterface(iface)
+                    ? await _databaseQueryService.QueryByValuesAsync(
+                        databaseConnection!.DatabaseType,
+                        databaseConnection.ConnectionStringName,
+                        databaseConnection.Host,
+                        databaseConnection.Database,
+                        databaseConnection.Username,
+                        databaseConnection.Password,
+                        databaseConnection.TrustCertificate,
+                        iface.QuerySql ?? "",
+                        iface.QueryField,
+                        chunk,
+                        ct)
+                    : await _dataLakeClient.QueryAllPagesAsync(iface.ServerCode, BuildQueryConditions(iface, chunk), ct);
                 allData.AddRange(chunkData);
             }
 
@@ -1007,9 +1036,92 @@ public class SyncOrchestrator
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"[数据湖查询] {ex.Message}", ex);
+            var prefix = IsDatabaseInterface(iface) ? "[数据库查询]" : "[数据湖查询]";
+            throw new InvalidOperationException($"{prefix} {ex.Message}", ex);
         }
     }
+
+    private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDatabaseSourceType(iface.SourceType);
+
+    private async Task<DatabaseConnectionConfig> ResolveDatabaseConnectionAsync(
+        SyncTaskInterface iface,
+        SyncTask task,
+        CancellationToken ct)
+    {
+        var interfaceDatabaseType = IngestionService.NormalizeDatabaseType(iface.DatabaseType, iface.SourceType);
+        if (iface.DatabaseResourceId.HasValue)
+        {
+            var resource = await GetDatabaseResourceAsync(iface.DatabaseResourceId.Value, ct);
+            if (resource == null)
+                throw new InvalidOperationException($"数据库资源不存在：{iface.DatabaseResourceId.Value}");
+
+            return ToDatabaseConnectionConfig(resource);
+        }
+
+        if (HasInterfaceDatabaseConnection(iface) || !string.IsNullOrWhiteSpace(iface.ConnectionStringName))
+        {
+            return new DatabaseConnectionConfig(
+                interfaceDatabaseType,
+                iface.ConnectionStringName,
+                iface.SqlServerHost,
+                iface.SqlServerDatabase,
+                iface.SqlServerUsername,
+                iface.SqlServerPassword,
+                iface.SqlServerTrustCertificate);
+        }
+
+        var source = await _ingestionService.GetSourceByServerCodeAsync(task.TriggerServerCode, ct);
+        if (source == null)
+            return new DatabaseConnectionConfig(
+                interfaceDatabaseType,
+                null,
+                null,
+                null,
+                null,
+                null,
+                true);
+
+        if (source.DatabaseResource != null)
+            return ToDatabaseConnectionConfig(source.DatabaseResource);
+
+        var sourceDatabaseType = IngestionService.NormalizeDatabaseType(source.DatabaseType, source.SourceType);
+        if (!string.Equals(sourceDatabaseType, interfaceDatabaseType, StringComparison.OrdinalIgnoreCase))
+        {
+            return new DatabaseConnectionConfig(interfaceDatabaseType, null, null, null, null, null, true);
+        }
+
+        return new DatabaseConnectionConfig(
+            sourceDatabaseType,
+            source.ConnectionStringName,
+            source.SqlServerHost,
+            source.SqlServerDatabase,
+            source.SqlServerUsername,
+            source.SqlServerPassword,
+            source.SqlServerTrustCertificate);
+    }
+
+    private static bool HasInterfaceDatabaseConnection(SyncTaskInterface iface) =>
+        !string.IsNullOrWhiteSpace(iface.SqlServerHost) ||
+        !string.IsNullOrWhiteSpace(iface.SqlServerDatabase) ||
+        !string.IsNullOrWhiteSpace(iface.SqlServerUsername) ||
+        !string.IsNullOrWhiteSpace(iface.SqlServerPassword);
+
+    private async Task<DatabaseResource?> GetDatabaseResourceAsync(int id, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.DatabaseResources.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id, ct);
+    }
+
+    private static DatabaseConnectionConfig ToDatabaseConnectionConfig(DatabaseResource resource) =>
+        new(
+            IngestionService.NormalizeDatabaseType(resource.DatabaseType),
+            null,
+            resource.Host,
+            resource.DatabaseName,
+            resource.Username,
+            resource.Password,
+            resource.TrustCertificate);
 
     private List<DataLakeCondition> BuildQueryConditions(
         SyncTaskInterface iface,
@@ -1074,6 +1186,7 @@ public class SyncOrchestrator
     private async Task<Dictionary<string, List<Dictionary<string, object>>>> QueryChildDataMapAsync(
         List<CompositePlan> compositePlans,
         Dictionary<string, object> triggerRecord,
+        SyncTask task,
         List<string> skippedReasons,
         CancellationToken ct)
     {
@@ -1087,7 +1200,7 @@ public class SyncOrchestrator
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var childData = await QueryChildInterfaceDataAsync(childInterface, queryValues, skippedReasons, ct);
+            var childData = await QueryChildInterfaceDataAsync(childInterface, task, queryValues, skippedReasons, ct);
             if (childData.Count > 0)
                 InjectTriggerFields(childData, triggerRecord, childInterface.InjectFields);
 
@@ -1113,13 +1226,14 @@ public class SyncOrchestrator
 
     private async Task<List<Dictionary<string, object>>> QueryChildInterfaceDataAsync(
         SyncTaskInterface childInterface,
+        SyncTask task,
         List<string> queryValues,
         List<string> skippedReasons,
         CancellationToken ct)
     {
         try
         {
-            return await QueryInterfaceDataAsync(childInterface, queryValues, ct);
+            return await QueryInterfaceDataAsync(childInterface, task, queryValues, ct);
         }
         catch (Exception ex) when (queryValues.Count > 1 && !ct.IsCancellationRequested)
         {
@@ -1130,7 +1244,7 @@ public class SyncOrchestrator
             {
                 try
                 {
-                    result.AddRange(await QueryInterfaceDataAsync(childInterface, [value], ct));
+                    result.AddRange(await QueryInterfaceDataAsync(childInterface, task, [value], ct));
                 }
                 catch (Exception itemEx) when (!ct.IsCancellationRequested)
                 {
@@ -1429,6 +1543,14 @@ public class SyncOrchestrator
         };
     }
 
+    private static string GetPatientName(Dictionary<string, object> record)
+    {
+        var patName = GetStringValue(record, "PAT_NAME");
+        return string.IsNullOrWhiteSpace(patName)
+            ? GetStringValue(record, "PATIENT_NAME")
+            : patName;
+    }
+
     private sealed class CompositePlan
     {
         public SyncTaskInterface ChildInterface { get; init; } = default!;
@@ -1441,6 +1563,15 @@ public class SyncOrchestrator
         public InterfaceExecutionStatus Status { get; init; }
         public InterfaceSyncDetail Detail { get; init; } = new();
     }
+
+    private sealed record DatabaseConnectionConfig(
+        string DatabaseType,
+        string? ConnectionStringName,
+        string? Host,
+        string? Database,
+        string? Username,
+        string? Password,
+        bool TrustCertificate);
 
     private enum InterfaceExecutionStatus
     {

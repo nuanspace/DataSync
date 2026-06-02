@@ -65,6 +65,7 @@
                 <MudIconButton Icon="@Icons.Material.Filled.Close"
                                Size="Size.Small"
                                OnClick="@(() => _dialogVisible = false)"
+                               Disabled="_saving"
                                Class="interface-config-modal-close" />
             </div>
             <div class="@(_hasSampleJson ? "interface-config-modal-body interface-config-modal-body-split" : "interface-config-modal-body")">
@@ -116,8 +117,10 @@
                 }
             </div>
             <div class="interface-config-modal-actions">
-                <MudButton OnClick="@(() => _dialogVisible = false)">取消</MudButton>
-                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save">保存</MudButton>
+                <MudButton OnClick="@(() => _dialogVisible = false)" Disabled="_saving">取消</MudButton>
+                <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="Save" Disabled="_saving">
+                    @(_saving ? "保存中..." : "保存")
+                </MudButton>
             </div>
         </div>
     </div>
@@ -137,6 +140,7 @@
     private bool _loading = true;
     private bool _dialogVisible;
     private bool _isNew;
+    private bool _saving;
     private bool _projectDocumentsVisible;
 
     // 接口级过滤规则
@@ -642,6 +646,7 @@
             TranName = Truncate(message.TranName, 100),
             SampleJson = sampleToken.ToString(Newtonsoft.Json.Formatting.Indented),
             IntegrationProjectCode = CurrentIntegrationProjectCode,
+            SortOrder = GetNextSortOrder(),
         };
         _editFilterRules = [];
         _editMatchRules = [];
@@ -663,6 +668,7 @@
             IsEnabled = true,
             ReceiveMode = ReceiveMode.PersistAndAsync,
             IntegrationProjectCode = CurrentIntegrationProjectCode,
+            SortOrder = GetNextSortOrder(),
         };
         _editFilterRules = [];
         _editMatchRules = [];
@@ -672,6 +678,18 @@
         _isNew = true;
         _dialogVisible = true;
         await LoadEventTypesAsync();
+    }
+
+    private int GetNextSortOrder()
+        => _items.Count == 0 ? 1 : _items.Max(item => item.SortOrder) + 1;
+
+    private async Task<int> GetNextSortOrderAsync(DataSyncDbContext db)
+    {
+        var maxSortOrder = await ApplyCurrentProjectScope(db.EsbInterfaceConfigs)
+            .Select(item => (int?)item.SortOrder)
+            .MaxAsync();
+
+        return (maxSortOrder ?? 0) + 1;
     }
 
     private async Task Edit(EsbInterfaceConfig item)
@@ -1044,26 +1062,34 @@
 
     private async Task Save()
     {
+        if (_saving)
+            return;
+
         if (_editItem == null || string.IsNullOrWhiteSpace(_editItem.TranCode))
         {
             inj_snackbar.Add("事件代码不能为空", Severity.Warning);
             return;
         }
 
-        // 启用时校验关键路径
-        if (_editItem.IsEnabled)
-        {
-            var errors = ConfigSvc.ValidateInterfaceConfig(_editItem);
-            if (errors.Count > 0)
-            {
-                foreach (var err in errors)
-                    inj_snackbar.Add(err, Severity.Error);
-                return;
-            }
-        }
+        _saving = true;
+        var saveWasNew = _isNew;
+        var savedTranCode = _editItem.TranCode;
+        var openWizardAfterSave = false;
 
         try
         {
+            // 启用时校验关键路径
+            if (_editItem.IsEnabled)
+            {
+                var errors = ConfigSvc.ValidateInterfaceConfig(_editItem);
+                if (errors.Count > 0)
+                {
+                    foreach (var err in errors)
+                        inj_snackbar.Add(err, Severity.Error);
+                    return;
+                }
+            }
+
             if (_editItem.HandlerType != HandlerType.Custom)
                 _editItem.HandlerName = null;
 
@@ -1093,10 +1119,14 @@
                 part.SourcePath = NormalizePickedPath(part.SourcePath);
 
             await using var db = await ContextFactory.CreateDbContextAsync();
+            await using var transaction = await db.Database.BeginTransactionAsync();
 
             if (_isNew)
             {
+                _editItem.Id = 0;
                 _editItem.IntegrationProjectCode ??= CurrentIntegrationProjectCode;
+                if (_editItem.SortOrder <= 0)
+                    _editItem.SortOrder = await GetNextSortOrderAsync(db);
                 db.EsbInterfaceConfigs.Add(_editItem);
             }
             else
@@ -1134,31 +1164,41 @@
             await SyncMatchRulesAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
             await SyncIdempotentKeyPartsAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
 
-            var savedTranCode = _editItem.TranCode;
-            var openWizardAfterSave = _openWizardAfterCreateFromMessageSave;
-            ConfigSvc.ClearCache();
-            _dialogVisible = false;
-            _openWizardAfterCreateFromMessageSave = false;
-            inj_snackbar.Add("保存成功", Severity.Success);
-            await LoadDataAsync();
-
-            if (openWizardAfterSave)
-            {
-                var confirmed = await inj_dialogService.ShowMessageBox(
-                    "继续配置工作台",
-                    "接口配置已创建，是否进入接口配置工作台继续配置？",
-                    yesText: "进入工作台",
-                    cancelText: "暂不进入");
-
-                if (confirmed == true)
-                {
-                    inj_navigationManager.NavigateTo($"/config/wizard?tranCode={Uri.EscapeDataString(savedTranCode)}");
-                }
-            }
+            await transaction.CommitAsync();
+            _isNew = false;
+            savedTranCode = _editItem.TranCode;
+            openWizardAfterSave = _openWizardAfterCreateFromMessageSave;
         }
         catch (Exception ex)
         {
+            if (saveWasNew && _editItem != null)
+                _editItem.Id = 0;
             inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+            return;
+        }
+        finally
+        {
+            _saving = false;
+        }
+
+        ConfigSvc.ClearCache();
+        _dialogVisible = false;
+        _openWizardAfterCreateFromMessageSave = false;
+        inj_snackbar.Add("保存成功", Severity.Success);
+        await LoadDataAsync();
+
+        if (openWizardAfterSave)
+        {
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "继续配置工作台",
+                "接口配置已创建，是否进入接口配置工作台继续配置？",
+                yesText: "进入工作台",
+                cancelText: "暂不进入");
+
+            if (confirmed == true)
+            {
+                inj_navigationManager.NavigateTo($"/config/wizard?tranCode={Uri.EscapeDataString(savedTranCode)}");
+            }
         }
     }
 
@@ -1211,6 +1251,8 @@
                 EventStartTimeSourcePath = Truncate(result.EventStartTimeSourcePath, 500),
                 Description = Truncate(result.Description, 500),
                 SampleJson = _aiSampleJson,
+                IntegrationProjectCode = CurrentIntegrationProjectCode,
+                SortOrder = GetNextSortOrder(),
             };
             _editFilterRules = [];
             _editMatchRules = [];

@@ -26,6 +26,63 @@ public class SyncTaskInterface
     public string DisplayName { get; set; } = "";
 
     /// <summary>
+    /// 查询来源类型：DataLake / Database
+    /// </summary>
+    [Column("source_type")]
+    public string SourceType { get; set; } = "DataLake";
+
+    [Column("database_resource_id")]
+    public int? DatabaseResourceId { get; set; }
+
+    /// <summary>
+    /// 数据库类型：SqlServer / Oracle。
+    /// </summary>
+    [Column("database_type")]
+    public string? DatabaseType { get; set; } = "SqlServer";
+
+    /// <summary>
+    /// 数据库连接串名称或完整连接串。
+    /// </summary>
+    [Column("connection_string_name")]
+    public string? ConnectionStringName { get; set; }
+
+    /// <summary>
+    /// 数据库主机，可包含端口、实例名或 Oracle 服务名。
+    /// </summary>
+    [Column("sql_server_host")]
+    public string? SqlServerHost { get; set; }
+
+    /// <summary>
+    /// 数据库名或 Oracle 服务名。
+    /// </summary>
+    [Column("sql_server_database")]
+    public string? SqlServerDatabase { get; set; }
+
+    /// <summary>
+    /// 数据库用户名。
+    /// </summary>
+    [Column("sql_server_username")]
+    public string? SqlServerUsername { get; set; }
+
+    /// <summary>
+    /// 数据库密码。
+    /// </summary>
+    [Column("sql_server_password")]
+    public string? SqlServerPassword { get; set; }
+
+    /// <summary>
+    /// 是否信任 SQL Server 证书。
+    /// </summary>
+    [Column("sql_server_trust_certificate")]
+    public bool SqlServerTrustCertificate { get; set; } = true;
+
+    /// <summary>
+    /// 数据库查询模板，支持 @queryValue，Oracle 也可写 :queryValue。
+    /// </summary>
+    [Column("query_sql")]
+    public string? QuerySql { get; set; }
+
+    /// <summary>
     /// 查询条件字段名，如 HIS_PAT_ID 或 PAT_VISIT_SN
     /// </summary>
     [Column("query_field")]
@@ -125,4 +182,7 @@ public class SyncTaskInterface
 
     [ForeignKey(nameof(TaskId))]
     public SyncTask? Task { get; set; }
+
+    [ForeignKey(nameof(DatabaseResourceId))]
+    public DatabaseResource? DatabaseResource { get; set; }
 }

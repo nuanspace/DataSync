@@ -11,10 +11,16 @@ namespace DataSync.CYYY.Services;
 /// </summary>
 public class IngestionService
 {
-    private const int CheckpointLookbackMinutes = 5;
     private const int UpsertBatchSize = 200;
+    public const string SourceTypeDataLake = "DataLake";
+    public const string SourceTypeDatabase = "Database";
+    public const string SourceTypeSqlServer = "SqlServer";
+    public const string SourceTypeOracle = "Oracle";
+    public const string DatabaseTypeSqlServer = "SqlServer";
+    public const string DatabaseTypeOracle = "Oracle";
 
     private readonly DataLakeClient _dataLakeClient;
+    private readonly DatabaseQueryService _databaseQueryService;
     private readonly PendingSyncService _pendingSyncService;
     private readonly SyncTaskSignalService _syncTaskSignalService;
     private readonly SyncLogService _logService;
@@ -39,6 +45,7 @@ public class IngestionService
 
     public IngestionService(
         DataLakeClient dataLakeClient,
+        DatabaseQueryService databaseQueryService,
         PendingSyncService pendingSyncService,
         SyncTaskSignalService syncTaskSignalService,
         SyncLogService logService,
@@ -47,6 +54,7 @@ public class IngestionService
         ILogger<IngestionService> logger)
     {
         _dataLakeClient = dataLakeClient;
+        _databaseQueryService = databaseQueryService;
         _pendingSyncService = pendingSyncService;
         _syncTaskSignalService = syncTaskSignalService;
         _logService = logService;
@@ -62,7 +70,10 @@ public class IngestionService
     public async Task<List<IngestionSource>> GetEnabledSourcesAsync(CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.IngestionSources.Where(s => s.Enabled).ToListAsync(ct);
+        return await db.IngestionSources
+            .Include(s => s.DatabaseResource)
+            .Where(s => s.Enabled)
+            .ToListAsync(ct);
     }
 
     /// <summary>
@@ -71,7 +82,9 @@ public class IngestionService
     public async Task<IngestionSource?> GetSourceByServerCodeAsync(string serverCode, CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.IngestionSources.FirstOrDefaultAsync(s => s.ServerCode == serverCode, ct);
+        return await db.IngestionSources
+            .Include(s => s.DatabaseResource)
+            .FirstOrDefaultAsync(s => s.ServerCode == serverCode, ct);
     }
 
     /// <summary>
@@ -83,8 +96,9 @@ public class IngestionService
         var to = DateTime.Now.AddMinutes(-source.EndOffsetMinutes);
         var fallbackFrom = DateTime.Now.AddMinutes(-source.StartOffsetMinutes);
         var checkpoint = await _logService.GetCheckpointAsync(checkpointKey, ct);
+        var lookbackMinutes = Math.Max(0, source.LookbackMinutes);
         var from = checkpoint.HasValue
-            ? checkpoint.Value.AddMinutes(-CheckpointLookbackMinutes)
+            ? checkpoint.Value.AddMinutes(-lookbackMinutes)
             : fallbackFrom;
 
         if (from > to)
@@ -114,7 +128,10 @@ public class IngestionService
         IngestionSource source,
         List<DataLakeCondition> conditions,
         CancellationToken ct)
-        => await IngestCoreAsync(source, conditions, "Backfill", null, null, ct);
+    {
+        var (from, to) = ExtractTimeRange(source, conditions);
+        return await IngestCoreAsync(source, conditions, "Backfill", from, to, ct);
+    }
 
     /// <summary>
     /// 核心采集流程：合并额外条件、查询数据湖、写本地表，并记录采集日志。
@@ -149,25 +166,89 @@ public class IngestionService
             _logger.LogDebug("采集 [{Name}] 查询条件: {Conditions}", source.Name, conditionsJson);
 
             var notifiedTaskCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var queryResult = await _dataLakeClient.QueryPagesAsync(
-                source.ServerCode,
-                mergedConditions,
-                async (records, currentPageNo) =>
+            if (IsDatabaseSource(source))
+            {
+                var databaseResource = source.DatabaseResource;
+                var databaseType = NormalizeDatabaseType(databaseResource?.DatabaseType ?? source.DatabaseType, source.SourceType);
+                var host = databaseResource?.Host ?? source.SqlServerHost;
+                var database = databaseResource?.DatabaseName ?? source.SqlServerDatabase;
+                var username = databaseResource?.Username ?? source.SqlServerUsername;
+                var password = databaseResource?.Password ?? source.SqlServerPassword;
+                var trustCertificate = databaseResource?.TrustCertificate ?? source.SqlServerTrustCertificate;
+
+                List<Dictionary<string, object>> records;
+                if (from.HasValue && to.HasValue)
                 {
-                    pageCount = currentPageNo;
+                    records = await _databaseQueryService.QueryByTimeRangeAsync(
+                        databaseType,
+                        source.ConnectionStringName,
+                        host,
+                        database,
+                        username,
+                        password,
+                        trustCertificate,
+                        source.QuerySql ?? "",
+                        from.Value,
+                        to.Value,
+                        ct);
+                }
+                else if (TryExtractValueCondition(source, mergedConditions, out var queryField, out var values))
+                {
+                    records = await _databaseQueryService.QueryByValuesAsync(
+                        databaseType,
+                        source.ConnectionStringName,
+                        host,
+                        database,
+                        username,
+                        password,
+                        trustCertificate,
+                        source.QuerySql ?? "",
+                        queryField,
+                        values,
+                        ct);
+                }
+                else
+                {
+                    throw new InvalidOperationException("数据库采集必须提供时间范围，或提供 eq/in 字段条件用于按值补录");
+                }
+
+                apiCount = records.Count;
+                pageCount = records.Count > 0 ? 1 : 0;
+
+                if (records.Count > 0)
+                {
                     await UpsertToLocalAsync(source, records, ct);
 
-                    if (triggerType != "Scheduled")
-                        return;
+                    if (triggerType == "Scheduled")
+                    {
+                        var taskCodes = await _pendingSyncService.EnqueueForIngestedRecordsAsync(source, records, ct);
+                        foreach (var taskCode in taskCodes)
+                            notifiedTaskCodes.Add(taskCode);
+                    }
+                }
+            }
+            else
+            {
+                var queryResult = await _dataLakeClient.QueryPagesAsync(
+                    source.ServerCode,
+                    mergedConditions,
+                    async (records, currentPageNo) =>
+                    {
+                        pageCount = currentPageNo;
+                        await UpsertToLocalAsync(source, records, ct);
 
-                    var taskCodes = await _pendingSyncService.EnqueueForIngestedRecordsAsync(source, records, ct);
-                    foreach (var taskCode in taskCodes)
-                        notifiedTaskCodes.Add(taskCode);
-                },
-                ct);
+                        if (triggerType != "Scheduled")
+                            return;
 
-            apiCount = queryResult.TotalCount;
-            pageCount = queryResult.PageCount;
+                        var taskCodes = await _pendingSyncService.EnqueueForIngestedRecordsAsync(source, records, ct);
+                        foreach (var taskCode in taskCodes)
+                            notifiedTaskCodes.Add(taskCode);
+                    },
+                    ct);
+
+                apiCount = queryResult.TotalCount;
+                pageCount = queryResult.PageCount;
+            }
 
             if (apiCount > 0)
             {
@@ -245,7 +326,125 @@ public class IngestionService
     /// 规则：cyyy.dl_ + ServerCode 转小写并将 '-' 替换为 '_'
     /// </summary>
     public static string GetLocalTableName(string serverCode)
-        => $"cyyy.dl_{serverCode.ToLower().Replace('-', '_')}";
+        => $"cyyy.dl_{string.Concat(serverCode.ToLowerInvariant().Select(c => char.IsLetterOrDigit(c) ? c : '_'))}";
+
+    public static bool IsDatabaseSource(IngestionSource source) =>
+        IsDatabaseSourceType(source.SourceType);
+
+    public static bool IsSqlServerSource(IngestionSource source) =>
+        IsDatabaseSource(source) &&
+        IsSqlServerDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
+
+    public static bool IsOracleSource(IngestionSource source) =>
+        IsDatabaseSource(source) &&
+        IsOracleDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
+
+    public static bool IsDatabaseSourceType(string? sourceType) =>
+        string.Equals(sourceType, SourceTypeDatabase, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, SourceTypeSqlServer, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, SourceTypeOracle, StringComparison.OrdinalIgnoreCase);
+
+    public static string NormalizeSourceType(string? sourceType) =>
+        IsDatabaseSourceType(sourceType) ? SourceTypeDatabase : SourceTypeDataLake;
+
+    public static string NormalizeDatabaseType(string? databaseType, string? sourceType = null)
+    {
+        if (string.Equals(sourceType, SourceTypeOracle, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(databaseType, DatabaseTypeOracle, StringComparison.OrdinalIgnoreCase))
+        {
+            return DatabaseTypeOracle;
+        }
+
+        return DatabaseTypeSqlServer;
+    }
+
+    public static bool IsSqlServerDatabaseType(string? databaseType) =>
+        string.Equals(NormalizeDatabaseType(databaseType), DatabaseTypeSqlServer, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsOracleDatabaseType(string? databaseType) =>
+        string.Equals(NormalizeDatabaseType(databaseType), DatabaseTypeOracle, StringComparison.OrdinalIgnoreCase);
+
+    private static (DateTime? From, DateTime? To) ExtractTimeRange(
+        IngestionSource source,
+        IReadOnlyCollection<DataLakeCondition> conditions)
+    {
+        DateTime? from = null;
+        DateTime? to = null;
+        foreach (var condition in conditions)
+        {
+            if (!string.Equals(condition.Column, source.TimeField, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var text = condition.Value?.ToString();
+            if (!DateTime.TryParse(text, out var value))
+                continue;
+
+            if (condition.Type is "ge" or "gt")
+                from = value;
+            else if (condition.Type is "le" or "lt")
+                to = value;
+        }
+
+        return (from, to);
+    }
+
+    private static bool TryExtractValueCondition(
+        IngestionSource source,
+        IEnumerable<DataLakeCondition> conditions,
+        out string queryField,
+        out List<string> values)
+    {
+        queryField = "";
+        values = [];
+
+        foreach (var condition in conditions)
+        {
+            if (string.IsNullOrWhiteSpace(condition.Column) ||
+                string.Equals(condition.Column, source.TimeField, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!condition.Type.Equals("eq", StringComparison.OrdinalIgnoreCase) &&
+                !condition.Type.Equals("in", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var parsedValues = SplitConditionValues(condition.Value);
+            if (parsedValues.Count == 0)
+                continue;
+
+            queryField = condition.Column;
+            values = parsedValues;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static List<string> SplitConditionValues(object? value)
+    {
+        if (value is JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                return element.EnumerateArray()
+                    .Select(item => item.ToString())
+                    .Where(text => !string.IsNullOrWhiteSpace(text))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            value = element.ToString();
+        }
+
+        return (value?.ToString() ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     /// <summary>
     /// 获取本地采集表记录数。

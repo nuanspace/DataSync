@@ -2,6 +2,27 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.ingestion-edit-layout {
+    display: grid;
+    grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+    align-items: start;
+}
+
+.ingestion-edit-column {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-width: 0;
+}
+
+.ingestion-edit-panel {
+    border-radius: 8px;
 }
 
 .ingestion-edit-actions {
@@ -16,6 +37,31 @@
     align-items: center;
 }
 
+.checkpoint-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.checkpoint-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: baseline;
+}
+
+.checkpoint-row span {
+    color: var(--mud-palette-text-secondary);
+    flex: 0 0 auto;
+}
+
+.checkpoint-row strong {
+    font-family: monospace;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+
 .pk-section {
     display: flex;
     flex-direction: column;
@@ -25,10 +71,12 @@
 .pk-input-row {
     display: flex;
     align-items: flex-start;
+    gap: 8px;
 }
 
 .pk-input {
-    max-width: 360px;
+    flex: 1;
+    min-width: 0;
 }
 
 .pk-add-btn {
@@ -40,4 +88,35 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
+}
+
+@media (max-width: 960px) {
+    .ingestion-edit-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 600px) {
+    .ingestion-edit-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .pk-input-row {
+        flex-direction: column;
+    }
+
+    .checkpoint-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .checkpoint-row strong {
+        text-align: left;
+    }
+
+    .pk-add-btn {
+        margin-left: 0 !important;
+        width: 100%;
+    }
 }

@@ -1,0 +1,355 @@
+@page "/database-resources"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>数据库资源</PageTitle>
+
+<div class="database-resource-toolbar">
+    <MudText Typo="Typo.h5">数据库资源</MudText>
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+               OnClick="CreateNew">
+        新增资源
+    </MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+}
+else
+{
+    <MudGrid Class="mt-4" Spacing="3">
+        <MudItem xs="12" md="5">
+            <MudPaper Class="database-resource-panel" Elevation="1">
+                <MudText Typo="Typo.h6" Class="mb-3">@(_editing.Id > 0 ? "编辑资源" : "新增资源")</MudText>
+                <MudGrid>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_editing.Name" Label="名称" Required="true" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudSelect T="string" @bind-Value="_editing.DatabaseType" Label="数据库类型" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@(IngestionService.DatabaseTypeSqlServer)">SqlServer</MudSelectItem>
+                            <MudSelectItem Value="@(IngestionService.DatabaseTypeOracle)">Oracle</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editing.Host"
+                                      Label="@DatabaseHostLabel"
+                                      HelperText="@DatabaseHostHelperText"
+                                      Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editing.DatabaseName"
+                                      Label="@DatabaseNameLabel"
+                                      Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editing.Username" Label="用户名" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editing.Password"
+                                      Label="密码"
+                                      InputType="InputType.Password"
+                                      Variant="Variant.Outlined" />
+                    </MudItem>
+                    @if (IsSqlServerDatabase)
+                    {
+                        <MudItem xs="12" sm="6" Class="d-flex align-center">
+                            <MudCheckBox T="bool" @bind-Value="_editing.TrustCertificate" Label="信任服务器证书" />
+                        </MudItem>
+                    }
+                </MudGrid>
+
+                <div class="database-resource-actions">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                               OnClick="Save" Disabled="_saving">
+                        @(_saving ? "保存中..." : "保存")
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.NetworkCheck"
+                               OnClick="TestConnection" Disabled="@(_testing || _saving)">
+                        @(_testing ? "测试中..." : "测试连接")
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" OnClick="CreateNew">
+                        取消
+                    </MudButton>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudTable Items="_resources" Hover="true" Striped="true" Dense="true">
+                <HeaderContent>
+                    <MudTh>名称</MudTh>
+                    <MudTh>类型</MudTh>
+                    <MudTh>地址</MudTh>
+                    <MudTh>用户</MudTh>
+                    <MudTh>引用</MudTh>
+                    <MudTh>操作</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="名称">@context.Name</MudTd>
+                    <MudTd DataLabel="类型">
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.DatabaseType</MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="地址">@GetResourceEndpoint(context)</MudTd>
+                    <MudTd DataLabel="用户">@context.Username</MudTd>
+                    <MudTd DataLabel="引用">@GetReferenceCount(context.Id)</MudTd>
+                    <MudTd DataLabel="操作">
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" Color="Color.Primary"
+                                       OnClick="@(() => Edit(context))" />
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => Delete(context))" />
+                    </MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText>暂无数据库资源</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private List<DatabaseResource> _resources = [];
+    private Dictionary<int, int> _referenceCounts = [];
+    private DatabaseResource _editing = NewResource();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+
+    private bool IsSqlServerDatabase =>
+        IngestionService.IsSqlServerDatabaseType(_editing.DatabaseType);
+
+    private bool IsOracleDatabase =>
+        IngestionService.IsOracleDatabaseType(_editing.DatabaseType);
+
+    private string DatabaseHostLabel => IsOracleDatabase ? "Oracle 主机" : "SQL Server 主机";
+
+    private string DatabaseNameLabel => IsOracleDatabase ? "服务名" : "数据库";
+
+    private string DatabaseHostHelperText => IsOracleDatabase
+        ? "可填写主机或 host:port，端口默认 1521"
+        : "可包含端口或实例名";
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadResources();
+    }
+
+    private async Task LoadResources()
+    {
+        _loading = true;
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _resources = await db.DatabaseResources
+            .AsNoTracking()
+            .OrderBy(r => r.Name)
+            .ToListAsync(CancellationToken);
+
+        var ingestionRefs = await db.IngestionSources
+            .Where(s => s.DatabaseResourceId != null)
+            .GroupBy(s => s.DatabaseResourceId!.Value)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToListAsync(CancellationToken);
+        var interfaceRefs = await db.SyncTaskInterfaces
+            .Where(i => i.DatabaseResourceId != null)
+            .GroupBy(i => i.DatabaseResourceId!.Value)
+            .Select(g => new { Id = g.Key, Count = g.Count() })
+            .ToListAsync(CancellationToken);
+
+        _referenceCounts = ingestionRefs
+            .Concat(interfaceRefs)
+            .GroupBy(x => x.Id)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Count));
+        _loading = false;
+    }
+
+    private static DatabaseResource NewResource() => new()
+    {
+        DatabaseType = IngestionService.DatabaseTypeSqlServer,
+        TrustCertificate = true
+    };
+
+    private void CreateNew()
+    {
+        _editing = NewResource();
+    }
+
+    private void Edit(DatabaseResource resource)
+    {
+        _editing = new DatabaseResource
+        {
+            Id = resource.Id,
+            Name = resource.Name,
+            DatabaseType = resource.DatabaseType,
+            Host = resource.Host,
+            DatabaseName = resource.DatabaseName,
+            Username = resource.Username,
+            Password = resource.Password,
+            TrustCertificate = resource.TrustCertificate,
+            CreatedAt = resource.CreatedAt,
+            UpdatedAt = resource.UpdatedAt
+        };
+    }
+
+    private async Task TestConnection()
+    {
+        NormalizeEditing();
+        if (!Validate(false))
+            return;
+
+        _testing = true;
+        try
+        {
+            await inj_databaseQueryService.TestConnectionAsync(
+                _editing.DatabaseType,
+                null,
+                _editing.Host,
+                _editing.DatabaseName,
+                _editing.Username,
+                _editing.Password,
+                _editing.TrustCertificate,
+                CancellationToken);
+            inj_snackbar.Add("连接测试成功", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"连接测试失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        NormalizeEditing();
+        if (!Validate())
+            return;
+
+        _saving = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var nameExists = await db.DatabaseResources
+                .AnyAsync(r => r.Name == _editing.Name && r.Id != _editing.Id, CancellationToken);
+            if (nameExists)
+            {
+                inj_snackbar.Add($"名称「{_editing.Name}」已存在", Severity.Warning);
+                return;
+            }
+
+            if (_editing.Id > 0)
+            {
+                var entity = await db.DatabaseResources.FindAsync([_editing.Id], CancellationToken);
+                if (entity is null)
+                {
+                    inj_snackbar.Add("数据库资源不存在", Severity.Error);
+                    return;
+                }
+
+                entity.Name = _editing.Name;
+                entity.DatabaseType = _editing.DatabaseType;
+                entity.Host = _editing.Host;
+                entity.DatabaseName = _editing.DatabaseName;
+                entity.Username = _editing.Username;
+                entity.Password = _editing.Password;
+                entity.TrustCertificate = _editing.TrustCertificate;
+                entity.UpdatedAt = DateTime.Now;
+            }
+            else
+            {
+                _editing.CreatedAt = DateTime.Now;
+                _editing.UpdatedAt = DateTime.Now;
+                db.DatabaseResources.Add(_editing);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add("数据库资源已保存", Severity.Success);
+            CreateNew();
+            await LoadResources();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Delete(DatabaseResource resource)
+    {
+        if (GetReferenceCount(resource.Id) > 0)
+        {
+            inj_snackbar.Add("该数据库资源已被采集源或同步接口引用，不能删除", Severity.Warning);
+            return;
+        }
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除数据库资源「{resource.Name}」吗？",
+            yesText: "删除",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.DatabaseResources.FindAsync([resource.Id], CancellationToken);
+            if (entity is null)
+                return;
+
+            var referenced = await db.IngestionSources.AnyAsync(s => s.DatabaseResourceId == resource.Id, CancellationToken)
+                || await db.SyncTaskInterfaces.AnyAsync(i => i.DatabaseResourceId == resource.Id, CancellationToken);
+            if (referenced)
+            {
+                inj_snackbar.Add("该数据库资源已被引用，不能删除", Severity.Warning);
+                await LoadResources();
+                return;
+            }
+
+            db.DatabaseResources.Remove(entity);
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add("数据库资源已删除", Severity.Success);
+            await LoadResources();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"删除失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private void NormalizeEditing()
+    {
+        _editing.Name = _editing.Name.Trim();
+        _editing.DatabaseType = IngestionService.NormalizeDatabaseType(_editing.DatabaseType);
+        _editing.Host = _editing.Host.Trim();
+        _editing.DatabaseName = _editing.DatabaseName.Trim();
+        _editing.Username = _editing.Username.Trim();
+        if (IsOracleDatabase)
+            _editing.TrustCertificate = true;
+    }
+
+    private bool Validate(bool requireName = true)
+    {
+        if ((requireName && string.IsNullOrWhiteSpace(_editing.Name)) ||
+            string.IsNullOrWhiteSpace(_editing.Host) ||
+            string.IsNullOrWhiteSpace(_editing.DatabaseName) ||
+            string.IsNullOrWhiteSpace(_editing.Username))
+        {
+            inj_snackbar.Add(requireName ? "请填写名称、主机、数据库和用户名" : "请填写主机、数据库和用户名", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private int GetReferenceCount(int id) =>
+        _referenceCounts.TryGetValue(id, out var count) ? count : 0;
+
+    private static string GetResourceEndpoint(DatabaseResource resource) =>
+        $"{resource.Host}/{resource.DatabaseName}";
+}

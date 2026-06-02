@@ -1,0 +1,17 @@
+.database-resource-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.database-resource-panel {
+    padding: 16px;
+}
+
+.database-resource-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+}

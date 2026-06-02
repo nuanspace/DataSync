@@ -31,13 +31,11 @@ public class IngestionWorker : BackgroundService
     {
         // 等待数据湖配置就绪
         {
-            using var scope = _scopeFactory.CreateScope();
-            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    if (await dlClient.HasConfigAsync(stoppingToken))
+                    if (await CanStartWithoutWaitingDataLakeAsync(stoppingToken))
                         break;
                 }
                 catch (Exception ex)
@@ -179,5 +177,17 @@ public class IngestionWorker : BackgroundService
         }
 
         _logger.LogInformation("采集源 [{ServerCode}] 轮询循环已停止", serverCode);
+    }
+
+    private async Task<bool> CanStartWithoutWaitingDataLakeAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var ingestionService = scope.ServiceProvider.GetRequiredService<IngestionService>();
+        var sources = await ingestionService.GetEnabledSourcesAsync(ct);
+        if (sources.Count == 0 || sources.All(IngestionService.IsDatabaseSource))
+            return true;
+
+        var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
+        return await dlClient.HasConfigAsync(ct);
     }
 }
