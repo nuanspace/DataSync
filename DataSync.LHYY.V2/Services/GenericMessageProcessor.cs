@@ -208,7 +208,8 @@ public class GenericMessageProcessor
                     var questionId = questionValue.QuestionId;
                     if (!formQuestionDict.TryGetValue(questionId, out var question))
                     {
-                        return ProcessResult.Fail($"QuestionId {questionId} 不在当前 FormSet 中，请重新绑定映射");
+                        _logger.LogWarning("QuestionId {QuestionId} 不在当前 FormSet 中，已跳过写入", questionId);
+                        continue;
                     }
 
                     if (ShouldSkipQuestionValue(question, questionValue, _logger))
@@ -257,7 +258,10 @@ public class GenericMessageProcessor
                             {
                                 var questionId = questionValue.QuestionId;
                                 if (!formQuestionDict.TryGetValue(questionId, out var subQuestion))
-                                    return ProcessResult.Fail($"SubCard QuestionId {questionId} 不在当前 FormSet 中，请重新绑定映射");
+                                {
+                                    _logger.LogWarning("SubCard QuestionId {QuestionId} 不在当前 FormSet 中，已跳过写入", questionId);
+                                    continue;
+                                }
 
                                 if (ShouldSkipQuestionValue(subQuestion, questionValue, _logger))
                                     continue;
@@ -354,7 +358,10 @@ public class GenericMessageProcessor
             {
                 var questionId = questionValue.QuestionId;
                 if (!formQuestionDict.TryGetValue(questionId, out var question))
-                    return ProcessResult.Fail($"QuestionId {questionId} 不在当前 FormSet 中，请重新绑定映射");
+                {
+                    _logger.LogWarning("QuestionId {QuestionId} 不在当前 FormSet 中，已跳过写入", questionId);
+                    continue;
+                }
 
                 if (ShouldSkipQuestionValue(question, questionValue, _logger))
                     continue;
@@ -392,7 +399,10 @@ public class GenericMessageProcessor
                     {
                         var questionId = questionValue.QuestionId;
                         if (!formQuestionDict.TryGetValue(questionId, out var question))
-                            return ProcessResult.Fail($"SubCard QuestionId {questionId} 不在当前 FormSet 中，请重新绑定映射");
+                        {
+                            _logger.LogWarning("SubCard QuestionId {QuestionId} 不在当前 FormSet 中，已跳过写入", questionId);
+                            continue;
+                        }
 
                         if (ShouldSkipQuestionValue(question, questionValue, _logger))
                             continue;

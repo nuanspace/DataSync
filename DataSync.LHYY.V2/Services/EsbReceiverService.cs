@@ -25,6 +25,7 @@ public class EsbReceiverService
     private readonly InterfaceRecognitionService _recognitionService;
     private readonly IdempotentKeyService _idempotentKeyService;
     private readonly MessageExecutionService _messageExecutionService;
+    private readonly MessageProcessingNotifier _messageProcessingNotifier;
     private readonly BioCoreIntegrationService _bioCore;
     private readonly ILogger<EsbReceiverService> _logger;
 
@@ -34,6 +35,7 @@ public class EsbReceiverService
         InterfaceRecognitionService recognitionService,
         IdempotentKeyService idempotentKeyService,
         MessageExecutionService messageExecutionService,
+        MessageProcessingNotifier messageProcessingNotifier,
         BioCoreIntegrationService bioCore,
         ILogger<EsbReceiverService> logger)
     {
@@ -42,6 +44,7 @@ public class EsbReceiverService
         _recognitionService = recognitionService;
         _idempotentKeyService = idempotentKeyService;
         _messageExecutionService = messageExecutionService;
+        _messageProcessingNotifier = messageProcessingNotifier;
         _bioCore = bioCore;
         _logger = logger;
     }
@@ -156,6 +159,7 @@ public class EsbReceiverService
             message.ProcessedAt = null;
             message.ProcessingStartedAt = null;
             await db.SaveChangesAsync(cancellationToken);
+            _messageProcessingNotifier.Notify();
 
             return new HandleMessageResult
             {
@@ -918,6 +922,8 @@ public class EsbReceiverService
 
             if (queued > 0 || processed > 0 || filtered > 0)
                 await db.SaveChangesAsync();
+            if (queued > 0)
+                _messageProcessingNotifier.Notify();
         }
         catch (DbUpdateException ex)
         {
@@ -1033,6 +1039,7 @@ public class EsbReceiverService
                 message.Status = MessageStatus.Pending;
                 db.EsbMessages.Add(message);
                 await db.SaveChangesAsync();
+                _messageProcessingNotifier.Notify();
                 summary.Queued++;
                 return;
             }

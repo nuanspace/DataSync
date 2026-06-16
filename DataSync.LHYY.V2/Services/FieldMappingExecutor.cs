@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
@@ -364,6 +365,30 @@ public class FieldMappingExecutor
             {
                 if (start < value.Length)
                     return value.Substring(start, Math.Min(len, value.Length - start));
+            }
+        }
+
+        if (expression.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+        {
+            var pattern = expression[6..];
+            if (string.IsNullOrWhiteSpace(pattern))
+                return null;
+
+            try
+            {
+                var match = Regex.Match(value, pattern, RegexOptions.None, TimeSpan.FromSeconds(1));
+                if (!match.Success)
+                    return null;
+
+                return match.Groups.Count > 1 ? match.Groups[1].Value : match.Value;
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                return null;
             }
         }
 

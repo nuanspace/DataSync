@@ -60,15 +60,18 @@ public class MessageQueryService
     private readonly IDbContextFactory<DataSyncDbContext> _contextFactory;
     private readonly IntegrationProjectService _integrationProjectService;
     private readonly ConfigService _configService;
+    private readonly EsbReceiverService _receiverService;
 
     public MessageQueryService(
         IDbContextFactory<DataSyncDbContext> contextFactory,
         IntegrationProjectService integrationProjectService,
-        ConfigService configService)
+        ConfigService configService,
+        EsbReceiverService receiverService)
     {
         _contextFactory = contextFactory;
         _integrationProjectService = integrationProjectService;
         _configService = configService;
+        _receiverService = receiverService;
     }
 
     public async Task<int> GetHotRetentionDaysAsync()
@@ -337,6 +340,23 @@ public class MessageQueryService
         return true;
     }
 
+    public async Task<bool> ProcessMessageNowAsync(long id, CancellationToken cancellationToken = default)
+    {
+        if (!await PrepareMessageForDirectProcessAsync(id, cancellationToken))
+            return false;
+
+        try
+        {
+            await _receiverService.ProcessQueuedMessageAsync(id, cancellationToken);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            await MarkDirectProcessFailedAsync(id, ex.Message, cancellationToken);
+            throw;
+        }
+    }
+
     public async Task<int> BatchRetryAsync(
         string? tranCode = null,
         MessageStatus? status = null,
@@ -365,6 +385,76 @@ public class MessageQueryService
             .SetProperty(m => m.ErrorMessage, (string?)null)
             .SetProperty(m => m.ProcessingStartedAt, (DateTime?)null));
     }
+
+    private async Task<bool> PrepareMessageForDirectProcessAsync(long id, CancellationToken cancellationToken)
+    {
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
+        var message = await db.EsbMessages
+            .WhereInProjectOrGlobal(currentProjectCode)
+            .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+        if (message == null || !CanDirectProcess(message.Status))
+            return false;
+
+        var originalStatus = message.Status;
+        if (ShouldClearMessageReceiptsForDirectProcess(originalStatus))
+            await ClearMessageReceiptsAsync(db, message, cancellationToken);
+
+        message.Status = MessageStatus.Processing;
+        message.ErrorMessage = null;
+        message.ProcessedAt = null;
+        message.ProcessingStartedAt = DateTime.Now;
+        await db.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private async Task MarkDirectProcessFailedAsync(long id, string errorMessage, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+            var message = await db.EsbMessages.FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+            if (message == null)
+                return;
+
+            message.Status = MessageStatus.Failed;
+            message.ErrorMessage = $"直接处理失败: {errorMessage}";
+            message.ProcessedAt = DateTime.Now;
+            message.ProcessingStartedAt = null;
+            message.RetryCount++;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // 保留原始异常给页面提示。
+        }
+    }
+
+    private static async Task ClearMessageReceiptsAsync(DataSyncDbContext db, EsbMessage message, CancellationToken cancellationToken)
+    {
+        var sourceMessageId = string.IsNullOrWhiteSpace(message.SourceMessageId) ? null : message.SourceMessageId;
+        var idempotentKey = string.IsNullOrWhiteSpace(message.IdempotentKey) ? null : message.IdempotentKey;
+        if (sourceMessageId == null && idempotentKey == null)
+            return;
+
+        var query = db.EsbMessageReceipts
+            .Where(r => r.IntegrationProjectCode == message.IntegrationProjectCode && r.TranCode == message.TranCode);
+
+        if (sourceMessageId != null && idempotentKey != null)
+            query = query.Where(r => r.SourceMessageId == sourceMessageId || r.IdempotentKey == idempotentKey);
+        else if (sourceMessageId != null)
+            query = query.Where(r => r.SourceMessageId == sourceMessageId);
+        else
+            query = query.Where(r => r.IdempotentKey == idempotentKey);
+
+        await query.ExecuteDeleteAsync(cancellationToken);
+    }
+
+    private static bool CanDirectProcess(MessageStatus status) =>
+        status != MessageStatus.Processing;
+
+    private static bool ShouldClearMessageReceiptsForDirectProcess(MessageStatus status) =>
+        status == MessageStatus.Filtered;
 
     public async Task<List<string>> GetDistinctTranCodesAsync(DateTime? startTime = null, DateTime? endTime = null)
     {

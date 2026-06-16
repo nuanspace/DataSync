@@ -90,6 +90,53 @@ public class DatabaseQueryService
         return result;
     }
 
+    public async Task<List<Dictionary<string, object>>> QueryByFieldValueSetsAsync(
+        string? databaseType,
+        string? connectionStringName,
+        string? host,
+        string? database,
+        string? username,
+        string? password,
+        bool trustCertificate,
+        string sql,
+        IReadOnlyCollection<IReadOnlyDictionary<string, string>> valueSets,
+        CancellationToken ct)
+    {
+        var normalizedType = IngestionService.NormalizeDatabaseType(databaseType);
+        ValidateSelectSql(sql, normalizedType);
+        var validSets = valueSets
+            .Select(set => set
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value))
+                .ToDictionary(pair => pair.Key.Trim(), pair => pair.Value.Trim(), StringComparer.OrdinalIgnoreCase))
+            .Where(set => set.Count > 0)
+            .ToList();
+
+        if (validSets.Count == 0)
+            return [];
+
+        var result = new List<Dictionary<string, object>>();
+        await using var conn = CreateConnection(normalizedType, ResolveConnectionString(
+            normalizedType, connectionStringName, host, database, username, password, trustCertificate));
+        await conn.OpenAsync(ct);
+
+        foreach (var valueSet in validSets)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var fields = valueSet.Keys.ToList();
+            var querySql = BuildFieldValueSetQuerySql(sql, normalizedType, fields);
+            await using var cmd = CreateCommand(conn, normalizedType, querySql);
+            AddOpenTimeRangeParametersIfNeeded(cmd, normalizedType);
+            for (var i = 0; i < fields.Count; i++)
+                AddStringParameter(cmd, normalizedType, $"linkValue{i}", valueSet[fields[i]]);
+
+            result.AddRange(await ReadRowsAsync(cmd, ct));
+        }
+
+        _logger.LogInformation("{DatabaseType} 关联字段查询完成：{Count} 条", normalizedType, result.Count);
+        return result;
+    }
+
     public async Task TestConnectionAsync(
         string? databaseType,
         string? connectionStringName,
@@ -224,15 +271,18 @@ public class DatabaseQueryService
     }
 
     private static void AddQueryValueParameter(DbCommand cmd, string databaseType, string value)
+        => AddStringParameter(cmd, databaseType, "queryValue", value);
+
+    private static void AddStringParameter(DbCommand cmd, string databaseType, string name, string value)
     {
         if (IngestionService.IsOracleDatabaseType(databaseType))
         {
             var oracleCommand = (OracleCommand)cmd;
-            oracleCommand.Parameters.Add("queryValue", OracleDbType.Varchar2).Value = value;
+            oracleCommand.Parameters.Add(name, OracleDbType.Varchar2).Value = value;
             return;
         }
 
-        ((SqlCommand)cmd).Parameters.Add("@queryValue", SqlDbType.NVarChar).Value = value;
+        ((SqlCommand)cmd).Parameters.Add($"@{name}", SqlDbType.NVarChar).Value = value;
     }
 
     private static void AddOpenTimeRangeParametersIfNeeded(DbCommand cmd, string databaseType)
@@ -333,6 +383,25 @@ public class DatabaseQueryService
         var parameter = IngestionService.IsOracleDatabaseType(databaseType) ? ":queryValue" : "@queryValue";
         return $"SELECT * FROM ({trimmed}) q WHERE {field} = {parameter}";
     }
+
+    private static string BuildFieldValueSetQuerySql(string sql, string databaseType, IReadOnlyList<string> fields)
+    {
+        if (fields.Count == 0)
+            throw new InvalidOperationException("关联字段不能为空");
+
+        var trimmed = sql.Trim();
+        if (trimmed.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("WITH 查询无法自动追加关联字段条件，请在 SQL 中手动处理");
+
+        var conditions = fields
+            .Select((field, index) =>
+                $"{BuildColumnReference(databaseType, field)} = {BuildParameterReference(databaseType, $"linkValue{index}")}")
+            .ToList();
+        return $"SELECT * FROM ({trimmed}) q WHERE {string.Join(" AND ", conditions)}";
+    }
+
+    private static string BuildParameterReference(string databaseType, string name) =>
+        IngestionService.IsOracleDatabaseType(databaseType) ? $":{name}" : $"@{name}";
 
     private static string BuildColumnReference(string databaseType, string queryField)
     {

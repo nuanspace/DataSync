@@ -870,6 +870,19 @@
     margin-bottom: 12px;
 }
 
+.link-mapping-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.link-mapping-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+}
+
 .config-row + .config-row {
     padding-top: 8px;
     border-top: 1px solid rgba(15, 23, 42, 0.06);
@@ -1002,6 +1015,10 @@
     .interface-card--child::before,
     .interface-card--child::after {
         display: none;
+    }
+
+    .link-mapping-row {
+        grid-template-columns: 1fr;
     }
 
     .task-edit-actions--sticky {

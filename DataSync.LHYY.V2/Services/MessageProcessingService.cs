@@ -13,23 +13,28 @@ namespace DataSync.LHYY.V2.Services;
 public class MessageProcessingService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly MessageProcessingNotifier _notifier;
     private readonly ILogger<MessageProcessingService> _logger;
 
     private const int DefaultIntervalMs = 5000;
     private const int DefaultMaxRetry = 3;
-    private const int BatchSize = 10;
+    private const int DefaultBatchSize = 50;
+    private const int MaxBatchSize = 500;
+    private const string BatchSizeConfigKey = "MessageProcessingBatchSize";
 
-    public MessageProcessingService(IServiceScopeFactory scopeFactory, ILogger<MessageProcessingService> logger)
+    public MessageProcessingService(
+        IServiceScopeFactory scopeFactory,
+        MessageProcessingNotifier notifier,
+        ILogger<MessageProcessingService> logger)
     {
         _scopeFactory = scopeFactory;
+        _notifier = notifier;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("消息处理引擎已启动");
-
-        await Task.Delay(3000, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -39,7 +44,7 @@ public class MessageProcessingService : BackgroundService
                 if (processed == 0)
                 {
                     var intervalMs = await GetIntervalMsAsync();
-                    await Task.Delay(intervalMs, stoppingToken);
+                    await _notifier.WaitAsync(TimeSpan.FromMilliseconds(intervalMs), stoppingToken);
                 }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -65,6 +70,7 @@ public class MessageProcessingService : BackgroundService
         var configService = scope.ServiceProvider.GetRequiredService<ConfigService>();
 
         var maxRetry = int.TryParse(await configService.GetGlobalConfigValueAsync("MaxRetryCount"), out var mr) ? mr : DefaultMaxRetry;
+        var batchSize = await GetBatchSizeAsync(configService);
 
         await using (var resetDb = await dbFactory.CreateDbContextAsync(ct))
         {
@@ -80,7 +86,7 @@ public class MessageProcessingService : BackgroundService
                 _logger.LogWarning("已重置 {Count} 条超时 Processing 消息", staleCount);
         }
 
-        var messages = await ClaimMessagesAsync(dbFactory, currentProjectCode, maxRetry, ct);
+        var messages = await ClaimMessagesAsync(dbFactory, currentProjectCode, maxRetry, batchSize, ct);
         if (messages.Count == 0) return 0;
 
         int count = 0;
@@ -106,6 +112,7 @@ public class MessageProcessingService : BackgroundService
         IDbContextFactory<DataSyncDbContext> dbFactory,
         string currentProjectCode,
         int maxRetry,
+        int batchSize,
         CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -125,7 +132,7 @@ public class MessageProcessingService : BackgroundService
                     WHERE (integration_project_code = {currentProjectCode} OR integration_project_code IS NULL)
                       AND (status = {pending} OR (status = {failed} AND retry_count < {maxRetry}))
                     ORDER BY created_at
-                    LIMIT {BatchSize}
+                    LIMIT {batchSize}
                     FOR UPDATE SKIP LOCKED
                 )
                 RETURNING m.*")
@@ -163,5 +170,14 @@ public class MessageProcessingService : BackgroundService
         var configService = scope.ServiceProvider.GetRequiredService<ConfigService>();
         var value = await configService.GetGlobalConfigValueAsync("ProcessingIntervalMs");
         return int.TryParse(value, out var intervalMs) ? intervalMs : DefaultIntervalMs;
+    }
+
+    private static async Task<int> GetBatchSizeAsync(ConfigService configService)
+    {
+        var value = await configService.GetGlobalConfigValueAsync(BatchSizeConfigKey);
+        if (!int.TryParse(value, out var batchSize) || batchSize <= 0)
+            return DefaultBatchSize;
+
+        return Math.Min(batchSize, MaxBatchSize);
     }
 }

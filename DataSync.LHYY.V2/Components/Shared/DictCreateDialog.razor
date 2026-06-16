@@ -5,7 +5,7 @@
         <div class="dict-create-title">
             <div>
                 <MudText Typo="Typo.caption" Class="dict-create-kicker">字典配置</MudText>
-                <MudText Typo="Typo.h6" Class="dict-create-heading">新建字典</MudText>
+                <MudText Typo="Typo.h6" Class="dict-create-heading">@DialogHeading</MudText>
             </div>
             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="Cancel" />
         </div>
@@ -15,9 +15,9 @@
             <div class="dict-create-fields">
                 <MudTextField T="string" Value="_newDictCode" ValueChanged="v => _newDictCode = v"
                               Label="DictCode（字典代码）" Required="true" Margin="Margin.Dense"
-                              Variant="Variant.Outlined" />
+                              Variant="Variant.Outlined" Disabled="@_editExisting" />
                 <MudSelect T="string" Value="_createScope" ValueChanged="v => _createScope = v"
-                           Label="保存范围" Margin="Margin.Dense" Variant="Variant.Outlined">
+                           Label="保存范围" Margin="Margin.Dense" Variant="Variant.Outlined" Disabled="@_editExisting">
                     <MudSelectItem Value="@ProjectScopeKey">项目级（@CurrentIntegrationProjectCode）</MudSelectItem>
                     <MudSelectItem Value="@GlobalScopeKey">全局级</MudSelectItem>
                 </MudSelect>
@@ -132,7 +132,7 @@
             一个目标值可以配置多组条件；每组条件会保存为一条字典匹配规则。
         </MudText>
         <MudButton OnClick="Cancel">取消</MudButton>
-        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveDictAsync">保存并选中</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveDictAsync">@SaveButtonText</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -143,10 +143,16 @@
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
     [Parameter] public string? InitialDictCode { get; set; }
     [Parameter] public IEnumerable<string>? SuggestedSourceValues { get; set; }
+    [Parameter] public bool EditExisting { get; set; }
 
     private string? _newDictCode;
     private string _createScope = ProjectScopeKey;
     private List<DictEntryItem> _entries = [];
+    private bool _editExisting;
+
+    private string DialogHeading => _editExisting ? "编辑字典" : "新建字典";
+
+    private string SaveButtonText => _editExisting ? "保存修改并选中" : "保存并选中";
 
     private sealed class DictEntryItem
     {
@@ -161,9 +167,14 @@
         public List<string?> Keywords { get; set; } = [null];
     }
 
-    protected override Task OnPageInitializedAsync()
+    protected override async Task OnPageInitializedAsync()
     {
         _newDictCode = InitialDictCode?.Trim();
+        if (EditExisting && !string.IsNullOrWhiteSpace(_newDictCode) && await LoadExistingDictAsync(_newDictCode))
+        {
+            return;
+        }
+
         var suggestedEntries = SuggestedSourceValues?
             .Where(v => !string.IsNullOrWhiteSpace(v))
             .Select(v => v.Trim())
@@ -178,8 +189,65 @@
         _entries = suggestedEntries is { Count: > 0 }
             ? suggestedEntries
             : [new DictEntryItem()];
+    }
 
-        return Task.CompletedTask;
+    private async Task<bool> LoadExistingDictAsync(string dictCode)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync();
+
+        var projectItems = await db.EsbDicts
+            .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == CurrentIntegrationProjectCode)
+            .OrderBy(d => d.SortOrder)
+            .ThenBy(d => d.Id)
+            .ToListAsync();
+
+        if (projectItems.Count > 0)
+        {
+            _createScope = ProjectScopeKey;
+            _entries = BuildEntriesFromExistingItems(projectItems);
+            _editExisting = true;
+            return true;
+        }
+
+        var globalItems = await db.EsbDicts
+            .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == null)
+            .OrderBy(d => d.SortOrder)
+            .ThenBy(d => d.Id)
+            .ToListAsync();
+
+        if (globalItems.Count == 0)
+        {
+            return false;
+        }
+
+        _createScope = GlobalScopeKey;
+        _entries = BuildEntriesFromExistingItems(globalItems);
+        _editExisting = true;
+        return true;
+    }
+
+    private static List<DictEntryItem> BuildEntriesFromExistingItems(IEnumerable<EsbDict> items)
+    {
+        var entries = items
+            .GroupBy(d => d.TargetValue, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new DictEntryItem
+            {
+                TargetValue = group.First().TargetValue,
+                Conditions = group.Select(BuildConditionFromExistingItem).ToList()
+            })
+            .ToList();
+
+        return entries.Count == 0 ? [new DictEntryItem()] : entries;
+    }
+
+    private static DictConditionItem BuildConditionFromExistingItem(EsbDict item)
+    {
+        var (matchMode, _) = DictExpressionHelper.ParseSourceValue(item.SourceValue);
+        return new DictConditionItem
+        {
+            MatchMode = matchMode,
+            Keywords = DictExpressionHelper.ParseSourceValueKeywords(item.SourceValue)
+        };
     }
 
     private void Cancel()
@@ -271,6 +339,31 @@
             .Where(d => d.DictCode == dictCode && d.IntegrationProjectCode == integrationProjectCode)
             .ToListAsync();
 
+        if (_editExisting)
+        {
+            db.EsbDicts.RemoveRange(existingItems);
+
+            var sortOrder = 0;
+            foreach (var entry in entries)
+            {
+                sortOrder += 10;
+                db.EsbDicts.Add(new EsbDict
+                {
+                    DictCode = dictCode,
+                    IntegrationProjectCode = integrationProjectCode,
+                    SourceValue = entry.SourceValue ?? "",
+                    TargetValue = entry.TargetValue ?? "",
+                    SortOrder = sortOrder
+                });
+            }
+
+            await db.SaveChangesAsync();
+            inj_dictService.ClearCache(dictCode, CurrentIntegrationProjectCode);
+            inj_snackbar.Add($"字典“{dictCode}”已保存，共 {entries.Count} 条", Severity.Success);
+            MudDialog.Close(dictCode);
+            return;
+        }
+
         var existingMap = existingItems.ToDictionary(d => d.SourceValue, d => d, StringComparer.OrdinalIgnoreCase);
         var conflictEntries = entries
             .Where(e => existingMap.ContainsKey(e.SourceValue!))
@@ -359,6 +452,9 @@
             }
         }
 
-        return entries;
+        return entries
+            .GroupBy(e => e.SourceValue, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
     }
 }

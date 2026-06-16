@@ -105,6 +105,9 @@ public partial class InterfaceWizardPage
     private int _selectedJsonTreeVersion;
     private TargetFieldDescriptor? _selectedQuestionField;
 
+    private string? CurrentLicenseCode =>
+        string.IsNullOrWhiteSpace(_selectedConfig?.LicenseCode) ? _defaultLicenseCode : _selectedConfig.LicenseCode;
+
     private enum PathPickMode
     {
         None,
@@ -1060,7 +1063,7 @@ public partial class InterfaceWizardPage
 
         if (target is MappingTarget.Question or MappingTarget.SubCard)
         {
-            if (_formTreeTabs.Count == 0 && !string.IsNullOrEmpty(_defaultLicenseCode))
+            if (_formTreeTabs.Count == 0 && !string.IsNullOrEmpty(CurrentLicenseCode))
             {
                 await LoadFormTreeAsync();
             }
@@ -1083,7 +1086,8 @@ public partial class InterfaceWizardPage
 
     private async Task LoadFormTreeAsync()
     {
-        if (string.IsNullOrEmpty(_defaultLicenseCode))
+        var licenseCode = CurrentLicenseCode;
+        if (string.IsNullOrEmpty(licenseCode))
         {
             _formTreeError = "未配置默认 LicenseCode。";
             return;
@@ -1094,10 +1098,10 @@ public partial class InterfaceWizardPage
 
         try
         {
-            var eventTypes = await BioCoreService.GetEventTypesAsync(_defaultLicenseCode);
+            var eventTypes = await BioCoreService.GetEventTypesAsync(licenseCode);
             if (eventTypes.Count == 0)
             {
-                _formTreeError = $"LicenseCode [{_defaultLicenseCode}] 未匹配到事件类型，请检查 Bio.Core 配置。";
+                _formTreeError = $"LicenseCode [{licenseCode}] 未匹配到事件类型，请检查 Bio.Core 配置。";
                 _formTreeTabs = [];
                 _selectedEventType = null;
                 _selectedFormId = null;
@@ -1117,8 +1121,11 @@ public partial class InterfaceWizardPage
                 _formTreeTabs.Add((eventType, forms));
             }
 
-            _selectedEventType = _formTreeTabs.FirstOrDefault().EventType;
-            _selectedFormId = _formTreeTabs.FirstOrDefault().Forms.FirstOrDefault()?.Id;
+            _selectedEventType = _formTreeTabs
+                .FirstOrDefault(t => string.Equals(t.EventType, _selectedConfig?.EventTypeName, StringComparison.OrdinalIgnoreCase))
+                .EventType
+                ?? _formTreeTabs.FirstOrDefault().EventType;
+            _selectedFormId = ActiveFormOptions.FirstOrDefault()?.Id;
 
             BuildQuestionLookups();
             RefreshMappingDisplayNames();
@@ -4124,49 +4131,8 @@ public partial class InterfaceWizardPage
 
     private string GetSampleValue(MappingTarget mappingTarget, Guid? cardId, string? arrayPath, string? sourcePath)
     {
-        if (_parsedJson == null || string.IsNullOrWhiteSpace(sourcePath))
-        {
-            return "未选择源路径";
-        }
-
-        if (mappingTarget != MappingTarget.SubCard)
-        {
-            var standaloneToken = ResolveStandalonePreviewToken(sourcePath);
-            if (standaloneToken == null)
-            {
-                return "(未匹配)";
-            }
-
-            var standaloneValue = standaloneToken.ToString();
-            if (standaloneValue.Length == 0)
-            {
-                return "(空字符串)";
-            }
-
-            return standaloneValue.Length > 80 ? standaloneValue[..80] + "..." : standaloneValue;
-        }
-
-        var token = ResolvePreviewToken(mappingTarget, cardId, arrayPath, sourcePath);
-        if (token == null)
-        {
-            if (mappingTarget == MappingTarget.SubCard
-                && !SubCardPathHelper.IsAbsoluteJsonPath(NormalizeSubCardSourcePathForPreview(sourcePath))
-                && !IsMainRecordScopedPath(NormalizeSubCardSourcePathForPreview(sourcePath))
-                && string.IsNullOrWhiteSpace(GetEffectiveArrayPath(cardId, arrayPath, sourcePath)))
-            {
-                return "(需先配置 ArrayPath)";
-            }
-
-            return "(未匹配)";
-        }
-
-        var value = token.ToString();
-        if (value.Length == 0)
-        {
-            return "(空字符串)";
-        }
-
-        return value.Length > 80 ? value[..80] + "..." : value;
+        var value = ResolveSampleRawValue(mappingTarget, cardId, arrayPath, sourcePath, out var missingText);
+        return value == null ? missingText : FormatPreviewValue(value, "(未匹配)");
     }
 
     private string GetSampleValue(string? sourcePath) =>
@@ -4183,6 +4149,101 @@ public partial class InterfaceWizardPage
             field.CardId,
             row?.ArrayPath ?? (field.CardId.HasValue ? GetSubCardArrayPath(field.CardId.Value) : null),
             row?.SourcePath);
+    }
+
+    private string GetConvertedSampleText(WizardMappingRow? row)
+    {
+        if (row == null || string.IsNullOrWhiteSpace(row.ValueExpression))
+        {
+            return "";
+        }
+
+        return "；转换后：" + GetConvertedSampleValue(
+            row.MappingTarget,
+            row.CardId,
+            row.ArrayPath,
+            row.SourcePath,
+            row.ValueExpression);
+    }
+
+    private string GetConvertedSampleText(TargetFieldDescriptor field)
+    {
+        var row = GetQuestionFieldRow(field);
+        if (row == null || string.IsNullOrWhiteSpace(row.ValueExpression))
+        {
+            return "";
+        }
+
+        return "；转换后：" + GetConvertedSampleValue(
+            field.MappingTarget,
+            field.CardId,
+            row.ArrayPath ?? (field.CardId.HasValue ? GetSubCardArrayPath(field.CardId.Value) : null),
+            row.SourcePath,
+            row.ValueExpression);
+    }
+
+    private string GetConvertedSampleValue(
+        MappingTarget mappingTarget,
+        Guid? cardId,
+        string? arrayPath,
+        string? sourcePath,
+        string valueExpression)
+    {
+        var value = ResolveSampleRawValue(mappingTarget, cardId, arrayPath, sourcePath, out var missingText);
+        if (value == null)
+        {
+            return missingText;
+        }
+
+        var convertedValue = FieldMappingExecutor.ApplyExpression(value, valueExpression);
+        return FormatPreviewValue(convertedValue, "(空值)");
+    }
+
+    private string? ResolveSampleRawValue(
+        MappingTarget mappingTarget,
+        Guid? cardId,
+        string? arrayPath,
+        string? sourcePath,
+        out string missingText)
+    {
+        missingText = "未选择源路径";
+        if (_parsedJson == null || string.IsNullOrWhiteSpace(sourcePath))
+        {
+            return null;
+        }
+
+        var token = ResolvePreviewToken(mappingTarget, cardId, arrayPath, sourcePath);
+        if (token != null)
+        {
+            return token.ToString();
+        }
+
+        if (mappingTarget == MappingTarget.SubCard
+            && !SubCardPathHelper.IsAbsoluteJsonPath(NormalizeSubCardSourcePathForPreview(sourcePath))
+            && !IsMainRecordScopedPath(NormalizeSubCardSourcePathForPreview(sourcePath))
+            && string.IsNullOrWhiteSpace(GetEffectiveArrayPath(cardId, arrayPath, sourcePath)))
+        {
+            missingText = "(需先配置 ArrayPath)";
+            return null;
+        }
+
+        missingText = "(未匹配)";
+        return null;
+    }
+
+    private static string FormatPreviewValue(string? value, string nullText)
+    {
+        if (value == null)
+        {
+            return nullText;
+        }
+
+        if (value.Length == 0)
+        {
+            return "(空字符串)";
+        }
+
+        return value.Length > 80 ? value[..80] + "..." : value;
     }
 
     private string GetSuggestionPreviewArrayPath(LlmSuggestionItem item)

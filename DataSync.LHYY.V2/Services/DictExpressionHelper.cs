@@ -82,6 +82,11 @@ public static class DictExpressionHelper
     public static bool TryMatch(string source, string expression, out bool matched)
     {
         matched = false;
+        if (TryMatchToken(source, expression, out matched))
+        {
+            return true;
+        }
+
         var expressionParts = ParseExpressionParts(expression);
         if (expressionParts == null)
         {
@@ -89,8 +94,40 @@ public static class DictExpressionHelper
         }
 
         matched = expressionParts.Value.MatchMode == MatchModeAny
-            ? expressionParts.Value.Keywords.Any(v => source.Contains(v, StringComparison.OrdinalIgnoreCase))
-            : expressionParts.Value.Keywords.All(v => source.Contains(v, StringComparison.OrdinalIgnoreCase));
+            ? expressionParts.Value.Keywords.Any(v => MatchToken(source, v))
+            : expressionParts.Value.Keywords.All(v => MatchToken(source, v));
+        return true;
+    }
+
+    private static bool MatchToken(string source, string token) =>
+        TryMatchToken(source, token, out var matched)
+            ? matched
+            : source.Contains(token, StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryMatchToken(string source, string token, out bool matched)
+    {
+        matched = false;
+        var value = token.Trim();
+        if (!value.StartsWith("regex:", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var pattern = value["regex:".Length..].Trim();
+        if (pattern.Length == 0)
+        {
+            return true;
+        }
+
+        try
+        {
+            matched = Regex.IsMatch(source, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+        catch (ArgumentException)
+        {
+            matched = false;
+        }
+
         return true;
     }
 

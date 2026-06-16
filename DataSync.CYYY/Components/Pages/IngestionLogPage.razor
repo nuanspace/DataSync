@@ -1,0 +1,220 @@
+@page "/ingestion-logs"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>采集日志</PageTitle>
+
+<div class="ingestion-log-toolbar">
+    <MudText Typo="Typo.h5">采集日志</MudText>
+    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="SearchAsync">
+        刷新
+    </MudButton>
+</div>
+
+<MudPaper Class="pa-4 mb-4" Elevation="1">
+    <MudGrid>
+        <MudItem xs="12" sm="3">
+            <MudSelect @bind-Value="_filterServerCode" Label="采集源" Clearable="true"
+                       Variant="Variant.Outlined" Dense="true">
+                @foreach (var source in _sources)
+                {
+                    <MudSelectItem Value="@source.ServerCode">@source.Name</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect @bind-Value="_filterResult" Label="结果" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@FilterAll">全部</MudSelectItem>
+                <MudSelectItem Value="@FilterSuccess">成功</MudSelectItem>
+                <MudSelectItem Value="@FilterFailed">失败</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="2">
+            <MudSelect @bind-Value="_filterTriggerType" Label="触发方式" Clearable="true"
+                       Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="@TriggerScheduled">定时采集</MudSelectItem>
+                <MudSelectItem Value="@TriggerBackfill">补录采集</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudTextField @bind-Value="_filterKeyword" Label="ServerCode / 名称 / 错误关键字"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" />
+        </MudItem>
+        <MudItem xs="12" sm="1" Class="d-flex align-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SearchAsync">查询</MudButton>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+<MudTable ServerData="LoadServerData" @ref="_table" Dense="true" Hover="true" Bordered="true"
+          Loading="_loading" LoadingProgressColor="Color.Primary">
+    <HeaderContent>
+        <MudTh>时间</MudTh>
+        <MudTh>结果</MudTh>
+        <MudTh>采集源</MudTh>
+        <MudTh>触发方式</MudTh>
+        <MudTh>采集窗口</MudTh>
+        <MudTh>源端条数</MudTh>
+        <MudTh>本地总数</MudTh>
+        <MudTh>耗时</MudTh>
+        <MudTh>错误</MudTh>
+        <MudTh>查询条件</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.CreatedAt.ToString("MM-dd HH:mm:ss")</MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@(context.Success ? Color.Success : Color.Error)">
+                @(context.Success ? "成功" : "失败")
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            <div>@context.SourceName</div>
+            <MudText Typo="Typo.caption">@context.ServerCode</MudText>
+        </MudTd>
+        <MudTd>@GetTriggerTypeText(context.TriggerType)</MudTd>
+        <MudTd>
+            <div>@FormatDateTime(context.FromTime)</div>
+            <div>@FormatDateTime(context.ToTime)</div>
+        </MudTd>
+        <MudTd>@context.ApiCount</MudTd>
+        <MudTd>@context.LocalCount</MudTd>
+        <MudTd>@FormatDuration(context.DurationMs)</MudTd>
+        <MudTd>
+            @if (!string.IsNullOrWhiteSpace(context.ErrorMessage))
+            {
+                <MudTooltip Arrow="true">
+                    <TooltipContent>
+                        <div class="ingestion-log-multiline">@context.ErrorMessage</div>
+                    </TooltipContent>
+                    <ChildContent>
+                        <div class="ingestion-log-ellipsis">@context.ErrorMessage</div>
+                    </ChildContent>
+                </MudTooltip>
+            }
+            else
+            {
+                <span>-</span>
+            }
+        </MudTd>
+        <MudTd>
+            <MudTooltip Arrow="true">
+                <TooltipContent>
+                    <div class="ingestion-log-multiline">@FormatConditions(context.QueryConditions)</div>
+                </TooltipContent>
+                <ChildContent>
+                    <div class="ingestion-log-ellipsis">@FormatConditions(context.QueryConditions)</div>
+                </ChildContent>
+            </MudTooltip>
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText>暂无采集日志</MudText>
+    </NoRecordsContent>
+    <PagerContent>
+        <MudTablePager PageSizeOptions="new int[] { 20, 50, 100 }" />
+    </PagerContent>
+</MudTable>
+
+@code {
+    private const string FilterAll = "all";
+    private const string FilterSuccess = "success";
+    private const string FilterFailed = "failed";
+    private const string TriggerScheduled = "Scheduled";
+    private const string TriggerBackfill = "Backfill";
+
+    private MudTable<IngestionLog>? _table;
+    private List<IngestionSource> _sources = [];
+    private string? _filterServerCode;
+    private string _filterResult = FilterAll;
+    private string? _filterTriggerType;
+    private string? _filterKeyword;
+    private bool _loading;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _sources = await db.IngestionSources
+            .AsNoTracking()
+            .OrderBy(source => source.Name)
+            .ToListAsync(CancellationToken);
+    }
+
+    private async Task<TableData<IngestionLog>> LoadServerData(TableState state, CancellationToken ct)
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(ct);
+            var query = db.IngestionLogs.AsNoTracking().AsQueryable();
+
+            if (!string.IsNullOrWhiteSpace(_filterServerCode))
+                query = query.Where(log => log.ServerCode == _filterServerCode);
+
+            if (_filterResult == FilterSuccess)
+                query = query.Where(log => log.Success);
+            else if (_filterResult == FilterFailed)
+                query = query.Where(log => !log.Success);
+
+            if (!string.IsNullOrWhiteSpace(_filterTriggerType))
+                query = query.Where(log => log.TriggerType == _filterTriggerType);
+
+            if (!string.IsNullOrWhiteSpace(_filterKeyword))
+            {
+                var keyword = _filterKeyword.Trim();
+                query = query.Where(log =>
+                    log.ServerCode.Contains(keyword) ||
+                    log.SourceName.Contains(keyword) ||
+                    (log.ErrorMessage != null && log.ErrorMessage.Contains(keyword)));
+            }
+
+            var total = await query.CountAsync(ct);
+            var items = await query
+                .OrderByDescending(log => log.CreatedAt)
+                .Skip(state.Page * state.PageSize)
+                .Take(state.PageSize)
+                .ToListAsync(ct);
+
+            return new TableData<IngestionLog> { Items = items, TotalItems = total };
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SearchAsync()
+    {
+        if (_table != null)
+            await _table.ReloadServerData();
+    }
+
+    private static string GetTriggerTypeText(string triggerType)
+        => triggerType switch
+        {
+            TriggerBackfill => "补录采集",
+            TriggerScheduled => "定时采集",
+            _ => triggerType
+        };
+
+    private static string FormatDateTime(DateTime? value)
+        => value?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-";
+
+    private static string FormatDuration(long durationMs)
+        => durationMs >= 1000 ? $"{durationMs / 1000.0:F1}s" : $"{durationMs}ms";
+
+    private static string FormatConditions(string? conditions)
+    {
+        if (string.IsNullOrWhiteSpace(conditions))
+            return "[]";
+
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<JsonElement>(conditions);
+            return JsonSerializer.Serialize(parsed, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return conditions;
+        }
+    }
+}

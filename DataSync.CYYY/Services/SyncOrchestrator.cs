@@ -813,11 +813,31 @@ public class SyncOrchestrator
                 }
 
                 var childInterface = matchedChildren[0];
-                var parentValue = GetStringValue(rootRecord, childInterface.ParentResultField ?? "");
-                if (string.IsNullOrWhiteSpace(parentValue))
+                var linkMappings = GetInterfaceLinkMappings(childInterface);
+                if (linkMappings.Count == 0)
                 {
                     skippedCount++;
-                    skippedReasons.Add($"{DescribeRecord(rootRecord, rootInterface.QueryField)} 缺少父接口取值字段 {childInterface.ParentResultField}");
+                    skippedReasons.Add($"{DescribeRecord(rootRecord, rootInterface.QueryField)} 子接口 {childInterface.ServerCode} 未配置关联字段");
+                    continue;
+                }
+
+                var linkValues = new List<InterfaceLinkValue>();
+                foreach (var mapping in linkMappings)
+                {
+                    var parentValue = GetStringValue(rootRecord, mapping.ParentField);
+                    if (string.IsNullOrWhiteSpace(parentValue))
+                    {
+                        skippedReasons.Add($"{DescribeRecord(rootRecord, mapping.ParentField)} 缺少父接口取值字段 {mapping.ParentField}");
+                        linkValues.Clear();
+                        break;
+                    }
+
+                    linkValues.Add(new InterfaceLinkValue(mapping.ChildField, parentValue));
+                }
+
+                if (linkValues.Count == 0)
+                {
+                    skippedCount++;
                     continue;
                 }
 
@@ -825,7 +845,7 @@ public class SyncOrchestrator
                 {
                     ChildInterface = childInterface,
                     RootRecord = rootRecord,
-                    ParentValue = parentValue
+                    LinkValues = linkValues
                 });
             }
 
@@ -852,12 +872,12 @@ public class SyncOrchestrator
 
             foreach (var plan in compositePlans)
             {
-                var childKey = BuildChildMapKey(plan.ChildInterface.InterfaceKey, plan.ParentValue);
+                var childKey = BuildChildMapKey(plan.ChildInterface.InterfaceKey, plan.LinkValues);
                 if (!childDataMap.TryGetValue(childKey, out var childRecords) || childRecords.Count == 0)
                 {
                     skippedCount++;
                     skippedReasons.Add(
-                        $"{DescribeRecord(plan.RootRecord, plan.ChildInterface.ParentResultField)} 未查到子接口 {plan.ChildInterface.ServerCode} 数据");
+                        $"{DescribeRecord(plan.RootRecord, plan.LinkValues.FirstOrDefault()?.ChildField)} 未查到子接口 {plan.ChildInterface.ServerCode} 数据");
                     continue;
                 }
 
@@ -1041,6 +1061,64 @@ public class SyncOrchestrator
         }
     }
 
+    private async Task<List<Dictionary<string, object>>> QueryInterfaceDataByLinkValueSetsAsync(
+        SyncTaskInterface iface,
+        SyncTask task,
+        IReadOnlyCollection<InterfaceLinkValueSet> queryValueSets,
+        CancellationToken ct)
+    {
+        try
+        {
+            var validSets = queryValueSets
+                .Where(set => set.Values.Count > 0 && set.Values.All(value => !string.IsNullOrWhiteSpace(value.Value)))
+                .DistinctBy(set => BuildLinkValuesKey(set.Values))
+                .ToList();
+
+            if (validSets.Count == 0)
+                return [];
+
+            var databaseConnection = IsDatabaseInterface(iface)
+                ? await ResolveDatabaseConnectionAsync(iface, task, ct)
+                : null;
+
+            if (IsDatabaseInterface(iface))
+            {
+                return await _databaseQueryService.QueryByFieldValueSetsAsync(
+                    databaseConnection!.DatabaseType,
+                    databaseConnection.ConnectionStringName,
+                    databaseConnection.Host,
+                    databaseConnection.Database,
+                    databaseConnection.Username,
+                    databaseConnection.Password,
+                    databaseConnection.TrustCertificate,
+                    iface.QuerySql ?? "",
+                    validSets
+                        .Select(set => (IReadOnlyDictionary<string, string>)set.Values
+                            .ToDictionary(value => value.ChildField, value => value.Value, StringComparer.OrdinalIgnoreCase))
+                        .ToList(),
+                    ct);
+            }
+
+            var allData = new List<Dictionary<string, object>>();
+            foreach (var chunk in validSets.Chunk(200))
+            {
+                var chunkList = chunk.ToList();
+                var chunkData = await _dataLakeClient.QueryAllPagesAsync(
+                    iface.ServerCode,
+                    BuildLinkQueryConditions(iface, chunkList),
+                    ct);
+                allData.AddRange(FilterByLinkValueSets(chunkData, chunkList));
+            }
+
+            return allData;
+        }
+        catch (Exception ex)
+        {
+            var prefix = IsDatabaseInterface(iface) ? "[数据库查询]" : "[数据湖查询]";
+            throw new InvalidOperationException($"{prefix} {ex.Message}", ex);
+        }
+    }
+
     private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
         IngestionService.IsDatabaseSourceType(iface.SourceType);
 
@@ -1165,6 +1243,121 @@ public class SyncOrchestrator
         return conditions;
     }
 
+    private List<DataLakeCondition> BuildLinkQueryConditions(
+        SyncTaskInterface iface,
+        IReadOnlyCollection<InterfaceLinkValueSet> queryValueSets)
+    {
+        var conditions = new List<DataLakeCondition>();
+        var fields = queryValueSets
+            .SelectMany(set => set.Values.Select(value => value.ChildField))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var field in fields)
+        {
+            var values = queryValueSets
+                .SelectMany(set => set.Values
+                    .Where(value => string.Equals(value.ChildField, field, StringComparison.OrdinalIgnoreCase))
+                    .Select(value => value.Value))
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (values.Count == 0)
+                continue;
+
+            conditions.Add(new DataLakeCondition
+            {
+                Column = field,
+                Type = values.Count == 1 ? "eq" : "in",
+                Value = values.Count == 1 ? values[0] : string.Join(",", values)
+            });
+        }
+
+        if (!string.IsNullOrEmpty(iface.FilterConditions))
+        {
+            try
+            {
+                var filters = JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions);
+                if (filters != null)
+                    conditions.AddRange(filters);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "接口 {ServerCode} 过滤条件 JSON 解析失败：{FilterConditions}",
+                    iface.ServerCode, iface.FilterConditions);
+            }
+        }
+
+        return conditions;
+    }
+
+    private static List<Dictionary<string, object>> FilterByLinkValueSets(
+        List<Dictionary<string, object>> data,
+        IReadOnlyCollection<InterfaceLinkValueSet> queryValueSets)
+    {
+        if (data.Count == 0 || queryValueSets.Count == 0)
+            return data;
+
+        var fields = queryValueSets.First().Values.Select(value => value.ChildField).ToList();
+        var allowedKeys = queryValueSets
+            .Select(set => BuildLinkValuesKey(set.Values))
+            .ToHashSet(StringComparer.Ordinal);
+
+        return data
+            .Where(record =>
+            {
+                var values = fields
+                    .Select(field => new InterfaceLinkValue(field, GetStringValue(record, field)))
+                    .ToList();
+                return values.All(value => !string.IsNullOrWhiteSpace(value.Value)) &&
+                    allowedKeys.Contains(BuildLinkValuesKey(values));
+            })
+            .ToList();
+    }
+
+    private List<InterfaceLinkMapping> GetInterfaceLinkMappings(SyncTaskInterface iface)
+    {
+        if (!string.IsNullOrWhiteSpace(iface.LinkMappings))
+        {
+            try
+            {
+                var mappings = JsonSerializer.Deserialize<List<InterfaceLinkMapping>>(iface.LinkMappings);
+                if (mappings != null)
+                {
+                    var validMappings = mappings
+                        .Where(mapping =>
+                            !string.IsNullOrWhiteSpace(mapping.ParentField) &&
+                            !string.IsNullOrWhiteSpace(mapping.ChildField))
+                        .Select(mapping => new InterfaceLinkMapping
+                        {
+                            ParentField = mapping.ParentField.Trim(),
+                            ChildField = mapping.ChildField.Trim()
+                        })
+                        .ToList();
+                    if (validMappings.Count > 0)
+                        return validMappings;
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogWarning(ex, "接口 {ServerCode} 关联字段 JSON 解析失败：{LinkMappings}",
+                    iface.ServerCode, iface.LinkMappings);
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.QueryField)
+            ? []
+            :
+            [
+                new InterfaceLinkMapping
+                {
+                    ParentField = iface.ParentResultField,
+                    ChildField = iface.QueryField
+                }
+            ];
+    }
+
     private async Task PushInterfaceDataAsync(
         string pushTarget,
         SyncTaskInterface iface,
@@ -1195,22 +1388,25 @@ public class SyncOrchestrator
         foreach (var group in compositePlans.GroupBy(p => p.ChildInterface.InterfaceKey))
         {
             var childInterface = group.First().ChildInterface;
-            var queryValues = group
-                .Select(p => p.ParentValue)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
+            var queryValueSets = group
+                .Select(p => new InterfaceLinkValueSet(p.LinkValues))
+                .DistinctBy(set => BuildLinkValuesKey(set.Values))
                 .ToList();
 
-            var childData = await QueryChildInterfaceDataAsync(childInterface, task, queryValues, skippedReasons, ct);
+            var childData = await QueryChildInterfaceDataAsync(childInterface, task, queryValueSets, skippedReasons, ct);
             if (childData.Count > 0)
                 InjectTriggerFields(childData, triggerRecord, childInterface.InjectFields);
 
+            var linkMappings = GetInterfaceLinkMappings(childInterface);
             foreach (var record in childData)
             {
-                var childValue = GetStringValue(record, childInterface.QueryField);
-                if (string.IsNullOrWhiteSpace(childValue))
+                var recordValues = linkMappings
+                    .Select(mapping => new InterfaceLinkValue(mapping.ChildField, GetStringValue(record, mapping.ChildField)))
+                    .ToList();
+                if (recordValues.Any(value => string.IsNullOrWhiteSpace(value.Value)))
                     continue;
 
-                var key = BuildChildMapKey(childInterface.InterfaceKey, childValue);
+                var key = BuildChildMapKey(childInterface.InterfaceKey, recordValues);
                 if (!result.TryGetValue(key, out var list))
                 {
                     list = [];
@@ -1227,29 +1423,29 @@ public class SyncOrchestrator
     private async Task<List<Dictionary<string, object>>> QueryChildInterfaceDataAsync(
         SyncTaskInterface childInterface,
         SyncTask task,
-        List<string> queryValues,
+        List<InterfaceLinkValueSet> queryValueSets,
         List<string> skippedReasons,
         CancellationToken ct)
     {
         try
         {
-            return await QueryInterfaceDataAsync(childInterface, task, queryValues, ct);
+            return await QueryInterfaceDataByLinkValueSetsAsync(childInterface, task, queryValueSets, ct);
         }
-        catch (Exception ex) when (queryValues.Count > 1 && !ct.IsCancellationRequested)
+        catch (Exception ex) when (queryValueSets.Count > 1 && !ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex, "子接口 {ServerCode} 批量查询失败，改为逐条查询", childInterface.ServerCode);
 
             var result = new List<Dictionary<string, object>>();
-            foreach (var value in queryValues)
+            foreach (var valueSet in queryValueSets)
             {
                 try
                 {
-                    result.AddRange(await QueryInterfaceDataAsync(childInterface, task, [value], ct));
+                    result.AddRange(await QueryInterfaceDataByLinkValueSetsAsync(childInterface, task, [valueSet], ct));
                 }
                 catch (Exception itemEx) when (!ct.IsCancellationRequested)
                 {
                     skippedReasons.Add(
-                        $"{childInterface.QueryField}={value} 子接口 {childInterface.ServerCode} 查询失败：{itemEx.Message}");
+                        $"{BuildLinkValueDescription(valueSet.Values)} 子接口 {childInterface.ServerCode} 查询失败：{itemEx.Message}");
                 }
             }
 
@@ -1258,13 +1454,21 @@ public class SyncOrchestrator
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             skippedReasons.Add(
-                $"{childInterface.QueryField}={queryValues.FirstOrDefault()} 子接口 {childInterface.ServerCode} 查询失败：{ex.Message}");
+                $"{BuildLinkValueDescription(queryValueSets.FirstOrDefault()?.Values ?? [])} 子接口 {childInterface.ServerCode} 查询失败：{ex.Message}");
             return [];
         }
     }
 
-    private static string BuildChildMapKey(string interfaceKey, string value) =>
-        $"{interfaceKey}|{value}";
+    private static string BuildChildMapKey(string interfaceKey, IReadOnlyList<InterfaceLinkValue> values) =>
+        $"{interfaceKey}|{BuildLinkValuesKey(values)}";
+
+    private static string BuildLinkValuesKey(IReadOnlyList<InterfaceLinkValue> values) =>
+        JsonSerializer.Serialize(values.Select(value => value.Value).ToArray());
+
+    private static string BuildLinkValueDescription(IReadOnlyList<InterfaceLinkValue> values) =>
+        values.Count == 0
+            ? "关联字段为空"
+            : string.Join("，", values.Select(value => $"{value.ChildField}={value.Value}"));
 
     private List<SyncTaskInterface> ResolveMatchedChildInterfaces(
         List<SyncTaskInterface> childInterfaces,
@@ -1555,7 +1759,19 @@ public class SyncOrchestrator
     {
         public SyncTaskInterface ChildInterface { get; init; } = default!;
         public Dictionary<string, object> RootRecord { get; init; } = [];
-        public string ParentValue { get; init; } = "";
+        public List<InterfaceLinkValue> LinkValues { get; init; } = [];
+    }
+
+    private sealed record InterfaceLinkValue(string ChildField, string Value);
+
+    private sealed class InterfaceLinkValueSet
+    {
+        public InterfaceLinkValueSet(IEnumerable<InterfaceLinkValue> values)
+        {
+            Values = values.ToList();
+        }
+
+        public List<InterfaceLinkValue> Values { get; }
     }
 
     private sealed class InterfaceExecutionResult

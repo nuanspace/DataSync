@@ -169,6 +169,7 @@ public class TaskManagementService
             ParentInterfaceKey = source.ParentInterfaceKey,
             QueryValueField = source.QueryValueField,
             ParentResultField = source.ParentResultField,
+            LinkMappings = source.LinkMappings,
             MountField = source.MountField,
             RouteField = source.RouteField,
             RouteOperator = source.RouteOperator,

@@ -439,6 +439,11 @@ public class Program
 
                 db.Database.ExecuteSqlRaw("""
                     ALTER TABLE cyyy.sync_task_interfaces
+                    ADD COLUMN IF NOT EXISTS link_mappings TEXT
+                    """);
+
+                db.Database.ExecuteSqlRaw("""
+                    ALTER TABLE cyyy.sync_task_interfaces
                     ADD COLUMN IF NOT EXISTS mount_field TEXT
                     """);
 

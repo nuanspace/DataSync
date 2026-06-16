@@ -42,3 +42,18 @@
 ::deep .event-type-section > .mud-text:not(:first-child) {
     margin-top: 16px;
 }
+
+::deep .configured-field-row td {
+    background-color: rgba(196, 122, 31, 0.12);
+}
+
+::deep .configured-field-row td:first-child {
+    box-shadow: inset 4px 0 0 var(--mud-palette-warning);
+}
+
+::deep .configured-question-row {
+    background-color: rgba(196, 122, 31, 0.10);
+    border-left: 4px solid var(--mud-palette-warning);
+    border-radius: 4px;
+    padding-left: 6px !important;
+}

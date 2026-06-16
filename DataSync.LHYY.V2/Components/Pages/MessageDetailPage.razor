@@ -128,8 +128,15 @@ else
             @if (_message.Status == MessageStatus.Failed)
             {
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                           OnClick="RetryMessage" Disabled="_retrying">
+                            OnClick="RetryMessage" Disabled="_retrying">
                     重试
+                </MudButton>
+            }
+            @if (CanProcessNow)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow"
+                           OnClick="ProcessMessageNow" Disabled="_processingNow">
+                    直接处理
                 </MudButton>
             }
         </MudCardActions>
@@ -278,15 +285,26 @@ else
     private List<ProcessStepInfo> _stepDetails = [];
     private bool _loading = true;
     private bool _retrying;
+    private bool _processingNow;
     private bool _jsonDialogVisible;
     private string _jsonDialogTitle = "";
     private string _jsonDialogContent = "";
     private readonly DialogOptions _jsonDialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
+    private bool CanProcessNow => _message?.Status != MessageStatus.Processing;
 
     protected override async Task OnPageInitializedAsync()
     {
+        await LoadMessageDetailAsync();
+    }
+
+    private async Task LoadMessageDetailAsync()
+    {
         try
         {
+            _loading = true;
+            _summaryLog = null;
+            _requestLogDetail = null;
+            _stepDetails = [];
             _message = await QueryService.GetMessageByIdAsync(Id);
             if (_message != null)
             {
@@ -351,7 +369,7 @@ else
             if (success)
             {
                 inj_snackbar.Add("已重新提交处理", Severity.Success);
-                _message = await QueryService.GetMessageByIdAsync(Id);
+                await LoadMessageDetailAsync();
             }
             else
             {
@@ -365,6 +383,44 @@ else
         finally
         {
             _retrying = false;
+        }
+    }
+
+    private async Task ProcessMessageNow()
+    {
+        if (!CanProcessNow)
+            return;
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "直接处理",
+            "确定要跳过队列，按当前接口配置立即处理这条消息吗？已过滤消息会清理对应幂等回执后重跑；已成功或部分成功消息会保留重复拦截。",
+            yesText: "确认处理",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        _processingNow = true;
+        try
+        {
+            var success = await QueryService.ProcessMessageNowAsync(Id);
+            if (success)
+            {
+                inj_snackbar.Add("直接处理完成", Severity.Success);
+                await LoadMessageDetailAsync();
+            }
+            else
+            {
+                inj_snackbar.Add("当前消息状态不允许直接处理", Severity.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"直接处理失败: {ex.Message}", Severity.Error);
+            await LoadMessageDetailAsync();
+        }
+        finally
+        {
+            _processingNow = false;
         }
     }
 

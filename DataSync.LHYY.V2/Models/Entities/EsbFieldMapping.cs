@@ -13,6 +13,7 @@ public class EsbFieldMapping
     public const string SubCardFilterTargetField = "__subcard_filter__";
     public const string DictMatchModeContains = "contains";
     public const string DictMatchModeContainsExcludeNegation = "contains_exclude_negation";
+    public const string DictMatchModePriorityFirst = "priority_first";
     public const string DefaultDictMatchMode = DictMatchModeContains;
 
     [Key]
@@ -79,7 +80,10 @@ public class EsbFieldMapping
         && string.Equals(mapping.TargetField, SubCardFilterTargetField, StringComparison.Ordinal);
 
     public static string NormalizeDictMatchMode(string? mode) =>
-        string.Equals(mode, DictMatchModeContainsExcludeNegation, StringComparison.OrdinalIgnoreCase)
-            ? DictMatchModeContainsExcludeNegation
-            : DefaultDictMatchMode;
+        mode?.Trim().ToLowerInvariant() switch
+        {
+            DictMatchModeContainsExcludeNegation => DictMatchModeContainsExcludeNegation,
+            DictMatchModePriorityFirst => DictMatchModePriorityFirst,
+            _ => DefaultDictMatchMode
+        };
 }

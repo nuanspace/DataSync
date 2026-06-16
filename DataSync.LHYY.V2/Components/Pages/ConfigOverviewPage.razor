@@ -5,7 +5,18 @@
 
 <PageTitle>配置总览 - LHYY V2</PageTitle>
 
-<MudText Typo="Typo.h5" Class="mb-2">配置总览</MudText>
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+    <MudText Typo="Typo.h5">配置总览</MudText>
+    <MudSpacer />
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+               Disabled="@(_loading || _exporting)" OnClick="ExportOverviewAsync">
+        导出HTML
+    </MudButton>
+    <MudButton Variant="Variant.Outlined" Color="Color.Success" StartIcon="@Icons.Material.Filled.TableView"
+               Disabled="@(_loading || _exporting)" OnClick="ExportOverviewExcelAsync">
+        导出Excel
+    </MudButton>
+</MudStack>
 
 @* 概要信息 *@
 <MudPaper Class="pa-3 mb-4">
@@ -41,7 +52,7 @@ else
                     @foreach (var (name, label) in PatientFields)
                     {
                         var mappings = GetMappingsForField(MappingTarget.Patient, name);
-                        <tr>
+                        <tr class="@(mappings.Count > 0 ? "configured-field-row" : null)">
                             <td class="mapping-source">@name</td>
                             <td>@label</td>
                             <td>
@@ -112,7 +123,7 @@ else
                                 @foreach (var (name, label) in EventFields)
                                 {
                                     var mappings = GetMappingsForFieldByEventType(MappingTarget.Event, name, tab);
-                                    <tr>
+                                    <tr class="@(mappings.Count > 0 ? "configured-field-row" : null)">
                                         <td class="mapping-source">@name</td>
                                         <td>@label</td>
                                         <td>
@@ -152,8 +163,17 @@ else
                             </tbody>
                         </MudSimpleTable>
 
-                        @* 问卷映射 *@
-                        <MudText Typo="Typo.subtitle1" Class="mb-2"><b>问卷映射</b></MudText>
+                        @* 表单映射 *@
+                        <MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-2">
+                            <MudText Typo="Typo.subtitle1"><b>表单映射</b></MudText>
+                            <MudSpacer />
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                                       StartIcon="@Icons.Material.Filled.FactCheck"
+                                       Disabled="@(tab.Interfaces.Count == 0 || tab.FormNodes.Count == 0)"
+                                       OnClick="@(() => CheckAndClearMissingFormQuestions(tab))">
+                                检查题目映射
+                            </MudButton>
+                        </MudStack>
                         @if (string.IsNullOrEmpty(tab.EffectiveLicenseCode))
                         {
                             <MudAlert Severity="Severity.Warning" Dense="true">未配置 LicenseCode，无法加载问卷</MudAlert>
@@ -277,6 +297,7 @@ else
 
     // 页面状态
     private bool _loading = true;
+    private bool _exporting;
     private string? _defaultLicenseCode;
     private List<EsbInterfaceConfig> _interfaces = [];
     private List<EsbFieldMapping> _allMappings = [];
@@ -488,6 +509,583 @@ else
     private static bool IsVisibleProductEventType(string eventTypeName) =>
         eventTypeName is "住院" or "手术";
 
+    #region 导出
+
+    private async Task ExportOverviewAsync()
+    {
+        await DownloadOverviewAsync("html", "text/html;charset=utf-8", BuildOverviewExportHtml);
+    }
+
+    private async Task ExportOverviewExcelAsync()
+    {
+        await DownloadOverviewAsync("xls", "application/vnd.ms-excel;charset=utf-8", BuildOverviewExcelXml);
+    }
+
+    private async Task DownloadOverviewAsync(string extension, string contentType, Func<bool, string> contentFactory)
+    {
+        if (_loading || _exporting)
+            return;
+
+        var includeMappingSource = await ConfirmIncludeMappingSourceAsync();
+        _exporting = true;
+        try
+        {
+            var content = contentFactory(includeMappingSource);
+            var fileName = $"配置总览_{BuildSafeFilePart(CurrentIntegrationProjectCode)}_{DateTime.Now:yyyyMMddHHmmss}.{extension}";
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.downloadFile", fileName, "\uFEFF" + content, contentType);
+            inj_snackbar.Add("导出成功", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"导出失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    private async Task<bool> ConfirmIncludeMappingSourceAsync()
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "导出选项",
+            "是否导出映射来源？包含时会显示来源路径和使用的接口。",
+            yesText: "包含映射来源",
+            cancelText: "不包含映射来源");
+
+        return confirmed == true;
+    }
+
+    private string BuildOverviewExportHtml(bool includeInterfaceSource)
+    {
+        var sb = new System.Text.StringBuilder();
+        var patientMappedCount = GetMappedCount(MappingTarget.Patient, PatientFields.Select(f => f.Name));
+
+        sb.AppendLine("<!DOCTYPE html>");
+        sb.AppendLine("<html lang=\"zh-CN\">");
+        sb.AppendLine("<head>");
+        sb.AppendLine("<meta charset=\"utf-8\">");
+        sb.AppendLine("<title>配置总览</title>");
+        sb.AppendLine("<style>");
+        sb.AppendLine("body{font-family:\"Microsoft YaHei\",Arial,sans-serif;color:#102033;margin:24px;background:#f7fafc;}");
+        sb.AppendLine("h1{font-size:24px;margin:0 0 12px;}h2{font-size:18px;margin:28px 0 10px;}h3{font-size:15px;margin:16px 0 8px;}");
+        sb.AppendLine(".summary{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px;color:#425466;}.summary span{background:#fff;border:1px solid #dce5ec;border-radius:6px;padding:8px 10px;}");
+        sb.AppendLine("table{width:100%;border-collapse:collapse;background:#fff;margin-bottom:16px;}th,td{border:1px solid #dce5ec;padding:7px 8px;text-align:left;vertical-align:top;font-size:13px;}th{background:#edf3f8;}");
+        sb.AppendLine(".configured{background:#fff8d8;box-shadow:inset 4px 0 0 #c47a1f;}.status{font-weight:700;color:#9a5b00;}.muted{color:#789;}.source{font-family:Consolas,\"Courier New\",monospace;}");
+        sb.AppendLine(".tag{display:inline-block;background:#eef3f7;border-radius:4px;padding:1px 6px;margin:0 4px 4px 0;color:#425466;}.disabled{text-decoration:line-through;color:#8a97a3;}");
+        sb.AppendLine("</style>");
+        sb.AppendLine("</head>");
+        sb.AppendLine("<body>");
+        sb.AppendLine("<h1>配置总览</h1>");
+        sb.AppendLine("<div class=\"summary\">");
+        sb.Append("<span>当前项目：").Append(Html(CurrentIntegrationProjectCode)).AppendLine("</span>");
+        sb.Append("<span>LicenseCode：").Append(Html(_defaultLicenseCode ?? "未配置")).AppendLine("</span>");
+        sb.Append("<span>已注册接口：").Append(_interfaces.Count).AppendLine(" 个</span>");
+        sb.Append("<span>导出时间：").Append(Html(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))).AppendLine("</span>");
+        sb.AppendLine("</div>");
+
+        sb.Append("<h2>Patient（患者）</h2>");
+        sb.Append("<p>").Append(PatientFields.Count).Append(" 个字段，").Append(patientMappedCount).AppendLine(" 个已配置</p>");
+        AppendFieldExportTable(sb, PatientFields, field => GetMappingsForField(MappingTarget.Patient, field), includeInterfaceSource);
+
+        foreach (var tab in _eventTypeTabs)
+        {
+            sb.Append("<h2>").Append(Html(GetEventTypeTabText(tab))).AppendLine("</h2>");
+            sb.Append("<p>接口：").Append(Html(string.Join("，", tab.Interfaces.Select(i => GetInterfaceLabel(i.TranCode)))));
+            sb.Append("；LicenseCode：").Append(Html(tab.EffectiveLicenseCode ?? "未配置")).AppendLine("</p>");
+
+            sb.Append("<h3>Event 字段映射</h3>");
+            sb.Append("<p>").Append(EventFields.Count).Append(" 个字段，").Append(GetMappedCountForEventType(tab)).AppendLine(" 个已配置</p>");
+            AppendFieldExportTable(sb, EventFields, field => GetMappingsForFieldByEventType(MappingTarget.Event, field, tab), includeInterfaceSource);
+
+            sb.AppendLine("<h3>表单映射</h3>");
+            if (string.IsNullOrWhiteSpace(tab.EffectiveLicenseCode))
+            {
+                sb.AppendLine("<p class=\"muted\">未配置 LicenseCode，无法加载问卷。</p>");
+            }
+            else if (tab.FormSetId == null)
+            {
+                sb.Append("<p class=\"muted\">未找到事件类型 ").Append(Html(tab.EventTypeName)).AppendLine(" 对应的 FormSet。</p>");
+            }
+            else if (tab.FormNodes.Count == 0)
+            {
+                sb.AppendLine("<p class=\"muted\">该 FormSet 下无表单问题。</p>");
+            }
+            else
+            {
+                var (totalQ, totalMapped) = CountAllMappedForEventType(tab);
+                sb.Append("<p>共 ").Append(totalQ).Append(" 个问题，").Append(totalMapped).AppendLine(" 个已配置</p>");
+                AppendQuestionExportTable(sb, tab, includeInterfaceSource);
+            }
+        }
+
+        sb.AppendLine("</body>");
+        sb.AppendLine("</html>");
+        return sb.ToString();
+    }
+
+    private string BuildOverviewExcelXml(bool includeInterfaceSource)
+    {
+        var sb = new System.Text.StringBuilder();
+        var usedSheetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+        sb.AppendLine("<?mso-application progid=\"Excel.Sheet\"?>");
+        sb.AppendLine("<Workbook xmlns=\"urn:schemas-microsoft-com:office:spreadsheet\"");
+        sb.AppendLine(" xmlns:o=\"urn:schemas-microsoft-com:office:office\"");
+        sb.AppendLine(" xmlns:x=\"urn:schemas-microsoft-com:office:excel\"");
+        sb.AppendLine(" xmlns:ss=\"urn:schemas-microsoft-com:office:spreadsheet\">");
+        sb.AppendLine("<Styles>");
+        sb.AppendLine("<Style ss:ID=\"Default\" ss:Name=\"Normal\"><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/><Font ss:FontName=\"Microsoft YaHei\" ss:Size=\"10\"/></Style>");
+        sb.AppendLine("<Style ss:ID=\"Title\"><Font ss:FontName=\"Microsoft YaHei\" ss:Size=\"14\" ss:Bold=\"1\"/><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>");
+        sb.AppendLine("<Style ss:ID=\"Header\"><Font ss:FontName=\"Microsoft YaHei\" ss:Bold=\"1\"/><Interior ss:Color=\"#EDF3F8\" ss:Pattern=\"Solid\"/><Borders><Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/></Borders><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>");
+        sb.AppendLine("<Style ss:ID=\"Cell\"><Borders><Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/></Borders><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>");
+        sb.AppendLine("<Style ss:ID=\"Configured\"><Font ss:FontName=\"Microsoft YaHei\" ss:Color=\"#9A5B00\" ss:Bold=\"1\"/><Interior ss:Color=\"#FFF8D8\" ss:Pattern=\"Solid\"/><Borders><Border ss:Position=\"Bottom\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Left\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Right\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/><Border ss:Position=\"Top\" ss:LineStyle=\"Continuous\" ss:Weight=\"1\"/></Borders><Alignment ss:Vertical=\"Top\" ss:WrapText=\"1\"/></Style>");
+        sb.AppendLine("</Styles>");
+
+        AppendExcelPatientWorksheet(sb, usedSheetNames, includeInterfaceSource);
+        foreach (var tab in _eventTypeTabs)
+        {
+            AppendExcelEventTypeWorksheet(sb, tab, usedSheetNames, includeInterfaceSource);
+        }
+
+        sb.AppendLine("</Workbook>");
+        return sb.ToString();
+    }
+
+    private void AppendExcelPatientWorksheet(System.Text.StringBuilder sb, HashSet<string> usedSheetNames, bool includeInterfaceSource)
+    {
+        AppendExcelWorksheetStart(sb, BuildExcelSheetName("Patient", usedSheetNames));
+        AppendExcelSummaryRows(sb);
+        AppendExcelRow(sb, "Title", "Patient（患者）");
+        AppendExcelRow(sb, "Cell", $"{PatientFields.Count} 个字段，{GetMappedCount(MappingTarget.Patient, PatientFields.Select(f => f.Name))} 个已配置");
+        AppendExcelBlankRow(sb);
+        AppendExcelFieldRows(sb, PatientFields, field => GetMappingsForField(MappingTarget.Patient, field), includeInterfaceSource);
+        AppendExcelWorksheetEnd(sb);
+    }
+
+    private void AppendExcelEventTypeWorksheet(System.Text.StringBuilder sb, EventTypeTabData tab, HashSet<string> usedSheetNames, bool includeInterfaceSource)
+    {
+        AppendExcelWorksheetStart(sb, BuildExcelSheetName(GetEventTypeTabText(tab), usedSheetNames));
+        AppendExcelSummaryRows(sb);
+        AppendExcelRow(sb, "Title", GetEventTypeTabText(tab));
+        AppendExcelRow(sb, "Cell", "接口", string.Join("，", tab.Interfaces.Select(i => GetInterfaceLabel(i.TranCode))));
+        AppendExcelRow(sb, "Cell", "LicenseCode", tab.EffectiveLicenseCode ?? "未配置");
+        AppendExcelBlankRow(sb);
+
+        AppendExcelRow(sb, "Title", "Event 字段映射");
+        AppendExcelRow(sb, "Cell", $"{EventFields.Count} 个字段，{GetMappedCountForEventType(tab)} 个已配置");
+        AppendExcelFieldRows(sb, EventFields, field => GetMappingsForFieldByEventType(MappingTarget.Event, field, tab), includeInterfaceSource);
+        AppendExcelBlankRow(sb);
+
+        AppendExcelRow(sb, "Title", "表单映射");
+        if (string.IsNullOrWhiteSpace(tab.EffectiveLicenseCode))
+        {
+            AppendExcelRow(sb, "Cell", "未配置 LicenseCode，无法加载问卷。");
+        }
+        else if (tab.FormSetId == null)
+        {
+            AppendExcelRow(sb, "Cell", $"未找到事件类型 {tab.EventTypeName} 对应的 FormSet。");
+        }
+        else if (tab.FormNodes.Count == 0)
+        {
+            AppendExcelRow(sb, "Cell", "该 FormSet 下无表单问题。");
+        }
+        else
+        {
+            var (totalQ, totalMapped) = CountAllMappedForEventType(tab);
+            AppendExcelRow(sb, "Cell", $"共 {totalQ} 个问题，{totalMapped} 个已配置");
+            AppendExcelQuestionRows(sb, tab, includeInterfaceSource);
+        }
+
+        AppendExcelWorksheetEnd(sb);
+    }
+
+    private void AppendExcelSummaryRows(System.Text.StringBuilder sb)
+    {
+        AppendExcelRow(sb, "Cell", "当前项目", CurrentIntegrationProjectCode);
+        AppendExcelRow(sb, "Cell", "LicenseCode", _defaultLicenseCode ?? "未配置");
+        AppendExcelRow(sb, "Cell", "已注册接口", $"{_interfaces.Count} 个");
+        AppendExcelRow(sb, "Cell", "导出时间", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+        AppendExcelBlankRow(sb);
+    }
+
+    private void AppendExcelFieldRows(
+        System.Text.StringBuilder sb,
+        IEnumerable<(string Name, string Label)> fields,
+        Func<string, List<EsbFieldMapping>> getMappings,
+        bool includeInterfaceSource)
+    {
+        if (includeInterfaceSource)
+            AppendExcelRow(sb, "Header", "字段名", "中文名", "状态", "映射来源");
+        else
+            AppendExcelRow(sb, "Header", "字段名", "中文名", "状态");
+
+        foreach (var (name, label) in fields)
+        {
+            var mappings = getMappings(name);
+            if (includeInterfaceSource)
+            {
+                AppendExcelRow(
+                    sb,
+                    mappings.Count > 0 ? "Configured" : "Cell",
+                    name,
+                    label,
+                    mappings.Count > 0 ? "★ 已配置" : "未配置",
+                    BuildExportMappingsText(mappings, true));
+            }
+            else
+            {
+                AppendExcelRow(
+                    sb,
+                    mappings.Count > 0 ? "Configured" : "Cell",
+                    name,
+                    label,
+                    mappings.Count > 0 ? "★ 已配置" : "未配置");
+            }
+        }
+    }
+
+    private void AppendExcelQuestionRows(System.Text.StringBuilder sb, EventTypeTabData tab, bool includeInterfaceSource)
+    {
+        if (includeInterfaceSource)
+            AppendExcelRow(sb, "Header", "表单", "卡片", "问题", "类型", "状态", "映射来源");
+        else
+            AppendExcelRow(sb, "Header", "表单", "卡片", "问题", "类型", "状态");
+
+        foreach (var form in tab.FormNodes)
+        {
+            AppendExcelQuestionRows(sb, tab, form.Name, FormBrowserHelper.GetOrderedChildren(form), null, "", includeInterfaceSource);
+        }
+    }
+
+    private void AppendExcelQuestionRows(
+        System.Text.StringBuilder sb,
+        EventTypeTabData tab,
+        string formName,
+        IEnumerable<FormTreeChildNode> children,
+        CardNode? subCardAncestor,
+        string cardPath,
+        bool includeInterfaceSource)
+    {
+        foreach (var child in children)
+        {
+            if (child.Card != null)
+            {
+                var card = child.Card;
+                var isSubCard = card.CardType is "multiple" or "table";
+                var currentSubCard = isSubCard ? card : subCardAncestor;
+                var nextCardPath = string.IsNullOrWhiteSpace(cardPath) ? card.Name : $"{cardPath} > {card.Name}";
+                AppendExcelQuestionRows(sb, tab, formName, FormBrowserHelper.GetOrderedChildren(card), currentSubCard, nextCardPath, includeInterfaceSource);
+                continue;
+            }
+
+            if (child.Question == null)
+                continue;
+
+            var target = subCardAncestor != null ? MappingTarget.SubCard : MappingTarget.Question;
+            var mappings = GetMappingsForFieldByEventType(target, child.Question.Id, tab, subCardAncestor?.CardId);
+            if (includeInterfaceSource)
+            {
+                AppendExcelRow(
+                    sb,
+                    mappings.Count > 0 ? "Configured" : "Cell",
+                    formName,
+                    string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath,
+                    child.Question.Title ?? "",
+                    child.Question.DataType ?? "",
+                    mappings.Count > 0 ? "★ 已配置" : "未配置",
+                    BuildExportMappingsText(mappings, true));
+            }
+            else
+            {
+                AppendExcelRow(
+                    sb,
+                    mappings.Count > 0 ? "Configured" : "Cell",
+                    formName,
+                    string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath,
+                    child.Question.Title ?? "",
+                    child.Question.DataType ?? "",
+                    mappings.Count > 0 ? "★ 已配置" : "未配置");
+            }
+        }
+    }
+
+    private static void AppendExcelWorksheetStart(System.Text.StringBuilder sb, string sheetName)
+    {
+        sb.Append("<Worksheet ss:Name=\"").Append(Xml(sheetName)).AppendLine("\">");
+        sb.AppendLine("<Table>");
+        sb.AppendLine("<Column ss:Width=\"120\"/>");
+        sb.AppendLine("<Column ss:Width=\"160\"/>");
+        sb.AppendLine("<Column ss:Width=\"260\"/>");
+        sb.AppendLine("<Column ss:Width=\"100\"/>");
+        sb.AppendLine("<Column ss:Width=\"100\"/>");
+        sb.AppendLine("<Column ss:Width=\"420\"/>");
+    }
+
+    private static void AppendExcelWorksheetEnd(System.Text.StringBuilder sb)
+    {
+        sb.AppendLine("</Table>");
+        sb.AppendLine("</Worksheet>");
+    }
+
+    private static void AppendExcelBlankRow(System.Text.StringBuilder sb) => sb.AppendLine("<Row/>");
+
+    private static void AppendExcelRow(System.Text.StringBuilder sb, string styleId, params string[] values)
+    {
+        sb.Append("<Row>");
+        foreach (var value in values)
+        {
+            sb.Append("<Cell ss:StyleID=\"").Append(styleId).Append("\"><Data ss:Type=\"String\">")
+                .Append(Xml(value))
+                .Append("</Data></Cell>");
+        }
+        sb.AppendLine("</Row>");
+    }
+
+    private void AppendFieldExportTable(
+        System.Text.StringBuilder sb,
+        IEnumerable<(string Name, string Label)> fields,
+        Func<string, List<EsbFieldMapping>> getMappings,
+        bool includeInterfaceSource)
+    {
+        sb.AppendLine("<table>");
+        sb.Append("<thead><tr><th>字段名</th><th>中文名</th><th>状态</th>");
+        if (includeInterfaceSource)
+            sb.Append("<th>映射来源</th>");
+        sb.AppendLine("</tr></thead>");
+        sb.AppendLine("<tbody>");
+        foreach (var (name, label) in fields)
+        {
+            AppendFieldExportRow(sb, name, label, getMappings(name), includeInterfaceSource);
+        }
+        sb.AppendLine("</tbody>");
+        sb.AppendLine("</table>");
+    }
+
+    private void AppendFieldExportRow(
+        System.Text.StringBuilder sb,
+        string name,
+        string label,
+        List<EsbFieldMapping> mappings,
+        bool includeInterfaceSource)
+    {
+        var configured = mappings.Count > 0;
+        sb.Append("<tr");
+        if (configured)
+            sb.Append(" class=\"configured\"");
+        sb.Append(">");
+        sb.Append("<td class=\"source\">").Append(Html(name)).Append("</td>");
+        sb.Append("<td>").Append(Html(label)).Append("</td>");
+        sb.Append("<td");
+        if (configured)
+            sb.Append(" class=\"status\"");
+        sb.Append(">").Append(configured ? "★ 已配置" : "未配置").Append("</td>");
+        if (includeInterfaceSource)
+            sb.Append("<td>").Append(BuildExportMappingsHtml(mappings, true)).Append("</td>");
+        sb.AppendLine("</tr>");
+    }
+
+    private void AppendQuestionExportTable(System.Text.StringBuilder sb, EventTypeTabData tab, bool includeInterfaceSource)
+    {
+        sb.AppendLine("<table>");
+        sb.Append("<thead><tr><th>表单</th><th>卡片</th><th>问题</th><th>类型</th><th>状态</th>");
+        if (includeInterfaceSource)
+            sb.Append("<th>映射来源</th>");
+        sb.AppendLine("</tr></thead>");
+        sb.AppendLine("<tbody>");
+        foreach (var form in tab.FormNodes)
+        {
+            AppendQuestionExportRows(sb, tab, form.Name, FormBrowserHelper.GetOrderedChildren(form), null, "", includeInterfaceSource);
+        }
+        sb.AppendLine("</tbody>");
+        sb.AppendLine("</table>");
+    }
+
+    private void AppendQuestionExportRows(
+        System.Text.StringBuilder sb,
+        EventTypeTabData tab,
+        string formName,
+        IEnumerable<FormTreeChildNode> children,
+        CardNode? subCardAncestor,
+        string cardPath,
+        bool includeInterfaceSource)
+    {
+        foreach (var child in children)
+        {
+            if (child.Card != null)
+            {
+                var card = child.Card;
+                var isSubCard = card.CardType is "multiple" or "table";
+                var currentSubCard = isSubCard ? card : subCardAncestor;
+                var nextCardPath = string.IsNullOrWhiteSpace(cardPath) ? card.Name : $"{cardPath} > {card.Name}";
+                AppendQuestionExportRows(sb, tab, formName, FormBrowserHelper.GetOrderedChildren(card), currentSubCard, nextCardPath, includeInterfaceSource);
+                continue;
+            }
+
+            if (child.Question == null)
+                continue;
+
+            var target = subCardAncestor != null ? MappingTarget.SubCard : MappingTarget.Question;
+            var mappings = GetMappingsForFieldByEventType(target, child.Question.Id, tab, subCardAncestor?.CardId);
+            AppendQuestionExportRow(sb, formName, cardPath, child.Question, mappings, includeInterfaceSource);
+        }
+    }
+
+    private void AppendQuestionExportRow(
+        System.Text.StringBuilder sb,
+        string formName,
+        string cardPath,
+        QuestionInfo question,
+        List<EsbFieldMapping> mappings,
+        bool includeInterfaceSource)
+    {
+        var configured = mappings.Count > 0;
+        sb.Append("<tr");
+        if (configured)
+            sb.Append(" class=\"configured\"");
+        sb.Append(">");
+        sb.Append("<td>").Append(Html(formName)).Append("</td>");
+        sb.Append("<td>").Append(Html(string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath)).Append("</td>");
+        sb.Append("<td>").Append(Html(question.Title ?? "")).Append("</td>");
+        sb.Append("<td>").Append(Html(question.DataType ?? "")).Append("</td>");
+        sb.Append("<td");
+        if (configured)
+            sb.Append(" class=\"status\"");
+        sb.Append(">").Append(configured ? "★ 已配置" : "未配置").Append("</td>");
+        if (includeInterfaceSource)
+            sb.Append("<td>").Append(BuildExportMappingsHtml(mappings, true)).Append("</td>");
+        sb.AppendLine("</tr>");
+    }
+
+    private string BuildExportMappingsHtml(List<EsbFieldMapping> mappings, bool includeInterfaceSource)
+    {
+        if (mappings.Count == 0)
+            return "<span class=\"muted\">未配置</span>";
+
+        return string.Join("<br>", mappings.Select(m => BuildExportMappingHtml(m, includeInterfaceSource)));
+    }
+
+    private string BuildExportMappingHtml(EsbFieldMapping mapping, bool includeInterfaceSource)
+    {
+        var interfaceClass = IsInterfaceEnabled(mapping.TranCode) ? "tag" : "tag disabled";
+        var parts = new List<string>();
+
+        if (includeInterfaceSource)
+            parts.Add($"<span class=\"{interfaceClass}\">{Html(GetInterfaceLabel(mapping.TranCode))}</span>");
+
+        parts.Add($"<span class=\"source\">{Html(GetMappingSourceText(mapping))}</span>");
+
+        if (includeInterfaceSource && !IsInterfaceEnabled(mapping.TranCode))
+            parts.Add("<span class=\"tag\">接口已禁用</span>");
+
+        if (!string.IsNullOrWhiteSpace(mapping.DictCode))
+        {
+            parts.Add($"<span class=\"tag\">字典: {Html(mapping.DictCode)}</span>");
+            var dictMatchModeText = GetDictMatchModeDisplayText(mapping.DictMatchMode);
+            if (!string.IsNullOrWhiteSpace(dictMatchModeText))
+                parts.Add($"<span class=\"tag\">{dictMatchModeText}</span>");
+        }
+
+        if (!string.IsNullOrWhiteSpace(mapping.DefaultValue))
+            parts.Add($"<span class=\"tag\">默认: {Html(mapping.DefaultValue)}</span>");
+        if (!string.IsNullOrWhiteSpace(mapping.ValueExpression))
+            parts.Add($"<span class=\"tag\">表达式: {Html(mapping.ValueExpression)}</span>");
+        if (GetMappingFilterCount(mapping) > 0)
+            parts.Add($"<span class=\"tag\">过滤: {GetMappingFilterCount(mapping)}</span>");
+        if (!mapping.IsEnabled)
+            parts.Add("<span class=\"tag\">映射已禁用</span>");
+
+        return string.Join(" ", parts);
+    }
+
+    private string BuildExportMappingsText(List<EsbFieldMapping> mappings, bool includeInterfaceSource)
+    {
+        if (mappings.Count == 0)
+            return "未配置";
+
+        return string.Join("\n", mappings.Select(m => BuildExportMappingText(m, includeInterfaceSource)));
+    }
+
+    private string BuildExportMappingText(EsbFieldMapping mapping, bool includeInterfaceSource)
+    {
+        var parts = new List<string>();
+
+        if (includeInterfaceSource)
+            parts.Add(GetInterfaceLabel(mapping.TranCode));
+
+        parts.Add(GetMappingSourceText(mapping));
+
+        if (includeInterfaceSource && !IsInterfaceEnabled(mapping.TranCode))
+            parts.Add("接口已禁用");
+        if (!string.IsNullOrWhiteSpace(mapping.DictCode))
+        {
+            parts.Add($"字典: {mapping.DictCode}");
+            var dictMatchModeText = GetDictMatchModeDisplayText(mapping.DictMatchMode);
+            if (!string.IsNullOrWhiteSpace(dictMatchModeText))
+                parts.Add(dictMatchModeText);
+        }
+        if (!string.IsNullOrWhiteSpace(mapping.DefaultValue))
+            parts.Add($"默认: {mapping.DefaultValue}");
+        if (!string.IsNullOrWhiteSpace(mapping.ValueExpression))
+            parts.Add($"表达式: {mapping.ValueExpression}");
+        if (GetMappingFilterCount(mapping) > 0)
+            parts.Add($"过滤: {GetMappingFilterCount(mapping)}");
+        if (!mapping.IsEnabled)
+            parts.Add("映射已禁用");
+
+        return string.Join("；", parts);
+    }
+
+    private static string Html(string? value) => System.Net.WebUtility.HtmlEncode(value ?? "");
+
+    private static string GetDictMatchModeDisplayText(string? dictMatchMode) =>
+        EsbFieldMapping.NormalizeDictMatchMode(dictMatchMode) switch
+        {
+            EsbFieldMapping.DictMatchModeContainsExcludeNegation => "排除否定",
+            EsbFieldMapping.DictMatchModePriorityFirst => "按排序优先命中",
+            _ => ""
+        };
+
+    private static string Xml(string? value) => System.Security.SecurityElement.Escape(value ?? "") ?? "";
+
+    private static string BuildSafeFilePart(string? value)
+    {
+        var result = string.IsNullOrWhiteSpace(value) ? "DEFAULT" : value.Trim();
+        foreach (var invalidChar in System.IO.Path.GetInvalidFileNameChars())
+        {
+            result = result.Replace(invalidChar, '_');
+        }
+        return result;
+    }
+
+    private static string BuildExcelSheetName(string? value, HashSet<string> usedSheetNames)
+    {
+        var name = string.IsNullOrWhiteSpace(value) ? "Sheet" : value.Trim();
+        foreach (var invalidChar in new[] { ':', '\\', '/', '?', '*', '[', ']', '\'' })
+        {
+            name = name.Replace(invalidChar, '_');
+        }
+
+        if (name.Length > 31)
+            name = name[..31];
+        if (string.IsNullOrWhiteSpace(name))
+            name = "Sheet";
+
+        var baseName = name;
+        var index = 2;
+        while (!usedSheetNames.Add(name))
+        {
+            var suffix = $"_{index++}";
+            var maxBaseLength = Math.Max(1, 31 - suffix.Length);
+            name = (baseName.Length > maxBaseLength ? baseName[..maxBaseLength] : baseName) + suffix;
+        }
+
+        return name;
+    }
+
+    #endregion
+
     #region 公共映射条目渲染
 
     /// <summary>
@@ -503,9 +1101,9 @@ else
             @if (!string.IsNullOrEmpty(m.DictCode))
             {
                 <span class="mapping-tag">字典: @m.DictCode</span>
-                @if (EsbFieldMapping.NormalizeDictMatchMode(m.DictMatchMode) == EsbFieldMapping.DictMatchModeContainsExcludeNegation)
+                @if (!string.IsNullOrWhiteSpace(GetDictMatchModeDisplayText(m.DictMatchMode)))
                 {
-                    <span class="mapping-tag">排除否定</span>
+                    <span class="mapping-tag">@GetDictMatchModeDisplayText(m.DictMatchMode)</span>
                 }
             }
             @if (!string.IsNullOrEmpty(m.DefaultValue))
@@ -570,6 +1168,129 @@ else
     private bool IsInterfaceEnabled(string tranCode)
     {
         return !_interfaceDict.TryGetValue(tranCode, out var iface) || iface.IsEnabled;
+    }
+
+    private async Task CheckAndClearMissingFormQuestions(EventTypeTabData tab)
+    {
+        if (tab.Interfaces.Count == 0)
+        {
+            inj_snackbar.Add("该事件类型暂无接口，无需检查。", Severity.Info);
+            return;
+        }
+
+        var scope = BuildFormQuestionScope(tab);
+        if (scope.QuestionIds.Count == 0)
+        {
+            inj_snackbar.Add("当前事件类型未加载到表单题目，无法检查。", Severity.Warning);
+            return;
+        }
+
+        var missingMappings = _allMappings
+            .Where(m => tab.TranCodes.Contains(m.TranCode) && IsFormQuestionMappingOutsideScope(m, scope))
+            .ToList();
+
+        await using var db = await ContextFactory.CreateDbContextAsync();
+        var tranCodes = tab.TranCodes.ToList();
+        var subCardFilterMappings = await ApplyCurrentProjectScope(db.EsbFieldMappings, false)
+            .Where(m => tranCodes.Contains(m.TranCode)
+                        && m.MappingTarget == MappingTarget.SubCard
+                        && m.TargetField == EsbFieldMapping.SubCardFilterTargetField)
+            .ToListAsync();
+        var missingSubCardFilters = subCardFilterMappings
+            .Where(m => !m.CardId.HasValue || !scope.SubCardIds.Contains(m.CardId.Value))
+            .ToList();
+
+        if (missingMappings.Count == 0 && missingSubCardFilters.Count == 0)
+        {
+            inj_snackbar.Add("检查完成，未发现当前表单外的题目映射。", Severity.Success);
+            return;
+        }
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "清理表单题映射",
+            $"事件类型【{tab.EventTypeName}】检查到 {missingMappings.Count} 条题目映射不属于当前表单，{missingSubCardFilters.Count} 个 SubCard 过滤不属于当前表单。确定清理吗？",
+            yesText: "清理",
+            cancelText: "取消");
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        var mappingIds = missingMappings
+            .Select(m => m.Id)
+            .Concat(missingSubCardFilters.Select(m => m.Id))
+            .Distinct()
+            .ToList();
+
+        var rules = await db.EsbFilterRules
+            .Where(r => r.MappingId != null && mappingIds.Contains(r.MappingId.Value))
+            .ToListAsync();
+        var entities = await db.EsbFieldMappings
+            .Where(m => mappingIds.Contains(m.Id))
+            .ToListAsync();
+
+        db.EsbFilterRules.RemoveRange(rules);
+        db.EsbFieldMappings.RemoveRange(entities);
+        await db.SaveChangesAsync();
+
+        ConfigSvc.ClearCache();
+        inj_snackbar.Add($"已清理 {entities.Count} 条失效表单映射。", Severity.Success);
+        await LoadAllDataAsync();
+    }
+
+    private static FormQuestionScope BuildFormQuestionScope(EventTypeTabData tab)
+    {
+        var scope = new FormQuestionScope();
+        foreach (var form in tab.FormNodes)
+        {
+            foreach (var question in form.OrphanQuestions)
+            {
+                scope.QuestionIds.Add(question.Id);
+            }
+
+            foreach (var card in form.Cards)
+            {
+                IndexFormQuestionScope(card, scope);
+            }
+        }
+
+        return scope;
+    }
+
+    private static void IndexFormQuestionScope(CardNode card, FormQuestionScope scope)
+    {
+        if (card.CardType is "multiple" or "table")
+        {
+            scope.SubCardIds.Add(card.CardId);
+        }
+
+        foreach (var question in card.Questions)
+        {
+            scope.QuestionIds.Add(question.Id);
+        }
+
+        foreach (var subCard in card.SubCards)
+        {
+            IndexFormQuestionScope(subCard, scope);
+        }
+    }
+
+    private static bool IsFormQuestionMappingOutsideScope(EsbFieldMapping mapping, FormQuestionScope scope)
+    {
+        return mapping.MappingTarget switch
+        {
+            MappingTarget.Question => !scope.QuestionIds.Contains(mapping.TargetField),
+            MappingTarget.SubCard => !scope.QuestionIds.Contains(mapping.TargetField)
+                                     || !mapping.CardId.HasValue
+                                     || !scope.SubCardIds.Contains(mapping.CardId.Value),
+            _ => false,
+        };
+    }
+
+    private sealed class FormQuestionScope
+    {
+        public HashSet<string> QuestionIds { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<Guid> SubCardIds { get; } = [];
     }
 
     private static bool HasValueSource(EsbFieldMapping mapping) =>
@@ -924,12 +1645,17 @@ else
 
         <MudTreeViewItem T="string" Value="@q.Id">
             <BodyContent>
-                <div style="padding:3px 0;">
+                <div class="@(hasMappings ? "configured-question-row" : null)" style="padding:3px 0;">
                     <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                         <MudIcon Icon="@Icons.Material.Filled.Circle" Size="Size.Small"
                                  Color="@(hasMappings ? Color.Success : Color.Default)"
                                  Style="font-size:10px;" />
                         <MudText Typo="Typo.body2" Style="font-weight:500;">@q.Title</MudText>
+                        @if (hasMappings)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Warning"
+                                     Style="height:18px;font-size:10px;">已配置</MudChip>
+                        }
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default"
                                  Style="height:18px;font-size:10px;">@q.DataType</MudChip>
                         @if (subCardContext != null)

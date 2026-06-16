@@ -93,13 +93,18 @@ public class IngestionService
     public async Task IngestAsync(IngestionSource source, CancellationToken ct)
     {
         var checkpointKey = $"INGEST_{source.ServerCode}";
-        var to = DateTime.Now.AddMinutes(-source.EndOffsetMinutes);
-        var fallbackFrom = DateTime.Now.AddMinutes(-source.StartOffsetMinutes);
+        var now = DateTime.Now;
+        var to = now.AddMinutes(-source.EndOffsetMinutes);
+        var offsetFrom = now.AddMinutes(-source.StartOffsetMinutes);
         var checkpoint = await _logService.GetCheckpointAsync(checkpointKey, ct);
         var lookbackMinutes = Math.Max(0, source.LookbackMinutes);
-        var from = checkpoint.HasValue
+        var checkpointFrom = checkpoint.HasValue
             ? checkpoint.Value.AddMinutes(-lookbackMinutes)
-            : fallbackFrom;
+            : offsetFrom;
+        var from = checkpointFrom < offsetFrom ? checkpointFrom : offsetFrom;
+        var windowMode = checkpoint.HasValue
+            ? (from == offsetFrom ? "检查点+偏移兜底" : "检查点回看")
+            : "默认时间窗";
 
         if (from > to)
             from = to;
@@ -109,7 +114,7 @@ public class IngestionService
             source.Name,
             from,
             to,
-            checkpoint.HasValue ? "检查点回看" : "默认时间窗");
+            windowMode);
 
         var conditions = new List<DataLakeCondition>
         {

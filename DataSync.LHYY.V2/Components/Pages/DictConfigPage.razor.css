@@ -87,3 +87,66 @@
         padding-left: 0;
     }
 }
+
+.dict-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+::deep .dict-template-dialog {
+    width: min(1180px, calc(100vw - 64px));
+    max-width: min(1180px, calc(100vw - 64px));
+}
+
+::deep .dict-template-dialog .mud-dialog-content {
+    max-height: 76vh;
+    overflow-y: auto;
+}
+
+.dict-template-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.dict-template-group {
+    margin-top: 12px;
+}
+
+.dict-template-target {
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+::deep .dict-template-table table {
+    table-layout: fixed;
+}
+
+::deep .dict-template-table th:first-child,
+::deep .dict-template-table td:first-child {
+    width: 46%;
+}
+
+::deep .dict-template-table code {
+    display: block;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+    .dict-page-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    ::deep .dict-template-dialog {
+        width: calc(100vw - 24px);
+        max-width: calc(100vw - 24px);
+    }
+}

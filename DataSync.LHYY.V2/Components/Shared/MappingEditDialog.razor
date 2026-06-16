@@ -353,6 +353,7 @@
                            Margin="Margin.Dense" Variant="Variant.Outlined">
                     <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
                     <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                    <MudSelectItem Value="@EsbFieldMapping.DictMatchModePriorityFirst">按排序优先命中</MudSelectItem>
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
@@ -361,7 +362,7 @@
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudTextField @bind-Value="EditItem!.ValueExpression" Label="值表达式"
-                              HelperText="如: format:yyyy-MM-dd, substring:0,10"
+                              HelperText="如: format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)"
                               Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
 

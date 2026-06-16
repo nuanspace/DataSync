@@ -53,7 +53,7 @@
     @if (_selectedConfig != null)
     {
         <div class="workbench-toolbar-meta workbench-toolbar-meta-compact">
-            <MudText Typo="Typo.caption" Class="workbench-meta-item">LicenseCode @(_defaultLicenseCode ?? "未配置")</MudText>
+            <MudText Typo="Typo.caption" Class="workbench-meta-item">LicenseCode @(CurrentLicenseCode ?? "未配置")</MudText>
             @if (_parsedJson != null || HasSampleAnalysisPreview)
             {
                 @if (_sampleAnalysisLoading)
@@ -597,7 +597,7 @@ else
                         </div>
                         @if (!string.IsNullOrWhiteSpace(GetQuestionFieldSourcePath(field)))
                         {
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">样本值：@GetSampleValue(field)</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">样本值：@GetSampleValue(field)@GetConvertedSampleText(field)</MudText>
                         }
                         @if (NeedsSubCardArrayPath(field))
                         {
@@ -658,7 +658,7 @@ else
                                     <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="@(() => ClearQuestionFieldSourcePath(field))" Disabled="@(row == null || string.IsNullOrWhiteSpace(sourcePath))">清空路径</MudButton>
                                 </div>
                                 <div class="active-row-actions"><MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="RunActiveFieldLlmSuggest" Disabled="@(!CanRunActiveFieldLlmSuggest)" Class="llm-inline-button">@(_llmLoading ? "分析中..." : "LLM 推荐当前字段")</MudButton><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="@(() => DeleteQuestionFieldMapping(field))" Disabled="@(row == null)">删除映射</MudButton></div>
-                                @if (!string.IsNullOrWhiteSpace(sourcePath)) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(field)</MudText> }
+                                @if (!string.IsNullOrWhiteSpace(sourcePath)) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(field)@GetConvertedSampleText(field)</MudText> }
                                 @if (!IsQuestionFieldPathValid(field) && !string.IsNullOrWhiteSpace(sourcePath)) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前源路径在当前接口的样例 JSON 中无效，请重新选择。</MudAlert> }
                             </MudPaper>
                             <MudPaper Outlined="true" Class="detail-editor-shell pa-3" Style="flex:1 1 auto;min-height:0;">
@@ -671,13 +671,14 @@ else
                                         <MudSelect T="string" Value="@GetQuestionFieldDictMatchMode(field)" ValueChanged="v => OnQuestionFieldDictMatchModeChanged(field, v)" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">
                                             <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
                                             <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                                            <MudSelectItem Value="@EsbFieldMapping.DictMatchModePriorityFirst">按排序优先命中</MudSelectItem>
                                         </MudSelect>
                                     </MudItem>
                                     <MudItem xs="12" sm="6">
                                         <MudTextField T="string" Value="@GetQuestionFieldDefaultValue(field)" ValueChanged="v => OnQuestionFieldDefaultValueChanged(field, v)" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
                                     </MudItem>
                                     <MudItem xs="12">
-                                        <MudTextField T="string" Value="@GetQuestionFieldValueExpression(field)" ValueChanged="v => OnQuestionFieldValueExpressionChanged(field, v)" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10" Variant="Variant.Outlined" />
+                                        <MudTextField T="string" Value="@GetQuestionFieldValueExpression(field)" ValueChanged="v => OnQuestionFieldValueExpressionChanged(field, v)" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)" Variant="Variant.Outlined" />
                                     </MudItem>
                                     <MudItem xs="6">
                                         <MudSwitch T="bool" Value="@GetQuestionFieldIsRequired(field)" ValueChanged="v => OnQuestionFieldRequiredChanged(field, v)" Color="Color.Warning" Label="必填" />
@@ -729,7 +730,7 @@ else
                                 <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="ClearActiveRowSourcePath" Disabled="@(row == null || string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath()))">清空路径</MudButton>
                             </div>
                             <div class="active-row-actions"><MudButton Variant="Variant.Outlined" Size="Size.Small" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.AutoAwesome" OnClick="RunActiveFieldLlmSuggest" Disabled="@(!CanRunActiveFieldLlmSuggest)" Class="llm-inline-button">@(_llmLoading ? "分析中..." : "LLM 推荐当前字段")</MudButton><MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteActiveRow" Disabled="@(row == null)">删除映射</MudButton></div>
-                            @if (!string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath())) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(row!)</MudText> }
+                            @if (!string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath())) { <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">样本值：@GetSampleValue(row!)@GetConvertedSampleText(row)</MudText> }
                             @if (!IsActiveStandalonePathValid() && !string.IsNullOrWhiteSpace(GetActiveStandaloneSourcePath())) { <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">当前源路径在当前接口的样例 JSON 中无效，请重新选择。</MudAlert> }
                             @if (ShowActiveStandalonePendingHint()) { <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@GetActiveStandalonePendingHintText()</MudAlert> }
                         </MudPaper>
@@ -747,13 +748,14 @@ else
                                     <MudSelect T="string" Value="@GetActiveStandaloneDictMatchMode()" ValueChanged="OnActiveRowDictMatchModeChanged" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">
                                         <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContains">普通包含</MudSelectItem>
                                         <MudSelectItem Value="@EsbFieldMapping.DictMatchModeContainsExcludeNegation">包含并排除否定</MudSelectItem>
+                                        <MudSelectItem Value="@EsbFieldMapping.DictMatchModePriorityFirst">按排序优先命中</MudSelectItem>
                                     </MudSelect>
                                 </MudItem>
                                 <MudItem xs="12" sm="6">
                                     <MudTextField T="string" Value="@GetActiveStandaloneDefaultValue()" ValueChanged="OnActiveRowDefaultValueChanged" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
                                 </MudItem>
                                 <MudItem xs="12">
-                                    <MudTextField T="string" Value="@GetActiveStandaloneValueExpression()" ValueChanged="OnActiveRowValueExpressionChanged" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10" Variant="Variant.Outlined" />
+                                    <MudTextField T="string" Value="@GetActiveStandaloneValueExpression()" ValueChanged="OnActiveRowValueExpressionChanged" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)" Variant="Variant.Outlined" />
                                 </MudItem>
                                 <MudItem xs="6">
                                     <MudSwitch T="bool" Value="@GetActiveStandaloneIsRequired()" ValueChanged="OnActiveRowRequiredChanged" Color="Color.Warning" Label="必填" />

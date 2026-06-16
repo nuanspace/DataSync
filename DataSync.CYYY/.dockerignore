@@ -2,5 +2,11 @@ bin/
 obj/
 .codex-temp/
 docker包/
+logs/
+blobs/
 *.tar
 *.rar
+manifest.json
+index.json
+oci-layout
+repositories

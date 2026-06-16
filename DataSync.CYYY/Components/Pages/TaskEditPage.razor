@@ -580,23 +580,23 @@
                             <MudText Typo="Typo.subtitle1">查询映射</MudText>
                         </div>
                         <MudGrid Spacing="2">
-                            <MudItem xs="12" sm="6">
-                                <MudTextField @bind-Value="_editingConfigInterface.QueryField"
-                                              Label="@GetQueryFieldLabel(_editingConfigInterface)"
-                                              Variant="Variant.Outlined"
-                                              Margin="Margin.Dense" />
-                            </MudItem>
                             @if (IsChildInterface(_editingConfigInterface))
                             {
-                                <MudItem xs="12" sm="6">
+                                <MudItem xs="12">
                                     <div class="interface-inline-summary config-inline-summary">
-                                        <span class="interface-inline-summary-label">上游取值</span>
-                                        <strong class="interface-inline-summary-value">@GetChildSourceSummary(_editingConfigInterface)</strong>
+                                        <span class="interface-inline-summary-label">关联映射</span>
+                                        <strong class="interface-inline-summary-value">@GetQueryMappingPreview(_editingConfigInterface)</strong>
                                     </div>
                                 </MudItem>
                             }
                             else
                             {
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editingConfigInterface.QueryField"
+                                                  Label="@GetQueryFieldLabel(_editingConfigInterface)"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
                                 <MudItem xs="12" sm="6">
                                     <MudAutocomplete T="string"
                                                      Value="_editingConfigInterface.QueryValueField"
@@ -637,11 +637,34 @@
 
                             @if (IsChildInterface(_editingConfigInterface))
                             {
-                                <MudItem xs="12" sm="6">
-                                    <MudTextField @bind-Value="_editingConfigInterface.ParentResultField"
-                                                  Label="父记录关联值字段"
-                                                  Variant="Variant.Outlined"
-                                                  Margin="Margin.Dense" />
+                                <MudItem xs="12">
+                                    <div class="link-mapping-list">
+                                        @for (var i = 0; i < _editingLinkMappings.Count; i++)
+                                        {
+                                            var index = i;
+                                            <div class="link-mapping-row">
+                                                <MudTextField @bind-Value="_editingLinkMappings[index].ParentField"
+                                                              Label="父接口字段"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense" />
+                                                <MudTextField @bind-Value="_editingLinkMappings[index].ChildField"
+                                                              Label="当前接口字段"
+                                                              Variant="Variant.Outlined"
+                                                              Margin="Margin.Dense" />
+                                                <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                               Color="Color.Error"
+                                                               Size="Size.Small"
+                                                               Disabled="@(_editingLinkMappings.Count <= 1)"
+                                                               OnClick="@(() => RemoveLinkMapping(index))" />
+                                            </div>
+                                        }
+                                        <MudButton Variant="Variant.Outlined"
+                                                   Size="Size.Small"
+                                                   StartIcon="@Icons.Material.Filled.Add"
+                                                   OnClick="AddLinkMapping">
+                                            添加关联字段
+                                        </MudButton>
+                                    </div>
                                 </MudItem>
                                 <MudItem xs="12" sm="6">
                                     <MudTextField @bind-Value="_editingConfigInterface.MountField"
@@ -833,6 +856,7 @@
     private SyncTaskInterface? _editingConfigInterface;
     private List<KeyValuePair<string, string>> _editingParams = [];
     private List<DataLakeCondition> _editingFilters = [];
+    private List<InterfaceLinkMapping> _editingLinkMappings = [];
     private string _editingOutputFieldsText = "";
     private bool _showConfigDialog;
     private bool _editingNewInterface;
@@ -891,6 +915,7 @@
             _task = task;
             _interfaces = task.Interfaces.ToList();
             EnsureInterfaceKeys();
+            NormalizeInterfaceOrder();
 
             // 解析现有过滤条件
             _conditionConfig = inj_localQueryService.ParseTriggerConditions(
@@ -1057,8 +1082,43 @@
 
     private async Task RefreshInterfaceWorkspaceAsync()
     {
+        NormalizeInterfaceOrder();
         _dropContainer?.Refresh();
         await InvokeAsync(StateHasChanged);
+    }
+
+    private void NormalizeInterfaceOrder()
+    {
+        if (_interfaces.Count <= 1)
+            return;
+
+        var ordered = GetInterfaceDisplayOrder();
+        if (_interfaces.SequenceEqual(ordered))
+            return;
+
+        _interfaces = ordered;
+    }
+
+    private List<SyncTaskInterface> GetInterfaceDisplayOrder()
+    {
+        var result = new List<SyncTaskInterface>();
+        foreach (var group in _interfaces.GroupBy(i => i.SortOrder).OrderBy(g => g.Key))
+        {
+            var items = group.ToList();
+            var topLevelItems = items.Where(i => !IsChildInterface(i)).ToList();
+
+            foreach (var item in topLevelItems)
+            {
+                result.Add(item);
+                result.AddRange(items.Where(i => i.ParentInterfaceKey == item.InterfaceKey));
+            }
+
+            result.AddRange(items.Where(i =>
+                IsChildInterface(i) &&
+                !topLevelItems.Any(parent => parent.InterfaceKey == i.ParentInterfaceKey)));
+        }
+
+        return result;
     }
 
     private static string CreateInterfaceKey() => Guid.NewGuid().ToString("N");
@@ -1139,6 +1199,7 @@
     {
         iface.ParentInterfaceKey = null;
         iface.ParentResultField = null;
+        iface.LinkMappings = null;
         iface.MountField = null;
         iface.RouteField = null;
         iface.RouteOperator = "eq";
@@ -1216,6 +1277,7 @@
         }
 
         iface.ParentResultField = null;
+        iface.LinkMappings = null;
         iface.MountField = null;
         iface.RouteField = null;
         iface.RouteOperator = "eq";
@@ -1478,9 +1540,10 @@
             var parentName = GetParentInterface(iface) is { } parent
                 ? GetInterfaceDisplayName(parent)
                 : "父接口";
-            return string.IsNullOrWhiteSpace(iface.ParentResultField)
-                ? $"{iface.QueryField} ← {parentName}.?"
-                : $"{iface.QueryField} ← {parentName}.{iface.ParentResultField}";
+            var mappings = GetLinkMappings(iface);
+            return mappings.Count == 0
+                ? "未配置"
+                : string.Join("，", mappings.Select(mapping => $"{mapping.ChildField} ← {parentName}.{mapping.ParentField}"));
         }
 
         if (!string.IsNullOrWhiteSpace(iface.QueryValueField))
@@ -1522,7 +1585,7 @@
             return "待定查询";
 
         if (IsChildInterface(iface) &&
-            (string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.MountField)))
+            (GetLinkMappings(iface).Count == 0 || string.IsNullOrWhiteSpace(iface.MountField)))
         {
             return "待定关联";
         }
@@ -1551,17 +1614,30 @@
             ? "接口编码待配置"
             : iface.ServerCode;
 
-    private string GetInterfaceQueryFieldSummary(SyncTaskInterface iface) =>
-        string.IsNullOrWhiteSpace(iface.QueryField)
+    private string GetInterfaceQueryFieldSummary(SyncTaskInterface iface)
+    {
+        if (IsChildInterface(iface))
+        {
+            var mappings = GetLinkMappings(iface);
+            return mappings.Count == 0
+                ? "待配置"
+                : string.Join("、", mappings.Select(mapping => mapping.ChildField));
+        }
+
+        return string.IsNullOrWhiteSpace(iface.QueryField)
             ? "待配置"
             : iface.QueryField;
+    }
 
     private string GetInterfaceValueSourceSummary(SyncTaskInterface iface)
     {
         if (IsChildInterface(iface))
-            return string.IsNullOrWhiteSpace(iface.ParentResultField)
+        {
+            var mappings = GetLinkMappings(iface);
+            return mappings.Count == 0
                 ? "父接口字段待配置"
-                : $"父.{iface.ParentResultField}";
+                : string.Join("、", mappings.Select(mapping => $"父.{mapping.ParentField}"));
+        }
 
         return string.IsNullOrWhiteSpace(iface.QueryValueField)
             ? GetAutoQueryValueField(iface)
@@ -1591,8 +1667,8 @@
             return issues;
         }
 
-        if (string.IsNullOrWhiteSpace(iface.QueryField))
-            issues.Add(IsChildInterface(iface) ? "先填写当前接口关联字段" : "先填写目标接口查询字段");
+        if (!IsChildInterface(iface) && string.IsNullOrWhiteSpace(iface.QueryField))
+            issues.Add("先填写目标接口查询字段");
 
         if (IsDatabaseInterface(iface))
         {
@@ -1617,8 +1693,15 @@
             else if (!parent.Enabled)
                 issues.Add("父接口已停用");
 
-            if (string.IsNullOrWhiteSpace(iface.ParentResultField))
-                issues.Add("先填写父记录关联值字段");
+            var mappings = GetLinkMappings(iface);
+            if (mappings.Count == 0)
+            {
+                issues.Add("先添加关联字段");
+            }
+            else if (mappings.GroupBy(mapping => mapping.ChildField, StringComparer.OrdinalIgnoreCase).Any(g => g.Count() > 1))
+            {
+                issues.Add("当前接口关联字段不能重复");
+            }
 
             if (string.IsNullOrWhiteSpace(iface.MountField))
                 issues.Add("先填写挂载字段名");
@@ -1665,14 +1748,18 @@
 
     private string GetChildSourceSummary(SyncTaskInterface iface)
     {
-        var parentField = string.IsNullOrWhiteSpace(iface.ParentResultField) ? "待定" : iface.ParentResultField;
-        return $"取值：父.{parentField}";
+        var mappings = GetLinkMappings(iface);
+        return mappings.Count == 0
+            ? "取值：待定"
+            : $"取值：{string.Join("、", mappings.Select(mapping => $"父.{mapping.ParentField}"))}";
     }
 
     private string GetChildMatchSummary(SyncTaskInterface iface)
     {
-        var childField = string.IsNullOrWhiteSpace(iface.QueryField) ? "待定" : iface.QueryField;
-        return $"匹配：当前.{childField}";
+        var mappings = GetLinkMappings(iface);
+        return mappings.Count == 0
+            ? "匹配：待定"
+            : $"匹配：{string.Join("、", mappings.Select(mapping => $"当前.{mapping.ChildField}"))}";
     }
 
     private string GetChildMountSummary(SyncTaskInterface iface) =>
@@ -1746,6 +1833,15 @@
         _editingConfigInterface = iface;
         _editingNewInterface = isNew;
         _editingOutputFieldsText = iface.OutputFields ?? "";
+        _editingLinkMappings = GetLinkMappings(iface)
+            .Select(mapping => new InterfaceLinkMapping
+            {
+                ParentField = mapping.ParentField,
+                ChildField = mapping.ChildField
+            })
+            .ToList();
+        if (_editingLinkMappings.Count == 0)
+            _editingLinkMappings.Add(new InterfaceLinkMapping());
         // 初始化路由参数
         Dictionary<string, string>? existingParams = null;
         if (!IsChildInterface(iface) && !string.IsNullOrEmpty(iface.PushParams))
@@ -1778,6 +1874,66 @@
         }
 
         _showConfigDialog = true;
+    }
+
+    private void AddLinkMapping() => _editingLinkMappings.Add(new InterfaceLinkMapping());
+
+    private void RemoveLinkMapping(int index)
+    {
+        if (_editingLinkMappings.Count <= 1 || index < 0 || index >= _editingLinkMappings.Count)
+            return;
+
+        _editingLinkMappings.RemoveAt(index);
+    }
+
+    private static List<InterfaceLinkMapping> GetLinkMappings(SyncTaskInterface iface)
+    {
+        if (!string.IsNullOrWhiteSpace(iface.LinkMappings))
+        {
+            try
+            {
+                var mappings = JsonSerializer.Deserialize<List<InterfaceLinkMapping>>(iface.LinkMappings);
+                if (mappings != null)
+                {
+                    var validMappings = NormalizeLinkMappings(mappings);
+                    if (validMappings.Count > 0)
+                        return validMappings;
+                }
+            }
+            catch (JsonException) { /* 兼容旧字段 */ }
+        }
+
+        return string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.QueryField)
+            ? []
+            :
+            [
+                new InterfaceLinkMapping
+                {
+                    ParentField = iface.ParentResultField,
+                    ChildField = iface.QueryField
+                }
+            ];
+    }
+
+    private static List<InterfaceLinkMapping> NormalizeLinkMappings(IEnumerable<InterfaceLinkMapping> mappings) =>
+        mappings
+            .Where(mapping =>
+                !string.IsNullOrWhiteSpace(mapping.ParentField) &&
+                !string.IsNullOrWhiteSpace(mapping.ChildField))
+            .Select(mapping => new InterfaceLinkMapping
+            {
+                ParentField = mapping.ParentField.Trim(),
+                ChildField = mapping.ChildField.Trim()
+            })
+            .ToList();
+
+    private static void SetLinkMappings(SyncTaskInterface iface, IEnumerable<InterfaceLinkMapping> mappings)
+    {
+        var validMappings = NormalizeLinkMappings(mappings);
+        var first = validMappings.FirstOrDefault();
+        iface.ParentResultField = first?.ParentField;
+        iface.QueryField = first?.ChildField ?? "";
+        iface.LinkMappings = validMappings.Count > 0 ? JsonSerializer.Serialize(validMappings) : null;
     }
 
     private void UpdateParamValue(int index, string value) =>
@@ -1975,6 +2131,15 @@
 
         if (IsChildInterface(_editingConfigInterface))
         {
+            var hasIncompleteMapping = _editingLinkMappings.Any(mapping =>
+                string.IsNullOrWhiteSpace(mapping.ParentField) != string.IsNullOrWhiteSpace(mapping.ChildField));
+            if (hasIncompleteMapping)
+            {
+                inj_snackbar.Add("关联字段必须同时填写父接口字段和当前接口字段", Severity.Warning);
+                return;
+            }
+
+            SetLinkMappings(_editingConfigInterface, _editingLinkMappings);
             _editingConfigInterface.PushParams = null;
             _editingConfigInterface.OutputFields = null;
             _editingConfigInterface.RouteOperator = string.IsNullOrWhiteSpace(_editingConfigInterface.RouteOperator)
@@ -2082,6 +2247,7 @@
         EnsureInterfaceKeys();
         foreach (var iface in _interfaces)
             NormalizeInterfaceConfig(iface);
+        NormalizeInterfaceOrder();
 
         var duplicateInterfaceKeys = _interfaces
             .Where(i => !string.IsNullOrWhiteSpace(i.InterfaceKey))
@@ -2307,6 +2473,7 @@
         target.InterfaceKey = source.InterfaceKey;
         target.ParentInterfaceKey = source.ParentInterfaceKey;
         target.ParentResultField = source.ParentResultField;
+        target.LinkMappings = source.LinkMappings;
         target.MountField = source.MountField;
         target.RouteField = source.RouteField;
         target.RouteOperator = source.RouteOperator;

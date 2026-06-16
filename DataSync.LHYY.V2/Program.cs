@@ -119,6 +119,7 @@ public class Program
             builder.Services.AddScoped<MappingPreviewService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
             builder.Services.AddSingleton<DatabaseCompareService>();
+            builder.Services.AddSingleton<MessageProcessingNotifier>();
 
             // LLM 服务
             builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection("LlmOptions"));

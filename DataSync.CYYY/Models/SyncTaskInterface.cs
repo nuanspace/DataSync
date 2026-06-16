@@ -129,6 +129,12 @@ public class SyncTaskInterface
     public string? ParentResultField { get; set; }
 
     /// <summary>
+    /// 父子关联字段列表 JSON。仅子接口使用。
+    /// </summary>
+    [Column("link_mappings")]
+    public string? LinkMappings { get; set; }
+
+    /// <summary>
     /// 挂载到父结果中的字段名。仅子接口使用。
     /// </summary>
     [Column("mount_field")]
@@ -185,4 +191,11 @@ public class SyncTaskInterface
 
     [ForeignKey(nameof(DatabaseResourceId))]
     public DatabaseResource? DatabaseResource { get; set; }
+}
+
+public class InterfaceLinkMapping
+{
+    public string ParentField { get; set; } = "";
+
+    public string ChildField { get; set; } = "";
 }

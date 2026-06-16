@@ -1,0 +1,27 @@
+.ingestion-log-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.ingestion-log-ellipsis {
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ingestion-log-multiline {
+    max-width: 640px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+@media (max-width: 600px) {
+    .ingestion-log-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}

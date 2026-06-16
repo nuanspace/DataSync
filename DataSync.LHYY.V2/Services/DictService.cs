@@ -41,6 +41,11 @@ public class DictService
             return null;
 
         var matchMode = EsbFieldMapping.NormalizeDictMatchMode(dictMatchMode);
+        if (matchMode == EsbFieldMapping.DictMatchModePriorityFirst)
+        {
+            return dict.FirstOrDefault(item => IsMatch(source, item.SourceValue, matchMode)).TargetValue;
+        }
+
         var matches = dict
             .Where(item => IsMatch(source, item.SourceValue, matchMode))
             .Select(item => item.TargetValue)

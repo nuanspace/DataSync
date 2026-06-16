@@ -32,6 +32,8 @@
                 <MudSelectItem Value="@((MessageStatus?)MessageStatus.Processing)">处理中</MudSelectItem>
                 <MudSelectItem Value="@((MessageStatus?)MessageStatus.Success)">成功</MudSelectItem>
                 <MudSelectItem Value="@((MessageStatus?)MessageStatus.Failed)">失败</MudSelectItem>
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Filtered)">已过滤</MudSelectItem>
+                <MudSelectItem Value="@((MessageStatus?)MessageStatus.Unmatched)">未匹配</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="2">
@@ -89,6 +91,12 @@
                                    Disabled="@(!_filterEventEndTime.HasValue)" />
                 </MudItem>
             </MudGrid>
+        </MudItem>
+        <MudItem xs="12" Class="d-flex justify-end">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Search"
+                       OnClick="SearchMessages" Disabled="_loading">
+                查询
+            </MudButton>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -374,6 +382,13 @@
         }
     }
 
+    private async Task SearchMessages()
+    {
+        var navigated = UpdateFiltersInUrl();
+        if (!navigated && _table != null)
+            await _table.ReloadServerData();
+    }
+
     private void GoToDetail(long id)
     {
         inj_navigationManager.NavigateTo(GetMessageDetailUrl(id));
@@ -390,7 +405,7 @@
         _filterEventEndTime = ParseFilterTime(QueryEventEndDate, new TimeSpan(23, 59, 0));
     }
 
-    private void UpdateFiltersInUrl()
+    private bool UpdateFiltersInUrl()
     {
         var targetUrl = BuildMessageListUrl(
             _filterTranCode,
@@ -402,7 +417,12 @@
             _filterEventEndTime);
         var absoluteTargetUrl = inj_navigationManager.ToAbsoluteUri(targetUrl).ToString();
         if (!string.Equals(inj_navigationManager.Uri, absoluteTargetUrl, StringComparison.OrdinalIgnoreCase))
+        {
             inj_navigationManager.NavigateTo(targetUrl, replace: true);
+            return true;
+        }
+
+        return false;
     }
 
     private string GetQuerySignature() =>
