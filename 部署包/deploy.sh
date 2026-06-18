@@ -14,13 +14,14 @@ IMAGE_PACKAGE='./datasync-lhyy-v2.tar'
 # 镜像包包含多个标签或跳过 docker load 时必须填写。
 APP_IMAGE=''
 
-# 备份目录。数据库备份和旧程序镜像备份会放到这里。
+# 备份目录。数据库备份和旧程序镜像备份会放到这里。注意：即便不进行备份，这里也需要一个有效目录
 BACKUP_ROOT='/opt/datasync-lhyy-v2/backups'
 
 # 目标平台库连接串。现场必须修改。
 TARGET_CONNECTION_STRING='Host=数据库容器名或地址;Port=5432;Database=数据库名;Username=数据库用户;Password=数据库密码;MaxPoolSize=500;ConnectionLifeTime=15'
 
-# Docker 网络。留空时 compose 模式会自动从当前应用容器识别。
+# 如果数据库是通过容器连接的，这里需要填写容器所在网络，命令行如下：
+# docker inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' 数据库容器名
 # 如果自动识别失败，或数据库连接串使用了特殊网络中的容器名，再按现场实际填写。
 DOCKER_NETWORK=''
 
