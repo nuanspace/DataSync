@@ -1,0 +1,1136 @@
+@page "/active-sync"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>Active 病历补采</PageTitle>
+
+<div class="active-sync-page">
+    <section class="active-sync-heading">
+        <div>
+            <MudText Typo="Typo.h4" Class="page-title">Active 病历补采</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                以 LHYY 返回的 Active 病历为范围，补采所选同步任务接口的数据。
+            </MudText>
+        </div>
+        <div class="heading-actions">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshData">
+                刷新
+            </MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="CreateTask">
+                新建任务
+            </MudButton>
+        </div>
+    </section>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+    }
+    else
+    {
+        <section class="active-sync-summary">
+            <div class="summary-item">
+                <span class="summary-label">任务</span>
+                <strong>@TaskCount</strong>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">启用</span>
+                <strong>@EnabledTaskCount</strong>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">子数据源</span>
+                <strong>@SourceCount</strong>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">当前</span>
+                <strong>@CurrentTaskStateText</strong>
+            </div>
+        </section>
+
+        <section class="active-sync-workspace">
+            <aside class="task-rail">
+                <div class="rail-header">
+                    <div>
+                        <MudText Typo="Typo.subtitle1">补采任务</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">选择一个任务后配置入口和子源</MudText>
+                    </div>
+                </div>
+
+                @if (_tasks.Count == 0)
+                {
+                    <div class="empty-state">
+                        <MudIcon Icon="@Icons.Material.Filled.Assignment" Size="Size.Large" />
+                        <MudText Typo="Typo.body2">暂无任务</MudText>
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="CreateTask">创建第一条任务</MudButton>
+                    </div>
+                }
+                else
+                {
+                    <div class="task-list">
+                        @foreach (var task in _tasks)
+                        {
+                            <div class="@GetTaskRowClass(task)" @onclick="@(() => EditTask(task.Id))">
+                                <div class="task-row-main">
+                                    <span class="state-dot @(task.Enabled ? "is-on" : "is-off")"></span>
+                                    <div class="task-row-copy">
+                                        <span class="task-row-name">@task.Name</span>
+                                        <span class="task-row-code">@task.Code</span>
+                                    </div>
+                                </div>
+                                <div class="task-row-meta">
+                                    <span>@task.Sources.Count 个子源</span>
+                                    <span>@FormatSeconds(task.PollingIntervalSeconds)</span>
+                                </div>
+                                <div class="task-row-actions" @onclick:stopPropagation="true">
+                                    <MudSwitch T="bool" Value="task.Enabled" Color="Color.Success" Size="Size.Small"
+                                               ValueChanged="@(v => ToggleTask(task, v))" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="@(() => DeleteTask(task))" />
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </aside>
+
+            <main class="active-sync-editor">
+                <section class="editor-section">
+                    <div class="editor-tabs">
+                        <button type="button" class="@GetPaneButtonClass(TaskPane)" @onclick="ShowTaskPane">
+                            <span>任务配置</span>
+                            <small>入口、推送、压力控制</small>
+                        </button>
+                        <button type="button" class="@GetPaneButtonClass(SourcePane)" @onclick="ShowSourcePane" disabled="@(!CanEditSources)">
+                            <span>子数据源</span>
+                            <small>@(CanEditSources ? $"{_editingSources.Count} 个补采接口" : "保存任务后配置")</small>
+                        </button>
+                        <button type="button" class="@GetPaneButtonClass(RunPane)" @onclick="ShowRunPane" disabled="@(!CanEditSources)">
+                            <span>运行状态</span>
+                            <small>@GetRunPaneSummary()</small>
+                        </button>
+                    </div>
+
+                    @if (_activePane == TaskPane)
+                    {
+                        <div class="section-heading">
+                            <div>
+                                <MudText Typo="Typo.h6">@(_editingTask.Id > 0 ? "任务设置" : "新建任务")</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">定义从 LHYY 拉取 Active 病历的范围和推送目标</MudText>
+                            </div>
+                            <div class="section-actions">
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                                           OnClick="SaveTask" Disabled="_savingTask">
+                                    @(_savingTask ? "保存中..." : "保存任务")
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" OnClick="CreateTask">清空</MudButton>
+                            </div>
+                        </div>
+
+                        <div class="task-form-grid">
+                            <div class="form-block">
+                                <div class="form-block-title">基础信息</div>
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="7">
+                                        <MudTextField @bind-Value="_editingTask.Name" Label="任务名称" Variant="Variant.Outlined" Required="true" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="5">
+                                        <MudTextField @bind-Value="_editingTask.Code" Label="任务编码" Variant="Variant.Outlined" Required="true" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="6">
+                                        <MudTextField @bind-Value="_editingTask.IntegrationProjectCode" Label="项目编码" Variant="Variant.Outlined" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="4">
+                                        <MudSelect T="int?" Value="_editingTask.SyncTaskId" ValueChanged="OnSyncTaskChanged"
+                                                   Label="关联同步任务" Variant="Variant.Outlined" Required="true">
+                                            <MudSelectItem T="int?" Value="@((int?)null)">请选择</MudSelectItem>
+                                            @foreach (var syncTask in _syncTasks)
+                                            {
+                                                <MudSelectItem T="int?" Value="@((int?)syncTask.Id)">@syncTask.Name（@syncTask.Code）</MudSelectItem>
+                                            }
+                                        </MudSelect>
+                                    </MudItem>
+                                    <MudItem xs="12" sm="2" Class="switch-cell">
+                                        <MudSwitch T="bool" @bind-Value="_editingTask.Enabled" Color="Color.Success" Label="启用任务" />
+                                    </MudItem>
+                                </MudGrid>
+                            </div>
+
+                            <div class="form-block">
+                                <div class="form-block-title">LHYY 入口</div>
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12">
+                                        <MudTextField @bind-Value="_editingTask.ActiveRecordsUrl"
+                                                      Label="Active 病历接口地址"
+                                                      Placeholder="http://localhost:50146/api/active-medical-records"
+                                                      Variant="Variant.Outlined"
+                                                      Required="true" />
+                                    </MudItem>
+                                    @if (GetSyncTask(_editingTask.SyncTaskId) is { } selectedSyncTask)
+                                    {
+                                        <MudItem xs="12">
+                                            <div class="readonly-line">
+                                                <span>推送目标</span>
+                                                <strong>@selectedSyncTask.PushTarget</strong>
+                                            </div>
+                                        </MudItem>
+                                    }
+                                </MudGrid>
+                            </div>
+
+                            <div class="form-block pressure-block">
+                                <div class="form-block-title">压力控制</div>
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="6" md="3">
+                                        <MudNumericField @bind-Value="_editingTask.CaseBatchSize" Label="每轮病例数" Variant="Variant.Outlined" Min="1" Max="500" />
+                                    </MudItem>
+                                    <MudItem xs="6" md="3">
+                                        <MudNumericField @bind-Value="_editingTask.Concurrency" Label="并发数" Variant="Variant.Outlined" Min="1" Max="20" />
+                                    </MudItem>
+                                    <MudItem xs="6" md="3">
+                                        <MudNumericField @bind-Value="_editingTask.PollingIntervalSeconds" Label="轮询间隔秒" Variant="Variant.Outlined" Min="60" />
+                                    </MudItem>
+                                    <MudItem xs="6" md="3">
+                                        <MudNumericField @bind-Value="_editingTask.EmptyBackoffBaseSeconds" Label="空结果退避秒" Variant="Variant.Outlined" Min="60" />
+                                    </MudItem>
+                                    <MudItem xs="12" md="3">
+                                        <MudNumericField @bind-Value="_editingTask.EmptyBackoffMaxSeconds" Label="最大退避秒" Variant="Variant.Outlined" Min="60" />
+                                    </MudItem>
+                                    <MudItem xs="12" md="9">
+                                        <MudTextField @bind-Value="_editingTask.Remark" Label="备注" Variant="Variant.Outlined" Lines="2" />
+                                    </MudItem>
+                                </MudGrid>
+                            </div>
+                        </div>
+                    }
+                    else if (_activePane == SourcePane && CanEditSources)
+                    {
+                        <div class="section-heading">
+                            <div>
+                                <MudText Typo="Typo.h6">子数据源</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">左侧选择同步任务接口，右侧只维护补采参数</MudText>
+                            </div>
+                            <div class="add-interface-box">
+                                <MudSelect T="int?" @bind-Value="_selectedInterfaceIdToAdd" Dense="true"
+                                           Label="选择要添加的接口" Variant="Variant.Outlined">
+                                    <MudSelectItem T="int?" Value="@((int?)null)">请选择</MudSelectItem>
+                                    @foreach (var iface in GetAvailableInterfaces())
+                                    {
+                                        <MudSelectItem T="int?" Value="@((int?)iface.Id)">@GetInterfaceLabel(iface)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                                           OnClick="CreateSourceFromSelectedInterface">
+                                    添加
+                                </MudButton>
+                            </div>
+                        </div>
+
+                        <div class="source-config-grid">
+                            <aside class="source-rail">
+                                @if (_editingSources.Count == 0)
+                                {
+                                    <div class="empty-source">
+                                        <MudText Typo="Typo.body2">当前任务还没有子数据源</MudText>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">先从关联同步任务中添加接口。</MudText>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="source-list">
+                                        @foreach (var source in _editingSources.OrderBy(s => s.SortOrder))
+                                        {
+                                            <div class="@GetSourceRowClass(source)" @onclick="@(() => EditSource(source))">
+                                                <span class="state-dot @(source.Enabled ? "is-on" : "is-off")"></span>
+                                                <div class="source-main">
+                                                    <span class="source-name">@GetSourceInterfaceLabel(source)</span>
+                                                    <span class="source-detail">@source.SyncTaskInterface?.QueryField</span>
+                                                </div>
+                                                <div class="source-row-meta">
+                                                    <span>@GetSourceDatabaseName(source)</span>
+                                                    <span>@source.SourceRecordKeyFields</span>
+                                                </div>
+                                                <div class="source-actions" @onclick:stopPropagation="true">
+                                                    <MudSwitch T="bool" Value="source.Enabled" Color="Color.Success" Size="Size.Small"
+                                                               ValueChanged="@(v => ToggleSource(source, v))" />
+                                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                                   OnClick="@(() => DeleteSource(source))" />
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </aside>
+
+                            <section class="source-form-panel">
+                                <div class="source-form-heading">
+                                    <div>
+                                        <div class="form-block-title">@(_editingSource.Id > 0 ? "编辑补采接口" : "新增补采接口")</div>
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">接口从上方添加，这里只维护补采参数</MudText>
+                                    </div>
+                                    <div class="section-actions">
+                                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                                                   OnClick="SaveSource" Disabled="_savingSource">
+                                            @(_savingSource ? "保存中..." : "保存子源")
+                                        </MudButton>
+                                        <MudButton Variant="Variant.Text" OnClick="CreateSource">清空</MudButton>
+                                    </div>
+                                </div>
+
+                                <div class="source-editor">
+                                    @if (_editingSource.SyncTaskInterface is { } editingIface)
+                                    {
+                                        <div class="interface-summary">
+                                            <div>
+                                                <span>接口</span>
+                                                <strong>@GetInterfaceLabel(editingIface)</strong>
+                                            </div>
+                                            <div>
+                                                <span>查询字段</span>
+                                                <strong>@editingIface.QueryField</strong>
+                                            </div>
+                                            <div>
+                                                <span>数据库</span>
+                                                <strong>@GetSourceDatabaseName(_editingSource)</strong>
+                                            </div>
+                                        </div>
+                                    }
+                                    <MudGrid Spacing="2">
+                                        <MudItem xs="12" md="3">
+                                            <MudSelect T="string" @bind-Value="_editingSource.InpatientNoParameter" Label="Active 查询值" Variant="Variant.Outlined">
+                                                <MudSelectItem Value="@("InpatientNo")">住院号</MudSelectItem>
+                                                <MudSelectItem Value="@("Mrn")">病案号</MudSelectItem>
+                                                <MudSelectItem Value="@("VisitNo")">就诊号</MudSelectItem>
+                                            </MudSelect>
+                                        </MudItem>
+                                        <MudItem xs="12" md="5">
+                                            <MudTextField @bind-Value="_editingSource.SourceRecordKeyFields" Label="源记录唯一键字段" Variant="Variant.Outlined" Required="true" />
+                                        </MudItem>
+                                        <MudItem xs="6" md="3">
+                                            <MudNumericField @bind-Value="_editingSource.PollingIntervalSeconds" Label="子源轮询间隔秒" Variant="Variant.Outlined" Min="60" />
+                                        </MudItem>
+                                        <MudItem xs="6" md="2">
+                                            <MudNumericField @bind-Value="_editingSource.SortOrder" Label="排序" Variant="Variant.Outlined" Min="0" />
+                                        </MudItem>
+                                        <MudItem xs="12" md="2" Class="switch-cell">
+                                            <MudSwitch T="bool" @bind-Value="_editingSource.Enabled" Color="Color.Success" Label="启用" />
+                                        </MudItem>
+                                    </MudGrid>
+                                </div>
+                            </section>
+                        </div>
+                    }
+                    else if (_activePane == RunPane && CanEditSources)
+                    {
+                        <div class="section-heading">
+                            <div>
+                                <MudText Typo="Typo.h6">运行状态</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">查看补采有没有执行、查到多少、推送多少以及最近错误</MudText>
+                            </div>
+                            <div class="section-actions">
+                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshRuntimeData">
+                                    刷新状态
+                                </MudButton>
+                            </div>
+                        </div>
+
+                        <div class="runtime-panel">
+                            <div class="runtime-metrics">
+                                <div>
+                                    <span>最近执行</span>
+                                    <strong>@FormatDateTime(LastRunAt)</strong>
+                                </div>
+                                <div>
+                                    <span>监控住院号</span>
+                                    <strong>@RuntimeCaseCount</strong>
+                                </div>
+                                <div>
+                                    <span>已推送记录</span>
+                                    <strong>@_receiptTotalCount</strong>
+                                </div>
+                                <div>
+                                    <span>最近错误</span>
+                                    <strong>@RuntimeErrorCount</strong>
+                                </div>
+                            </div>
+
+                            <div class="runtime-columns">
+                                <section class="runtime-section">
+                                    <div class="form-block-title">病例查询状态</div>
+                                    @if (_runtimeStates.Count == 0)
+                                    {
+                                        <div class="runtime-empty">还没有补采状态。等后台任务执行后，这里会出现住院号、最近查询时间和下次查询时间。</div>
+                                    }
+                                    else
+                                    {
+                                        <MudTable T="ActiveSourceRuntimeState" Items="_runtimeStates" Dense="true" Hover="true" FixedHeader="true" Height="360px">
+                                            <HeaderContent>
+                                                <MudTh>住院号</MudTh>
+                                                <MudTh>接口</MudTh>
+                                                <MudTh>最近查询</MudTh>
+                                                <MudTh>结果</MudTh>
+                                                <MudTh>下次查询</MudTh>
+                                                <MudTh>错误</MudTh>
+                                            </HeaderContent>
+                                            <RowTemplate>
+                                                <MudTd DataLabel="住院号">@context.InpatientNo</MudTd>
+                                                <MudTd DataLabel="接口">@context.SourceName</MudTd>
+                                                <MudTd DataLabel="最近查询">@FormatDateTime(context.LastQueryAt)</MudTd>
+                                                <MudTd DataLabel="结果">@context.LastResultCount</MudTd>
+                                                <MudTd DataLabel="下次查询">@FormatDateTime(context.NextQueryTime)</MudTd>
+                                                <MudTd DataLabel="错误">
+                                                    @if (string.IsNullOrWhiteSpace(context.LastError))
+                                                    {
+                                                        <span class="runtime-ok">无</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="runtime-error" title="@context.LastError">@context.LastError</span>
+                                                    }
+                                                </MudTd>
+                                            </RowTemplate>
+                                        </MudTable>
+                                    }
+                                </section>
+
+                                <section class="runtime-section">
+                                    <div class="form-block-title">运行日志</div>
+                                    @if (_runLogs.Count == 0)
+                                    {
+                                        <div class="runtime-empty">还没有运行日志。</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="run-log-list">
+                                            @foreach (var log in _runLogs)
+                                            {
+                                                <div class="run-log-row">
+                                                    <div class="run-log-head">
+                                                        <span class="@GetLogLevelClass(log.Level)">@log.Level</span>
+                                                        <time>@FormatDateTime(log.CreatedAt)</time>
+                                                    </div>
+                                                    <div class="run-log-message">@log.Message</div>
+                                                    <div class="run-log-meta">
+                                                        <span>@(string.IsNullOrWhiteSpace(log.SourceName) ? "任务" : log.SourceName)</span>
+                                                        @if (!string.IsNullOrWhiteSpace(log.InpatientNo))
+                                                        {
+                                                            <span>@log.InpatientNo</span>
+                                                        }
+                                                        <span>Active @log.ActiveCaseCount</span>
+                                                        <span>查询 @log.QueryCount</span>
+                                                        <span>推送 @log.PushedCount</span>
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </section>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="empty-source save-task-first">
+                            <MudText Typo="Typo.body2">请先保存任务</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">任务保存后才能挂载同步任务接口。</MudText>
+                        </div>
+                    }
+                </section>
+            </main>
+
+            <aside class="active-sync-inspector">
+                <div class="inspector-block">
+                    <span class="inspector-label">运行范围</span>
+                    <strong>LHYY Active 病历</strong>
+                    <p>只拉取仍未 Finished 的住院号，不全量扫描业务明细表。</p>
+                </div>
+                <div class="inspector-grid">
+                    <div>
+                        <span>每轮</span>
+                        <strong>@_editingTask.CaseBatchSize</strong>
+                    </div>
+                    <div>
+                        <span>并发</span>
+                        <strong>@_editingTask.Concurrency</strong>
+                    </div>
+                    <div>
+                        <span>轮询</span>
+                        <strong>@FormatSeconds(_editingTask.PollingIntervalSeconds)</strong>
+                    </div>
+                    <div>
+                        <span>子源</span>
+                        <strong>@_editingSources.Count</strong>
+                    </div>
+                </div>
+                <div class="inspector-block">
+                    <span class="inspector-label">去重口径</span>
+                    <p>按任务、子源、住院号、源记录唯一键生成回执，已推送记录不会重复推送。</p>
+                </div>
+                <div class="inspector-block">
+                    <span class="inspector-label">查询参数</span>
+                    <p>默认注入 inpatientNo 和 admissionTime，也支持 MRN、INPATIENT_NO、VISIT_NO、ADMISSION_TIME。</p>
+                </div>
+            </aside>
+        </section>
+    }
+</div>
+
+@code {
+    private List<ActiveSyncTask> _tasks = [];
+    private List<ActiveSyncSource> _editingSources = [];
+    private List<SyncTask> _syncTasks = [];
+    private List<ActiveSourceRuntimeState> _runtimeStates = [];
+    private List<ActiveSyncRunLog> _runLogs = [];
+    private ActiveSyncTask _editingTask = NewTask();
+    private ActiveSyncSource _editingSource = NewSource(0);
+    private int? _selectedInterfaceIdToAdd;
+    private int _receiptTotalCount;
+    private bool _loading = true;
+    private bool _savingTask;
+    private bool _savingSource;
+    private string _activePane = TaskPane;
+
+    private const string TaskPane = "task";
+    private const string SourcePane = "source";
+    private const string RunPane = "run";
+
+    private int TaskCount => _tasks.Count;
+    private int EnabledTaskCount => _tasks.Count(t => t.Enabled);
+    private int SourceCount => _tasks.Sum(t => t.Sources.Count);
+    private string CurrentTaskStateText => _editingTask.Id <= 0 ? "新建中" : _editingTask.Enabled ? "已启用" : "已停用";
+    private bool CanEditSources => _editingTask.Id > 0;
+    private DateTime? LastRunAt => _runLogs.FirstOrDefault()?.CreatedAt;
+    private int RuntimeCaseCount => _runtimeStates.Select(s => s.InpatientNo).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+    private int RuntimeErrorCount => _runtimeStates.Count(s => !string.IsNullOrWhiteSpace(s.LastError)) +
+        _runLogs.Count(l => string.Equals(l.Level, "Error", StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _loading = true;
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _tasks = await db.ActiveSyncTasks
+            .Include(t => t.SyncTask)
+            .Include(t => t.Sources)
+                .ThenInclude(s => s.SyncTaskInterface)
+                    .ThenInclude(i => i!.DatabaseResource)
+            .OrderBy(t => t.Id)
+            .ToListAsync(CancellationToken);
+        _syncTasks = await db.SyncTasks
+            .AsNoTracking()
+            .Include(t => t.Interfaces.OrderBy(i => i.SortOrder))
+                .ThenInclude(i => i.DatabaseResource)
+            .Where(t => t.Enabled)
+            .OrderBy(t => t.Name)
+            .ToListAsync(CancellationToken);
+        _loading = false;
+    }
+
+    private async Task RefreshData()
+    {
+        var taskId = _editingTask.Id;
+        await LoadData();
+        if (taskId > 0)
+            await EditTask(taskId);
+    }
+
+    private static ActiveSyncTask NewTask() => new()
+    {
+        PushType = "Api",
+        CaseBatchSize = 50,
+        Concurrency = 3,
+        PollingIntervalSeconds = 300,
+        EmptyBackoffBaseSeconds = 1800,
+        EmptyBackoffMaxSeconds = 7200,
+        Enabled = true
+    };
+
+    private static ActiveSyncSource NewSource(int taskId) => new()
+    {
+        TaskId = taskId,
+        DataType = "Source",
+        InpatientNoParameter = "InpatientNo",
+        AdmissionTimeParameter = "admissionTime",
+        PollingIntervalSeconds = 1800,
+        Enabled = true
+    };
+
+    private void CreateTask()
+    {
+        _editingTask = NewTask();
+        _editingSources = [];
+        _editingSource = NewSource(0);
+        _runtimeStates = [];
+        _runLogs = [];
+        _receiptTotalCount = 0;
+        _selectedInterfaceIdToAdd = null;
+        _activePane = TaskPane;
+    }
+
+    private async Task EditTask(int id)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var task = await db.ActiveSyncTasks
+            .AsNoTracking()
+            .Include(t => t.SyncTask)
+            .Include(t => t.Sources.OrderBy(s => s.SortOrder))
+                .ThenInclude(s => s.SyncTaskInterface)
+                    .ThenInclude(i => i!.DatabaseResource)
+            .FirstOrDefaultAsync(t => t.Id == id, CancellationToken);
+        if (task == null)
+            return;
+
+        _editingTask = CloneTask(task);
+        _editingSources = task.Sources.Select(CloneSource).ToList();
+        _editingSource = NewSource(task.Id);
+        _selectedInterfaceIdToAdd = GetAvailableInterfaces().FirstOrDefault()?.Id;
+        await LoadRuntimeData(task.Id);
+    }
+
+    private async Task LoadRuntimeData(int taskId)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var states = await db.ActiveSyncCaseSourceStates
+            .AsNoTracking()
+            .Where(s => s.TaskId == taskId)
+            .OrderByDescending(s => s.LastQueryAt ?? s.UpdatedAt)
+            .Take(100)
+            .ToListAsync(CancellationToken);
+
+        var sourceNames = _editingSources.ToDictionary(s => s.Id, GetSourceInterfaceLabel);
+        _runtimeStates = states.Select(state => new ActiveSourceRuntimeState
+        {
+            InpatientNo = state.InpatientNo,
+            SourceName = sourceNames.TryGetValue(state.SourceId, out var sourceName) ? sourceName : $"子源 {state.SourceId}",
+            LastQueryAt = state.LastQueryAt,
+            LastResultCount = state.LastResultCount,
+            NextQueryTime = state.NextQueryTime,
+            EmptyCount = state.EmptyCount,
+            LastError = state.LastError
+        }).ToList();
+
+        _runLogs = await db.ActiveSyncRunLogs
+            .AsNoTracking()
+            .Where(l => l.TaskId == taskId)
+            .OrderByDescending(l => l.CreatedAt)
+            .Take(80)
+            .ToListAsync(CancellationToken);
+
+        _receiptTotalCount = await db.ActiveSyncRecordReceipts
+            .AsNoTracking()
+            .CountAsync(r => r.TaskId == taskId, CancellationToken);
+    }
+
+    private async Task RefreshRuntimeData()
+    {
+        if (_editingTask.Id <= 0)
+            return;
+
+        await LoadRuntimeData(_editingTask.Id);
+    }
+
+    private async Task SaveTask()
+    {
+        NormalizeTask();
+        if (!ValidateTask())
+            return;
+
+        _savingTask = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            ActiveSyncTask entity;
+            if (_editingTask.Id == 0)
+            {
+                entity = new ActiveSyncTask();
+                db.ActiveSyncTasks.Add(entity);
+            }
+            else
+            {
+                entity = await db.ActiveSyncTasks.FindAsync([_editingTask.Id], CancellationToken)
+                    ?? throw new InvalidOperationException("任务不存在");
+            }
+
+            CopyTaskFields(_editingTask, entity);
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add("任务已保存", Severity.Success);
+            await LoadData();
+            await EditTask(entity.Id);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存任务失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _savingTask = false;
+        }
+    }
+
+    private async Task ToggleTask(ActiveSyncTask task, bool enabled)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var entity = await db.ActiveSyncTasks.FindAsync([task.Id], CancellationToken);
+        if (entity == null)
+            return;
+
+        entity.Enabled = enabled;
+        await db.SaveChangesAsync(CancellationToken);
+        task.Enabled = enabled;
+        if (_editingTask.Id == task.Id)
+            _editingTask.Enabled = enabled;
+    }
+
+    private async Task DeleteTask(ActiveSyncTask task)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除任务“{task.Name}”及其子数据源吗？",
+            yesText: "删除",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var entity = await db.ActiveSyncTasks
+            .Include(t => t.Sources)
+            .FirstOrDefaultAsync(t => t.Id == task.Id, CancellationToken);
+        if (entity == null)
+            return;
+
+        db.ActiveSyncTasks.Remove(entity);
+        await db.SaveChangesAsync(CancellationToken);
+        inj_snackbar.Add("任务已删除", Severity.Success);
+        CreateTask();
+        await LoadData();
+    }
+
+    private void CreateSource()
+    {
+        if (!CanEditSources)
+            return;
+
+        _editingSource = NewSource(_editingTask.Id);
+        var iface = GetSyncTaskInterface(_selectedInterfaceIdToAdd);
+        if (iface != null)
+            ApplyInterfaceDefaults(_editingSource, iface);
+        _activePane = SourcePane;
+    }
+
+    private void CreateSourceFromSelectedInterface()
+    {
+        var iface = GetSyncTaskInterface(_selectedInterfaceIdToAdd);
+        if (iface == null)
+        {
+            inj_snackbar.Add("请选择要补采的同步任务接口", Severity.Warning);
+            return;
+        }
+
+        _editingSource = NewSource(_editingTask.Id);
+        ApplyInterfaceDefaults(_editingSource, iface);
+        _activePane = SourcePane;
+    }
+
+    private void EditSource(ActiveSyncSource source)
+    {
+        _editingSource = CloneSource(source);
+        _activePane = SourcePane;
+    }
+
+    private void ShowTaskPane()
+    {
+        _activePane = TaskPane;
+    }
+
+    private void ShowSourcePane()
+    {
+        if (CanEditSources)
+            _activePane = SourcePane;
+    }
+
+    private void ShowRunPane()
+    {
+        if (CanEditSources)
+            _activePane = RunPane;
+    }
+
+    private void OnSyncTaskChanged(int? syncTaskId)
+    {
+        _editingTask.SyncTaskId = syncTaskId;
+        var syncTask = GetSyncTask(syncTaskId);
+        if (syncTask != null)
+        {
+            if (string.IsNullOrWhiteSpace(_editingTask.Name))
+                _editingTask.Name = $"{syncTask.Name} Active 补采";
+
+            if (string.IsNullOrWhiteSpace(_editingTask.Code))
+                _editingTask.Code = $"{syncTask.Code}_active";
+
+            _editingTask.PushType = syncTask.PushType;
+            _editingTask.PushTarget = syncTask.PushTarget;
+        }
+
+        _selectedInterfaceIdToAdd = GetAvailableInterfaces().FirstOrDefault()?.Id;
+    }
+
+    private async Task SaveSource()
+    {
+        ApplySelectedInterfaceDefaults();
+        NormalizeSource();
+        if (!ValidateSource())
+            return;
+
+        _savingSource = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            ActiveSyncSource entity;
+            if (_editingSource.Id == 0)
+            {
+                entity = new ActiveSyncSource { TaskId = _editingTask.Id };
+                db.ActiveSyncSources.Add(entity);
+            }
+            else
+            {
+                entity = await db.ActiveSyncSources.FindAsync([_editingSource.Id], CancellationToken)
+                    ?? throw new InvalidOperationException("子数据源不存在");
+            }
+
+            CopySourceFields(_editingSource, entity);
+            entity.TaskId = _editingTask.Id;
+            await db.SaveChangesAsync(CancellationToken);
+            inj_snackbar.Add("子数据源已保存", Severity.Success);
+            await EditTask(_editingTask.Id);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存子数据源失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _savingSource = false;
+        }
+    }
+
+    private async Task ToggleSource(ActiveSyncSource source, bool enabled)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var entity = await db.ActiveSyncSources.FindAsync([source.Id], CancellationToken);
+        if (entity == null)
+            return;
+
+        entity.Enabled = enabled;
+        await db.SaveChangesAsync(CancellationToken);
+        source.Enabled = enabled;
+        if (_editingSource.Id == source.Id)
+            _editingSource.Enabled = enabled;
+    }
+
+    private async Task DeleteSource(ActiveSyncSource source)
+    {
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认删除",
+            $"确定要删除子数据源“{source.DisplayName}”吗？",
+            yesText: "删除",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var entity = await db.ActiveSyncSources.FindAsync([source.Id], CancellationToken);
+        if (entity == null)
+            return;
+
+        db.ActiveSyncSources.Remove(entity);
+        await db.SaveChangesAsync(CancellationToken);
+        inj_snackbar.Add("子数据源已删除", Severity.Success);
+        await EditTask(_editingTask.Id);
+    }
+
+    private bool ValidateTask()
+    {
+        if (string.IsNullOrWhiteSpace(_editingTask.Name) ||
+            string.IsNullOrWhiteSpace(_editingTask.Code) ||
+            string.IsNullOrWhiteSpace(_editingTask.ActiveRecordsUrl) ||
+            !_editingTask.SyncTaskId.HasValue)
+        {
+            inj_snackbar.Add("任务名称、编码、Active 接口地址和关联同步任务不能为空", Severity.Warning);
+            return false;
+        }
+
+        var syncTask = GetSyncTask(_editingTask.SyncTaskId);
+        if (syncTask == null)
+        {
+            inj_snackbar.Add("关联同步任务不存在或未启用", Severity.Warning);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(syncTask.PushTarget))
+        {
+            inj_snackbar.Add("关联同步任务未配置推送目标", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool ValidateSource()
+    {
+        if (_editingTask.Id <= 0)
+        {
+            inj_snackbar.Add("请先保存任务，再配置子数据源", Severity.Warning);
+            return false;
+        }
+
+        if (!_editingSource.SyncTaskInterfaceId.HasValue ||
+            string.IsNullOrWhiteSpace(_editingSource.SourceRecordKeyFields))
+        {
+            inj_snackbar.Add("同步任务接口和唯一键字段不能为空", Severity.Warning);
+            return false;
+        }
+
+        var iface = GetSyncTaskInterface(_editingSource.SyncTaskInterfaceId);
+        if (iface == null)
+        {
+            inj_snackbar.Add("同步任务接口不存在", Severity.Warning);
+            return false;
+        }
+
+        if (!IngestionService.IsDatabaseSourceType(iface.SourceType))
+        {
+            inj_snackbar.Add("Active 补采当前只支持数据库接口", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+
+    private void NormalizeTask()
+    {
+        _editingTask.Name = _editingTask.Name.Trim();
+        _editingTask.Code = _editingTask.Code.Trim();
+        _editingTask.ActiveRecordsUrl = _editingTask.ActiveRecordsUrl.Trim();
+        var syncTask = GetSyncTask(_editingTask.SyncTaskId);
+        if (syncTask != null)
+        {
+            _editingTask.PushType = syncTask.PushType;
+            _editingTask.PushTarget = syncTask.PushTarget;
+        }
+        else
+        {
+            _editingTask.PushTarget = _editingTask.PushTarget.Trim();
+        }
+        _editingTask.CaseBatchSize = Math.Clamp(_editingTask.CaseBatchSize, 1, 500);
+        _editingTask.Concurrency = Math.Clamp(_editingTask.Concurrency, 1, 20);
+        _editingTask.PollingIntervalSeconds = Math.Max(60, _editingTask.PollingIntervalSeconds);
+        _editingTask.EmptyBackoffBaseSeconds = Math.Max(60, _editingTask.EmptyBackoffBaseSeconds);
+        _editingTask.EmptyBackoffMaxSeconds = Math.Max(_editingTask.EmptyBackoffBaseSeconds, _editingTask.EmptyBackoffMaxSeconds);
+    }
+
+    private void NormalizeSource()
+    {
+        _editingSource.DisplayName = _editingSource.DisplayName.Trim();
+        _editingSource.ServerCode = _editingSource.ServerCode.Trim();
+        _editingSource.DataType = string.IsNullOrWhiteSpace(_editingSource.DataType)
+            ? "Source"
+            : _editingSource.DataType.Trim();
+        _editingSource.InpatientNoParameter = string.IsNullOrWhiteSpace(_editingSource.InpatientNoParameter)
+            ? "InpatientNo"
+            : _editingSource.InpatientNoParameter.Trim();
+        _editingSource.AdmissionTimeParameter = string.IsNullOrWhiteSpace(_editingSource.AdmissionTimeParameter)
+            ? null
+            : _editingSource.AdmissionTimeParameter.Trim().TrimStart('@', ':');
+        _editingSource.SourceRecordKeyFields = _editingSource.SourceRecordKeyFields.Trim();
+        _editingSource.PollingIntervalSeconds = Math.Max(60, _editingSource.PollingIntervalSeconds);
+    }
+
+    private SyncTask? GetSyncTask(int? id)
+        => id.HasValue ? _syncTasks.FirstOrDefault(t => t.Id == id.Value) : null;
+
+    private SyncTaskInterface? GetSyncTaskInterface(int? id)
+        => id.HasValue
+            ? _syncTasks.SelectMany(t => t.Interfaces).FirstOrDefault(i => i.Id == id.Value)
+            : null;
+
+    private IEnumerable<SyncTaskInterface> GetAvailableInterfaces()
+    {
+        var selectedTask = GetSyncTask(_editingTask.SyncTaskId);
+        if (selectedTask == null)
+            return [];
+
+        var selectedIds = _editingSources
+            .Where(s => s.SyncTaskInterfaceId.HasValue && s.Id != _editingSource.Id)
+            .Select(s => s.SyncTaskInterfaceId!.Value)
+            .ToHashSet();
+
+        return selectedTask.Interfaces
+            .Where(i => i.Enabled &&
+                IngestionService.IsDatabaseSourceType(i.SourceType) &&
+                !selectedIds.Contains(i.Id))
+            .OrderBy(i => i.SortOrder)
+            .ThenBy(i => i.ServerCode);
+    }
+
+    private string GetInterfaceLabel(SyncTaskInterface iface)
+        => string.IsNullOrWhiteSpace(iface.DisplayName)
+            ? iface.ServerCode
+            : $"{iface.DisplayName}（{iface.ServerCode}）";
+
+    private string GetSourceInterfaceLabel(ActiveSyncSource source)
+        => source.SyncTaskInterface == null
+            ? source.ServerCode
+            : GetInterfaceLabel(source.SyncTaskInterface);
+
+    private string GetSourceDatabaseName(ActiveSyncSource source)
+        => source.SyncTaskInterface?.DatabaseResource?.Name
+            ?? source.DatabaseResource?.Name
+            ?? "继承接口连接";
+
+    private void ApplySelectedInterfaceDefaults()
+    {
+        var iface = GetSyncTaskInterface(_editingSource.SyncTaskInterfaceId);
+        if (iface != null)
+            ApplyInterfaceDefaults(_editingSource, iface);
+    }
+
+    private static void ApplyInterfaceDefaults(ActiveSyncSource source, SyncTaskInterface iface)
+    {
+        source.SyncTaskInterfaceId = iface.Id;
+        source.SyncTaskInterface = iface;
+        source.DataType = "Source";
+        source.ServerCode = iface.ServerCode;
+        source.DisplayName = string.IsNullOrWhiteSpace(iface.DisplayName) ? iface.ServerCode : iface.DisplayName;
+        source.DatabaseResourceId = iface.DatabaseResourceId;
+        source.DatabaseResource = iface.DatabaseResource;
+        source.QuerySql = iface.QuerySql ?? "";
+    }
+
+    private string GetTaskRowClass(ActiveSyncTask task)
+        => _editingTask.Id == task.Id ? "task-row is-selected" : "task-row";
+
+    private string GetSourceRowClass(ActiveSyncSource source)
+        => _editingSource.Id == source.Id && source.Id > 0 ? "source-row is-selected" : "source-row";
+
+    private string GetPaneButtonClass(string pane)
+        => _activePane == pane ? "pane-tab is-active" : "pane-tab";
+
+    private string GetRunPaneSummary()
+    {
+        if (!CanEditSources)
+            return "保存任务后查看";
+
+        return LastRunAt.HasValue ? $"最近 {FormatDateTime(LastRunAt)}" : "暂无运行记录";
+    }
+
+    private static string FormatSeconds(int seconds)
+    {
+        if (seconds >= 3600 && seconds % 3600 == 0)
+            return $"{seconds / 3600} 小时";
+
+        if (seconds >= 60 && seconds % 60 == 0)
+            return $"{seconds / 60} 分钟";
+
+        return $"{seconds} 秒";
+    }
+
+    private static string FormatDateTime(DateTime? value)
+        => value.HasValue ? value.Value.ToString("MM-dd HH:mm:ss") : "-";
+
+    private static string GetLogLevelClass(string? level)
+    {
+        if (string.Equals(level, "Error", StringComparison.OrdinalIgnoreCase))
+            return "log-level is-error";
+
+        if (string.Equals(level, "Warning", StringComparison.OrdinalIgnoreCase))
+            return "log-level is-warning";
+
+        return "log-level is-info";
+    }
+
+    private static ActiveSyncTask CloneTask(ActiveSyncTask source) => new()
+    {
+        Id = source.Id,
+        Name = source.Name,
+        Code = source.Code,
+        Enabled = source.Enabled,
+        SyncTaskId = source.SyncTaskId,
+        SyncTask = source.SyncTask,
+        ActiveRecordsUrl = source.ActiveRecordsUrl,
+        IntegrationProjectCode = source.IntegrationProjectCode,
+        PushType = source.PushType,
+        PushTarget = source.PushTarget,
+        CaseBatchSize = source.CaseBatchSize,
+        Concurrency = source.Concurrency,
+        PollingIntervalSeconds = source.PollingIntervalSeconds,
+        EmptyBackoffBaseSeconds = source.EmptyBackoffBaseSeconds,
+        EmptyBackoffMaxSeconds = source.EmptyBackoffMaxSeconds,
+        Remark = source.Remark
+    };
+
+    private static ActiveSyncSource CloneSource(ActiveSyncSource source) => new()
+    {
+        Id = source.Id,
+        TaskId = source.TaskId,
+        SyncTaskInterfaceId = source.SyncTaskInterfaceId,
+        SyncTaskInterface = source.SyncTaskInterface,
+        DataType = source.DataType,
+        ServerCode = source.ServerCode,
+        DisplayName = source.DisplayName,
+        DatabaseResourceId = source.DatabaseResourceId,
+        QuerySql = source.QuerySql,
+        InpatientNoParameter = source.InpatientNoParameter,
+        AdmissionTimeParameter = source.AdmissionTimeParameter,
+        SourceRecordKeyFields = source.SourceRecordKeyFields,
+        PollingIntervalSeconds = source.PollingIntervalSeconds,
+        SortOrder = source.SortOrder,
+        Enabled = source.Enabled
+    };
+
+    private static void CopyTaskFields(ActiveSyncTask source, ActiveSyncTask target)
+    {
+        target.Name = source.Name;
+        target.Code = source.Code;
+        target.Enabled = source.Enabled;
+        target.SyncTaskId = source.SyncTaskId;
+        target.ActiveRecordsUrl = source.ActiveRecordsUrl;
+        target.IntegrationProjectCode = source.IntegrationProjectCode;
+        target.PushType = source.PushType;
+        target.PushTarget = source.PushTarget;
+        target.CaseBatchSize = source.CaseBatchSize;
+        target.Concurrency = source.Concurrency;
+        target.PollingIntervalSeconds = source.PollingIntervalSeconds;
+        target.EmptyBackoffBaseSeconds = source.EmptyBackoffBaseSeconds;
+        target.EmptyBackoffMaxSeconds = source.EmptyBackoffMaxSeconds;
+        target.Remark = source.Remark;
+    }
+
+    private static void CopySourceFields(ActiveSyncSource source, ActiveSyncSource target)
+    {
+        target.DataType = source.DataType;
+        target.SyncTaskInterfaceId = source.SyncTaskInterfaceId;
+        target.ServerCode = source.ServerCode;
+        target.DisplayName = source.DisplayName;
+        target.DatabaseResourceId = source.DatabaseResourceId;
+        target.QuerySql = source.QuerySql;
+        target.InpatientNoParameter = source.InpatientNoParameter;
+        target.AdmissionTimeParameter = source.AdmissionTimeParameter;
+        target.SourceRecordKeyFields = source.SourceRecordKeyFields;
+        target.PollingIntervalSeconds = source.PollingIntervalSeconds;
+        target.SortOrder = source.SortOrder;
+        target.Enabled = source.Enabled;
+    }
+
+    private sealed class ActiveSourceRuntimeState
+    {
+        public string InpatientNo { get; set; } = "";
+        public string SourceName { get; set; } = "";
+        public DateTime? LastQueryAt { get; set; }
+        public int LastResultCount { get; set; }
+        public DateTime? NextQueryTime { get; set; }
+        public int EmptyCount { get; set; }
+        public string? LastError { get; set; }
+    }
+}

@@ -393,7 +393,7 @@ else
 
         var confirmed = await inj_dialogService.ShowMessageBox(
             "直接处理",
-            "确定要跳过队列，按当前接口配置立即处理这条消息吗？已过滤消息会清理对应幂等回执后重跑；已成功或部分成功消息会保留重复拦截。",
+            "确定要跳过队列，按当前接口配置立即处理这条消息吗？直接处理会清理对应幂等回执后重跑，可能重新推送数据。",
             yesText: "确认处理",
             cancelText: "取消");
         if (confirmed != true)

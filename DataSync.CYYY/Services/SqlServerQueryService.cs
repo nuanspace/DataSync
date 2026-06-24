@@ -137,6 +137,35 @@ public class DatabaseQueryService
         return result;
     }
 
+    public async Task<List<Dictionary<string, object>>> QueryByNamedParametersAsync(
+        string? databaseType,
+        string? connectionStringName,
+        string? host,
+        string? database,
+        string? username,
+        string? password,
+        bool trustCertificate,
+        string sql,
+        IReadOnlyDictionary<string, object?> parameters,
+        CancellationToken ct)
+    {
+        var normalizedType = IngestionService.NormalizeDatabaseType(databaseType);
+        ValidateSelectSql(sql, normalizedType);
+        var parameterNames = parameters.Keys.Select(NormalizeParameterName).ToList();
+
+        await using var conn = CreateConnection(normalizedType, ResolveConnectionString(
+            normalizedType, connectionStringName, host, database, username, password, trustCertificate));
+        await conn.OpenAsync(ct);
+
+        await using var cmd = CreateCommand(conn, normalizedType, sql, parameterNames);
+        foreach (var (name, value) in parameters)
+            AddObjectParameter(cmd, normalizedType, NormalizeParameterName(name), value);
+
+        var rows = await ReadRowsAsync(cmd, ct);
+        _logger.LogInformation("{DatabaseType} 命名参数查询完成：{Count} 条", normalizedType, rows.Count);
+        return rows;
+    }
+
     public async Task TestConnectionAsync(
         string? databaseType,
         string? connectionStringName,
@@ -245,10 +274,14 @@ public class DatabaseQueryService
             : new SqlConnection(connectionString);
     }
 
-    private static DbCommand CreateCommand(DbConnection conn, string databaseType, string sql)
+    private static DbCommand CreateCommand(
+        DbConnection conn,
+        string databaseType,
+        string sql,
+        IEnumerable<string>? parameterNames = null)
     {
         var cmd = conn.CreateCommand();
-        cmd.CommandText = PrepareSql(databaseType, sql);
+        cmd.CommandText = PrepareSql(databaseType, sql, parameterNames);
         cmd.CommandTimeout = CommandTimeoutSeconds;
         if (cmd is OracleCommand oracleCommand)
             oracleCommand.BindByName = true;
@@ -283,6 +316,23 @@ public class DatabaseQueryService
         }
 
         ((SqlCommand)cmd).Parameters.Add($"@{name}", SqlDbType.NVarChar).Value = value;
+    }
+
+    private static void AddObjectParameter(DbCommand cmd, string databaseType, string name, object? value)
+    {
+        if (value is DateTime dateTime)
+        {
+            AddDateTimeParameter(cmd, IngestionService.IsOracleDatabaseType(databaseType), name, dateTime);
+            return;
+        }
+
+        if (value is DateTimeOffset dateTimeOffset)
+        {
+            AddDateTimeParameter(cmd, IngestionService.IsOracleDatabaseType(databaseType), name, dateTimeOffset.DateTime);
+            return;
+        }
+
+        AddStringParameter(cmd, databaseType, name, value?.ToString() ?? "");
     }
 
     private static void AddOpenTimeRangeParametersIfNeeded(DbCommand cmd, string databaseType)
@@ -325,7 +375,7 @@ public class DatabaseQueryService
         return false;
     }
 
-    private static string PrepareSql(string databaseType, string sql)
+    private static string PrepareSql(string databaseType, string sql, IEnumerable<string>? parameterNames = null)
     {
         if (!IngestionService.IsOracleDatabaseType(databaseType))
             return sql;
@@ -333,8 +383,17 @@ public class DatabaseQueryService
         var prepared = ReplaceOracleParameter(sql, "from", OracleFromParameter);
         prepared = ReplaceOracleParameter(prepared, "to", OracleToParameter);
         prepared = ReplaceNamedParameter(prepared, '@', "queryValue", ":queryValue");
+        if (parameterNames != null)
+        {
+            foreach (var parameterName in parameterNames)
+                prepared = ReplaceNamedParameter(prepared, '@', parameterName, $":{parameterName}");
+        }
+
         return prepared;
     }
+
+    private static string NormalizeParameterName(string name)
+        => name.Trim().TrimStart('@', ':');
 
     private static string ReplaceOracleParameter(string sql, string sourceName, string targetName)
     {

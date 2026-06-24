@@ -397,8 +397,7 @@ public class MessageQueryService
             return false;
 
         var originalStatus = message.Status;
-        if (ShouldClearMessageReceiptsForDirectProcess(originalStatus))
-            await ClearMessageReceiptsAsync(db, message, cancellationToken);
+        await ClearMessageReceiptsAsync(db, message, cancellationToken);
 
         message.Status = MessageStatus.Processing;
         message.ErrorMessage = null;
@@ -452,9 +451,6 @@ public class MessageQueryService
 
     private static bool CanDirectProcess(MessageStatus status) =>
         status != MessageStatus.Processing;
-
-    private static bool ShouldClearMessageReceiptsForDirectProcess(MessageStatus status) =>
-        status == MessageStatus.Filtered;
 
     public async Task<List<string>> GetDistinctTranCodesAsync(DateTime? startTime = null, DateTime? endTime = null)
     {

@@ -106,6 +106,7 @@ public class Program
             builder.Services.AddScoped<InterfaceRecognitionService>();
             builder.Services.AddScoped<IdempotentKeyService>();
             builder.Services.AddScoped<EventIdentityService>();
+            builder.Services.AddScoped<ActiveMedicalRecordService>();
             builder.Services.AddScoped<MessageReceiptService>();
             builder.Services.AddScoped<MessageQueryService>();
             builder.Services.AddScoped<BioCoreIntegrationService>();
@@ -285,6 +286,46 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             ALTER TABLE IF EXISTS lhyy.esb_interface_config
                 ADD COLUMN IF NOT EXISTS main_record_array_path VARCHAR(500);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_interface_config
+                ADD COLUMN IF NOT EXISTS medical_record_sync_role INTEGER NOT NULL DEFAULT 0;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS lhyy.active_medical_records (
+                id                       BIGSERIAL PRIMARY KEY,
+                integration_project_code VARCHAR(50),
+                tran_code                VARCHAR(20),
+                mrn                      VARCHAR(100) NOT NULL,
+                inpatient_no             VARCHAR(100),
+                visit_no                 VARCHAR(100),
+                patient_id               UUID NOT NULL,
+                event_id                 UUID NOT NULL,
+                event_type_name          VARCHAR(100) NOT NULL DEFAULT '',
+                admission_time           TIMESTAMP,
+                discharge_time           TIMESTAMP,
+                status                   VARCHAR(20) NOT NULL DEFAULT 'Active',
+                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+                finished_at              TIMESTAMP
+            );
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_active_medical_records_status
+                ON lhyy.active_medical_records (status);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_active_medical_records_project
+                ON lhyy.active_medical_records (integration_project_code);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_active_medical_records_project_inpatient
+                ON lhyy.active_medical_records (integration_project_code, inpatient_no);
             """);
     }
 

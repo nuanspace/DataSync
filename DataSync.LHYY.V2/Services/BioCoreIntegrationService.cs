@@ -561,7 +561,7 @@ public class BioCoreIntegrationService
             JOIN care.event_type_definition e ON e.project_id = l.project_id
             WHERE l.code = @licenseCode
               AND e.form_set_id IS NOT NULL
-              AND COALESCE(e.is_valid, TRUE) = TRUEzhij
+              AND COALESCE(e.is_valid, TRUE) = TRUE
             ORDER BY e.name
             """;
         var param = cmd.CreateParameter();

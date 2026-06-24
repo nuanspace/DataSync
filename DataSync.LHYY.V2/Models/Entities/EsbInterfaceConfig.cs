@@ -96,6 +96,9 @@ public class EsbInterfaceConfig
     [Column("missing_event_identity_policy")]
     public MissingEventIdentityPolicy MissingEventIdentityPolicy { get; set; } = MissingEventIdentityPolicy.Fail;
 
+    [Column("medical_record_sync_role")]
+    public MedicalRecordSyncRole MedicalRecordSyncRole { get; set; } = MedicalRecordSyncRole.None;
+
     [Column("sample_json")]
     public string? SampleJson { get; set; }
 }

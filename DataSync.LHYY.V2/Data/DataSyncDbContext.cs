@@ -23,6 +23,7 @@ public class DataSyncDbContext : DbContext
     public DbSet<EsbIntegrationProjectConfig> EsbIntegrationProjectConfigs => Set<EsbIntegrationProjectConfig>();
     public DbSet<EsbIntegrationProjectDocument> EsbIntegrationProjectDocuments => Set<EsbIntegrationProjectDocument>();
     public DbSet<EsbMessageListItem> EsbMessageListItems => Set<EsbMessageListItem>();
+    public DbSet<ActiveMedicalRecord> ActiveMedicalRecords => Set<ActiveMedicalRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -135,6 +136,14 @@ public class DataSyncDbContext : DbContext
             e.HasIndex(r => new { r.IntegrationProjectCode, r.TranCode, r.IdempotentKey })
                 .IsUnique()
                 .HasFilter("idempotent_key IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ActiveMedicalRecord>(e =>
+        {
+            e.HasIndex(r => r.Status);
+            e.HasIndex(r => r.IntegrationProjectCode);
+            e.HasIndex(r => new { r.IntegrationProjectCode, r.InpatientNo });
+            e.HasIndex(r => new { r.IntegrationProjectCode, r.Mrn, r.InpatientNo, r.VisitNo });
         });
 
         modelBuilder.Entity<EsbIntegrationProject>(e =>

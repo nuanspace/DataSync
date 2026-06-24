@@ -18,6 +18,7 @@ public class GenericMessageProcessor
     private readonly FilterRuleService _filterRuleService;
     private readonly ConfigService _configService;
     private readonly EventIdentityService _eventIdentityService;
+    private readonly ActiveMedicalRecordService _activeMedicalRecordService;
     private readonly DirectTargetWriteService _directTargetWriteService;
     private readonly ILogger<GenericMessageProcessor> _logger;
 
@@ -27,6 +28,7 @@ public class GenericMessageProcessor
         FilterRuleService filterRuleService,
         ConfigService configService,
         EventIdentityService eventIdentityService,
+        ActiveMedicalRecordService activeMedicalRecordService,
         DirectTargetWriteService directTargetWriteService,
         ILogger<GenericMessageProcessor> logger)
     {
@@ -35,6 +37,7 @@ public class GenericMessageProcessor
         _filterRuleService = filterRuleService;
         _configService = configService;
         _eventIdentityService = eventIdentityService;
+        _activeMedicalRecordService = activeMedicalRecordService;
         _directTargetWriteService = directTargetWriteService;
         _logger = logger;
     }
@@ -42,6 +45,7 @@ public class GenericMessageProcessor
     public async Task<ProcessResult> ProcessAsync(EsbMessage message, EsbInterfaceConfig config)
     {
         var result = new ProcessResult();
+        var integrationProjectCode = message.IntegrationProjectCode ?? config.IntegrationProjectCode;
 
         if (!MessageJsonHelper.TryParseToken(message.RawJson, out var root, out var error))
             return ProcessResult.Fail(error ?? "Raw JSON 解析失败");
@@ -65,6 +69,17 @@ public class GenericMessageProcessor
         var visitNo = MessageJsonHelper.ReadString(root, config.VisitNoSourcePath, mainContext);
         var inpatientNo = MessageJsonHelper.ReadString(root, config.InpatientNoSourcePath, mainContext);
         var eventStartTime = MessageJsonHelper.ReadDateTime(root, config.EventStartTimeSourcePath, mainContext);
+
+        if (config.MedicalRecordSyncRole == MedicalRecordSyncRole.Supplemental)
+        {
+            var isActive = await _activeMedicalRecordService.IsActiveAsync(
+                integrationProjectCode,
+                mrn,
+                inpatientNo,
+                visitNo);
+            if (!isActive)
+                return ProcessResult.Filtered("病历不是 Active，补采消息已忽略");
+        }
 
         var hasEventMappings = await _mappingExecutor.HasMappingsAsync(message.TranCode, config.IntegrationProjectCode, MappingTarget.Event);
         var hasQuestionMappings = await _mappingExecutor.HasMappingsAsync(message.TranCode, config.IntegrationProjectCode, MappingTarget.Question);
@@ -148,7 +163,7 @@ public class GenericMessageProcessor
             return ProcessResult.Fail("获取事件失败");
 
         await _eventIdentityService.UpsertAsync(
-            message.IntegrationProjectCode,
+            integrationProjectCode,
             message.TranCode,
             dbPatient.id,
             dbEvent.id,
@@ -159,6 +174,21 @@ public class GenericMessageProcessor
             inpatientNo,
             visitNo,
             eventStartTime);
+
+        if (config.MedicalRecordSyncRole == MedicalRecordSyncRole.CaseDriver)
+        {
+            await _activeMedicalRecordService.UpsertFromCaseDriverAsync(
+                integrationProjectCode,
+                message.TranCode,
+                dbPatient.id,
+                dbEvent.id,
+                mrn,
+                config.EventTypeName!,
+                inpatientNo,
+                visitNo,
+                eventStartTime,
+                eventEndTime);
+        }
 
         if (!hasQuestionMappings && !hasSubCardMappings)
         {
