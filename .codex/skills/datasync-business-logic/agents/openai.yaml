@@ -1,0 +1,4 @@
+interface:
+  display_name: "DataSync 业务逻辑"
+  short_description: "记录DataSync工作空间业务逻辑与变更维护同步规则"
+  default_prompt: "使用 $datasync-business-logic 理解或更新 DataSync 工作空间业务逻辑。"
