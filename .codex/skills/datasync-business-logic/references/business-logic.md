@@ -1,6 +1,6 @@
 # DataSync 工作空间业务逻辑记录
 
-更新时间：2026-06-24
+更新时间：2026-06-26
 
 本文件记录 `D:\Github\DataSync` 工作空间中 ntcare 产品与医院侧系统对接相关的业务逻辑。后续任何业务逻辑改动都必须同步更新本文件。
 
@@ -113,6 +113,7 @@
 - 直接目标表写入：`DirectTargetWriteService`。
 - 字段映射：`FieldMappingExecutor`。
 - 过滤规则：`FilterRuleService`。
+- JSON 读取与路径解析：`MessageJsonHelper`、`SubCardPathHelper`。
 - 项目文档：`ProjectDocumentService`。
 - LLM 辅助：`LlmService`，用于接口识别/配置辅助场景；配置中不得泄露密钥。
 
@@ -166,6 +167,49 @@
 5. `MessageExecutionService` 根据 `handler_type` 选择处理器。
 6. 处理器执行过滤、字段映射、字典转换、事件定位、Bio.Core 写入或目标表直写。
 7. 更新消息状态、回执和处理日志。
+
+当前转换边界：
+
+- 现有统一处理链路以 JSON 为中心：`EsbController` 读取请求体后交给 `EsbReceiverService`，由 `MessageJsonHelper` 解析为 `JToken`，再通过 JSONPath、字段映射、字典和值表达式完成数据抽取和转换。
+- 当前没有独立的通用报文转换模块，也没有已落地的 XML 转 JSON 服务或接口适配层。
+- 代码中的 XML 处理主要用于项目文档预览、Word OpenXML 解析和配置导出，不属于医院业务报文转换链路。
+
+通用 OCR 转换链路：
+
+- 2026-06-26 新增 `DataSync.Common` 通用辅助类库，当前提供 PDF OCR 转换能力，供 `DataSync.CYYY` 和 `DataSync.LHYY.V2` 引用；新增能力默认不改变现有接口处理逻辑。
+- OCR 公共服务接口为 `IOcrConversionService`，输入为 `OcrSource`，支持 `FilePath`、`Url`、`Base64` 三种 PDF 来源；输出为 `OcrDocumentResult`，包含 `FullText`、`Pages`、顶层聚合 `TextItems`、`ExtractedFields`、`Metadata` 等标准 JSON 结构，单个文本块包含页码和坐标信息。
+- OCR 运行实现采用 Linux 容器优先方案：`pdftoppm` 渲染 PDF，`tesseract` CLI 执行识别；程序运行时不联网下载 traineddata，部署镜像需要预装 `tesseract-ocr`、`tesseract-ocr-chi-sim`、`poppler-utils`。
+- `DataSync.LHYY.V2` 新增 `OcrMessageProcessor`，仅当接口配置为 `handler_type=1` 且 `handler_name='OcrMessageProcessor'` 时启用；处理器先按 OCR profile 解析 PDF，再把 OCR 结果挂到原消息 JSON 的 `Ocr` 节点，然后继续调用 `GenericMessageProcessor` 复用现有字段映射和 Bio.Core 写入。
+- OCR 配置表为 `lhyy.esb_ocr_profile`，实体为 `EsbOcrProfile`，读取服务为 `OcrProfileService`。关键字段包括 `tran_code`、`integration_project_code`、`source_kind`、`source_path`、`language`、`dpi`、`page_seg_mode`、`max_pages`、`max_input_bytes`、`timeout_seconds`、`allowed_file_roots`、`output_json_path`。
+- OCR 文件路径来源必须配置 `allowed_file_roots` 白名单；会先按配置目录做字面路径初筛，避免探测白名单外路径是否存在；读取前还会解析已存在路径中的 symlink/junction 最终目标，再按 `Path.GetRelativePath` 判断路径归属，避免目录名前缀误匹配和链接逃逸。
+- OCR URL 来源必须配置全局 `Ocr:AllowedUrlHosts` 白名单；未配置时拒绝 URL 来源。URL 下载仍限制为 `http/https`、超时和大小，且不使用系统代理。每次请求和重定向都会在 HTTP 连接回调中解析 Host 对应 IP、校验并连接已校验 IP：配置 `Ocr:AllowedUrlCidrs` 时所有解析 IP 必须落入允许网段，未配置时拒绝 loopback、link-local、private、保留、文档、转换用途和多播地址。
+- OCR URL 下载禁用 `HttpClient` 自动重定向，由程序最多手动跟随 5 次重定向，并对每一跳的 scheme、host 和实际连接 IP 重新校验，避免白名单 host 通过 30x 跳转到非白名单地址。
+- OCR Base64 来源会先按规范化后的 Base64 长度估算解码后大小，超过 `max_input_bytes` 时在分配完整 PDF byte[] 前拒绝，降低大报文造成的内存压力。
+- OCR 外部命令使用 `ProcessStartInfo.ArgumentList` 传参，不再拼接命令行字符串；超时时会尝试终止整个进程树，并对终止后的等待设置短超时，避免 `pdftoppm` 或 `tesseract` 子进程残留或清理路径再次卡住。
+- `output_json_path` 是 OCR 审计或调试辅助输出位置，不作为业务主链路依赖；配置该字段时必须同时配置全局 `Ocr:AllowedOutputRoots`，运行时会先校验最终输出路径在允许目录内，再启动 OCR，并按 `TranCode`、`MessageId`、时间戳和随机后缀生成唯一 JSON 文件，避免多消息并发覆盖。
+- `OcrMessageProcessor` 当前只处理 JSON 对象根节点；顶层数组 OCR 消息会返回明确失败提示，现有非 OCR 顶层数组处理逻辑不变。
+- OCR 业务字段提取不另建主映射体系；字段写入仍通过 `lhyy.esb_field_mapping` 的 JSONPath 从 `$.Ocr.FullText`、`$.Ocr.Pages`、`$.Ocr.TextItems` 等节点读取。
+- 主动采集 PDF 时，`DataSync.CYYY` 仍负责采集和推送 PDF 路径、URL 或 Base64 到 `/api/esb`；OCR 和写入 ntcare 仍由 `DataSync.LHYY.V2` 完成。
+- 数据库脚本：`DataSync.LHYY.V2/Scripts/202606/20260626.sql` 新增 `lhyy.esb_ocr_profile` 表和索引。
+- 验证结果：`dotnet build DataSync.sln` 已通过；OCR 外部命令超时等待已改为可取消等待并在超时后终止进程树；当前 Windows 本机未安装 `tesseract` 和 `pdftoppm`，未做本机 OCR 运行验证，Linux 容器依赖已写入 `DataSync.LHYY.V2/Dockerfile`。
+
+识别规则与过滤规则配置：
+
+- `DataSync.LHYY.V2` 的接口识别规则和过滤规则是数据库驱动的业务配置，不写在 `appsettings.json` 中；配置文件主要承载连接、运行参数、LLM 选项等环境或基础配置。
+- 接口识别规则表为 `lhyy.esb_interface_match_rule`，实体为 `EsbInterfaceMatchRule`，由 `InterfaceRecognitionService` 读取并执行。
+- 接口识别顺序为：先识别传统 ESB 结构中的交易码，再尝试 `serverCode`、`ServerCode`、`tranCode`、`TranCode`、`code`、`Code` 等常见字段，最后按 `esb_interface_match_rule` 执行配置化匹配。
+- `esb_interface_match_rule` 的关键字段包括 `tran_code`、`integration_project_code`、`match_group`、`source_path`、`operator`、`compare_value`、`is_enabled`、`sort_order`、`description`。
+- 接口识别规则的 `match_group` 表示匹配组：同组规则全部满足才命中，多个组之间满足任一组即可。路径含 `[]` 时支持数组遍历，只要任一数组元素满足条件即可匹配该规则。
+- 过滤规则表为 `lhyy.esb_filter_rule`，实体为 `EsbFilterRule`，由 `FilterRuleService` 读取并执行。
+- `esb_filter_rule` 的关键字段包括 `tran_code`、`integration_project_code`、`source_path`、`operator`、`compare_value`、`rule_group`、`mapping_id`、`filter_scope`、`is_enabled`、`sort_order`、`description`。
+- 过滤规则分为接口级和映射级：`mapping_id IS NULL` 表示接口级过滤，用于判断整条消息是否继续处理；`mapping_id IS NOT NULL` 表示映射级过滤，用于判断某条字段映射是否执行。
+- 过滤规则的 `rule_group` 表示规则组：同组 AND，组间 OR；没有任何规则时默认通过。
+- 路径支持普通 JSON 路径和 `[]` 数组遍历语法。`filter_scope` 仅在路径含 `[]` 时生效，`MessageCheck = 0` 表示数组中存在任一元素满足条件则消息通过，`RowFilter = 1` 表示只保留满足条件的数组元素。
+- 识别规则和过滤规则共用 `FilterRuleService.Evaluate` 的操作符语义，当前支持 `eq`、`neq`、`contains`、`not_contains`、`starts_with`、`ends_with`、`in`、`not_in`、`gt`、`lt`、`gte`、`lte`、`is_empty`、`is_not_empty`、`regex`。
+- 规则支持项目级覆盖：查询当前项目规则时优先使用 `integration_project_code` 等于当前项目编码的规则；没有项目专属规则时，才使用 `integration_project_code` 为空的全局规则。
+- 接口识别规则通过 `ConfigService` 读取，有 5 分钟内存缓存；修改规则后如需立即生效，需要通过现有配置缓存清理能力或重启服务触发重新加载。
+- 过滤规则通常由 `FilterRuleService` 按接口或映射 ID 查询启用规则。接口配置页、过滤规则页、接口向导和映射编辑弹窗可维护这些规则；也可以通过数据库脚本维护。
+- `DataSync.LHYY.V2` 数据库配置脚本必须放在 `Scripts/yyyyMM/yyyyMMdd.sql`，同一天变更追加到同一个 SQL 文件。示例：LHYY 血管项目病种过滤使用接口级 `esb_filter_rule`，对入院诊断或出院诊断字段执行 `contains` 判断。
 
 枚举语义：
 

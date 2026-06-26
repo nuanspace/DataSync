@@ -3,6 +3,7 @@ using Bio.Core.FormSetDC;
 using Bio.Core.FormSetDC.V2.Internal;
 using Bio.Core.Services;
 using Bio.Services;
+using DataSync.Common.Ocr;
 using DataSync.LHYY.V2.Components;
 using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Options;
@@ -99,6 +100,8 @@ public class Program
             builder.Services.AddScoped<ITargetSchemaService, TargetSchemaService>();
 
             // 平台服务注册
+            builder.Services.Configure<OcrRuntimeOptions>(builder.Configuration.GetSection("Ocr"));
+            builder.Services.AddDataSyncOcr();
             builder.Services.AddScoped<EsbReceiverService>();
             builder.Services.AddScoped<IntegrationProjectService>();
             builder.Services.AddScoped<ConfigService>();
@@ -116,6 +119,7 @@ public class Program
             builder.Services.AddScoped<DirectTargetWriteService>();
             builder.Services.AddScoped<GenericMessageProcessor>();
             builder.Services.AddScoped<GenericQuestionWriteBackProcessor>();
+            builder.Services.AddScoped<OcrProfileService>();
             builder.Services.AddScoped<MessageExecutionService>();
             builder.Services.AddScoped<FilterRuleService>();
             builder.Services.AddScoped<MappingPreviewService>();
@@ -387,6 +391,40 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             CREATE INDEX IF NOT EXISTS ix_esb_dict_template_item_template_sort
                 ON lhyy.esb_dict_template_item (template_id, sort_order);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS lhyy.esb_ocr_profile (
+                id                       SERIAL PRIMARY KEY,
+                tran_code                VARCHAR(20) NOT NULL,
+                integration_project_code VARCHAR(50),
+                profile_name             VARCHAR(100),
+                is_enabled               BOOLEAN NOT NULL DEFAULT TRUE,
+                source_kind              INTEGER NOT NULL DEFAULT 0,
+                source_path              VARCHAR(500) NOT NULL DEFAULT '$.pdfPath',
+                language                 VARCHAR(50) NOT NULL DEFAULT 'chi_sim',
+                dpi                      INTEGER NOT NULL DEFAULT 300,
+                page_seg_mode            INTEGER NOT NULL DEFAULT 11,
+                max_pages                INTEGER,
+                max_input_bytes          BIGINT,
+                timeout_seconds          INTEGER NOT NULL DEFAULT 120,
+                keep_work_files          BOOLEAN NOT NULL DEFAULT FALSE,
+                allowed_file_roots       TEXT,
+                output_json_path         VARCHAR(1000),
+                description              VARCHAR(500),
+                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at               TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_esb_ocr_profile_tran_code
+                ON lhyy.esb_ocr_profile (tran_code);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_esb_ocr_profile_project_tran
+                ON lhyy.esb_ocr_profile (integration_project_code, tran_code);
             """);
     }
 

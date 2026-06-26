@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataSync.LHYY.V2", "DataSyn
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataSync.LHYY.V2.Tests", "DataSync.LHYY.V2\DataSync.LHYY.V2.Tests\DataSync.LHYY.V2.Tests.csproj", "{A8D7C316-A8CE-48CF-9396-1136286DDAB5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataSync.Common", "DataSync.Common\DataSync.Common.csproj", "{4C6A4B67-AB37-453B-AB26-CC8411D42D02}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{A8D7C316-A8CE-48CF-9396-1136286DDAB5}.Release|x64.Build.0 = Release|Any CPU
 		{A8D7C316-A8CE-48CF-9396-1136286DDAB5}.Release|x86.ActiveCfg = Release|Any CPU
 		{A8D7C316-A8CE-48CF-9396-1136286DDAB5}.Release|x86.Build.0 = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|x64.Build.0 = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Debug|x86.Build.0 = Debug|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|x64.ActiveCfg = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|x64.Build.0 = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|x86.ActiveCfg = Release|Any CPU
+		{4C6A4B67-AB37-453B-AB26-CC8411D42D02}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

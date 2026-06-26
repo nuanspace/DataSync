@@ -24,6 +24,10 @@
 		<PackageReference Include="Oracle.ManagedDataAccess.Core" Version="23.9.0" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<ProjectReference Include="..\DataSync.Common\DataSync.Common.csproj" />
+	</ItemGroup>
+
 </Project>
 
 

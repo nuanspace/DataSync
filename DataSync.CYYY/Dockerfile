@@ -13,6 +13,7 @@ FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
 ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 COPY ["DataSync.CYYY/DataSync.CYYY.csproj", "DataSync.CYYY/"]
+COPY ["DataSync.Common/DataSync.Common.csproj", "DataSync.Common/"]
 RUN dotnet restore "./DataSync.CYYY/DataSync.CYYY.csproj"
 COPY . .
 WORKDIR "/src/DataSync.CYYY"

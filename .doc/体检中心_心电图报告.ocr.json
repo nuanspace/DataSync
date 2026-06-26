@@ -1,0 +1,1021 @@
+﻿{
+  "SourcePdfPath": "D:\\Github\\DataSync\\.doc\\体检中心_心电图报告.pdf",
+  "OutputJsonPath": "D:\\Github\\DataSync\\.doc\\体检中心_心电图报告.ocr.json",
+  "ConfigPath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocrsettings.json",
+  "TessdataDirectory": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\tessdata",
+  "Language": "chi_sim",
+  "PageSegMode": "SparseText",
+  "RenderScale": 4.17,
+  "CropTopRatio": 0.32,
+  "StartedAt": "2026-06-25T16:46:16.6340807+08:00",
+  "FinishedAt": "2026-06-25T16:46:17.3690153+08:00",
+  "PageCount": 1,
+  "Pages": [
+    {
+      "PageNumber": 1,
+      "Width": 1234,
+      "Height": 874,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-001.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-001-ocr.png",
+      "MeanConfidence": 0.7,
+      "TextItems": [
+        {
+          "Text": "都",
+          "X": 441,
+          "Y": 31,
+          "Width": 21,
+          "Height": 22,
+          "Confidence": 73.1588
+        },
+        {
+          "Text": "昔",
+          "X": 477,
+          "Y": 29,
+          "Width": 20,
+          "Height": 24,
+          "Confidence": 28.4948
+        },
+        {
+          "Text": "于",
+          "X": 501,
+          "Y": 28,
+          "Width": 9,
+          "Height": 21,
+          "Confidence": 0
+        },
+        {
+          "Text": "大学",
+          "X": 514,
+          "Y": 28,
+          "Width": 40,
+          "Height": 23,
+          "Confidence": 65.1283
+        },
+        {
+          "Text": "时",
+          "X": 560,
+          "Y": 29,
+          "Width": 42,
+          "Height": 20,
+          "Confidence": 55.8372
+        },
+        {
+          "Text": "局",
+          "X": 610,
+          "Y": 36,
+          "Width": 6,
+          "Height": 10,
+          "Confidence": 88.9326
+        },
+        {
+          "Text": "站",
+          "X": 620,
+          "Y": 30,
+          "Width": 20,
+          "Height": 20,
+          "Confidence": 33.2543
+        },
+        {
+          "Text": "京",
+          "X": 645,
+          "Y": 33,
+          "Width": 20,
+          "Height": 13,
+          "Confidence": 0
+        },
+        {
+          "Text": "世纪",
+          "X": 664,
+          "Y": 21,
+          "Width": 33,
+          "Height": 40,
+          "Confidence": 65.5728
+        },
+        {
+          "Text": "斑",
+          "X": 704,
+          "Y": 28,
+          "Width": 66,
+          "Height": 24,
+          "Confidence": 14.737
+        },
+        {
+          "Text": "医",
+          "X": 734,
+          "Y": 21,
+          "Width": 23,
+          "Height": 40,
+          "Confidence": 0
+        },
+        {
+          "Text": "改",
+          "X": 757,
+          "Y": 21,
+          "Width": 18,
+          "Height": 40,
+          "Confidence": 0
+        },
+        {
+          "Text": "心电图",
+          "X": 797,
+          "Y": 39,
+          "Width": 50,
+          "Height": 18,
+          "Confidence": 96.5276
+        },
+        {
+          "Text": "报告",
+          "X": 857,
+          "Y": 39,
+          "Width": 32,
+          "Height": 18,
+          "Confidence": 81.954
+        },
+        {
+          "Text": "ES",
+          "X": 289,
+          "Y": 22,
+          "Width": 114,
+          "Height": 42,
+          "Confidence": 0
+        },
+        {
+          "Text": "SI",
+          "X": 293,
+          "Y": 59,
+          "Width": 108,
+          "Height": 10,
+          "Confidence": 46.0553
+        },
+        {
+          "Text": "|",
+          "X": 343,
+          "Y": 48,
+          "Width": 8,
+          "Height": 28,
+          "Confidence": 70.4737
+        },
+        {
+          "Text": "一",
+          "X": 362,
+          "Y": 48,
+          "Width": 13,
+          "Height": 28,
+          "Confidence": 79.4004
+        },
+        {
+          "Text": "=",
+          "X": 374,
+          "Y": 48,
+          "Width": 13,
+          "Height": 28,
+          "Confidence": 11.9287
+        },
+        {
+          "Text": "一",
+          "X": 387,
+          "Y": 48,
+          "Width": 18,
+          "Height": 28,
+          "Confidence": 83.5632
+        },
+        {
+          "Text": "eine",
+          "X": 445,
+          "Y": 44,
+          "Width": 34,
+          "Height": 28,
+          "Confidence": 36.3499
+        },
+        {
+          "Text": "Shiltan",
+          "X": 483,
+          "Y": 44,
+          "Width": 36,
+          "Height": 28,
+          "Confidence": 14.2531
+        },
+        {
+          "Text": "Nospial",
+          "X": 523,
+          "Y": 44,
+          "Width": 38,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "AI8iated",
+          "X": 565,
+          "Y": 44,
+          "Width": 38,
+          "Height": 28,
+          "Confidence": 0.1568
+        },
+        {
+          "Text": "ta",
+          "X": 607,
+          "Y": 44,
+          "Width": 10,
+          "Height": 28,
+          "Confidence": 70.8961
+        },
+        {
+          "Text": "Captal",
+          "X": 623,
+          "Y": 44,
+          "Width": 32,
+          "Height": 28,
+          "Confidence": 14.9186
+        },
+        {
+          "Text": "Medical",
+          "X": 658,
+          "Y": 44,
+          "Width": 36,
+          "Height": 28,
+          "Confidence": 89.0214
+        },
+        {
+          "Text": "University",
+          "X": 697,
+          "Y": 44,
+          "Width": 44,
+          "Height": 28,
+          "Confidence": 65.5639
+        },
+        {
+          "Text": "姓名",
+          "X": 88,
+          "Y": 83,
+          "Width": 40,
+          "Height": 16,
+          "Confidence": 93.082
+        },
+        {
+          "Text": ":",
+          "X": 124,
+          "Y": 78,
+          "Width": 8,
+          "Height": 28,
+          "Confidence": 92.5244
+        },
+        {
+          "Text": "刘",
+          "X": 138,
+          "Y": 83,
+          "Width": 32,
+          "Height": 16,
+          "Confidence": 92.5244
+        },
+        {
+          "Text": "晖",
+          "X": 161,
+          "Y": 78,
+          "Width": 13,
+          "Height": 28,
+          "Confidence": 74.3427
+        },
+        {
+          "Text": "性",
+          "X": 215,
+          "Y": 83,
+          "Width": 84,
+          "Height": 16,
+          "Confidence": 93.1677
+        },
+        {
+          "Text": "别",
+          "X": 239,
+          "Y": 79,
+          "Width": 12,
+          "Height": 30,
+          "Confidence": 92.8318
+        },
+        {
+          "Text": "/年",
+          "X": 250,
+          "Y": 83,
+          "Width": 36,
+          "Height": 16,
+          "Confidence": 92.5987
+        },
+        {
+          "Text": "龄",
+          "X": 286,
+          "Y": 79,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 92.6549
+        },
+        {
+          "Text": ":",
+          "X": 299,
+          "Y": 79,
+          "Width": 6,
+          "Height": 30,
+          "Confidence": 90.5463
+        },
+        {
+          "Text": "女",
+          "X": 317,
+          "Y": 83,
+          "Width": 13,
+          "Height": 16,
+          "Confidence": 90.5463
+        },
+        {
+          "Text": "/43",
+          "X": 330,
+          "Y": 83,
+          "Width": 37,
+          "Height": 16,
+          "Confidence": 90.7815
+        },
+        {
+          "Text": "岁",
+          "X": 361,
+          "Y": 79,
+          "Width": 21,
+          "Height": 30,
+          "Confidence": 93.1331
+        },
+        {
+          "Text": "”申请",
+          "X": 381,
+          "Y": 79,
+          "Width": 50,
+          "Height": 30,
+          "Confidence": 52.8847
+        },
+        {
+          "Text": "科室",
+          "X": 437,
+          "Y": 83,
+          "Width": 28,
+          "Height": 16,
+          "Confidence": 93.1666
+        },
+        {
+          "Text": ":",
+          "X": 468,
+          "Y": 90,
+          "Width": 4,
+          "Height": 7,
+          "Confidence": 92.824
+        },
+        {
+          "Text": "体检",
+          "X": 486,
+          "Y": 83,
+          "Width": 27,
+          "Height": 16,
+          "Confidence": 96.6667
+        },
+        {
+          "Text": "中",
+          "X": 518,
+          "Y": 83,
+          "Width": 18,
+          "Height": 15,
+          "Confidence": 93.1325
+        },
+        {
+          "Text": "心",
+          "X": 537,
+          "Y": 84,
+          "Width": 11,
+          "Height": 14,
+          "Confidence": 88.9141
+        },
+        {
+          "Text": "患者",
+          "X": 695,
+          "Y": 83,
+          "Width": 44,
+          "Height": 16,
+          "Confidence": 93.1834
+        },
+        {
+          "Text": "编号",
+          "X": 747,
+          "Y": 79,
+          "Width": 21,
+          "Height": 26,
+          "Confidence": 92.8936
+        },
+        {
+          "Text": ":",
+          "X": 767,
+          "Y": 90,
+          "Width": 3,
+          "Height": 7,
+          "Confidence": 92.1713
+        },
+        {
+          "Text": "0017834321",
+          "X": 776,
+          "Y": 85,
+          "Width": 84,
+          "Height": 12,
+          "Confidence": 71.9322
+        },
+        {
+          "Text": "病案",
+          "X": 886,
+          "Y": 82,
+          "Width": 51,
+          "Height": 16,
+          "Confidence": 94.742
+        },
+        {
+          "Text": "号",
+          "X": 927,
+          "Y": 78,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 95.1929
+        },
+        {
+          "Text": "病床",
+          "X": 1062,
+          "Y": 82,
+          "Width": 33,
+          "Height": 16,
+          "Confidence": 95.8615
+        },
+        {
+          "Text": "心",
+          "X": 87,
+          "Y": 123,
+          "Width": 16,
+          "Height": 16,
+          "Confidence": 92.2205
+        },
+        {
+          "Text": "率",
+          "X": 131,
+          "Y": 124,
+          "Width": 15,
+          "Height": 16,
+          "Confidence": 87.2778
+        },
+        {
+          "Text": "68",
+          "X": 193,
+          "Y": 126,
+          "Width": 16,
+          "Height": 12,
+          "Confidence": 92.2099
+        },
+        {
+          "Text": "bpm",
+          "X": 219,
+          "Y": 126,
+          "Width": 25,
+          "Height": 14,
+          "Confidence": 90.9267
+        },
+        {
+          "Text": "心室",
+          "X": 311,
+          "Y": 124,
+          "Width": 57,
+          "Height": 15,
+          "Confidence": 91.7237
+        },
+        {
+          "Text": "率",
+          "X": 350,
+          "Y": 120,
+          "Width": 13,
+          "Height": 28,
+          "Confidence": 92.7687
+        },
+        {
+          "Text": ":",
+          "X": 363,
+          "Y": 120,
+          "Width": 9,
+          "Height": 28,
+          "Confidence": 84.3456
+        },
+        {
+          "Text": "68",
+          "X": 406,
+          "Y": 126,
+          "Width": 16,
+          "Height": 12,
+          "Confidence": 86.1191
+        },
+        {
+          "Text": "bpm",
+          "X": 432,
+          "Y": 126,
+          "Width": 25,
+          "Height": 14,
+          "Confidence": 92.321
+        },
+        {
+          "Text": "诊断",
+          "X": 579,
+          "Y": 116,
+          "Width": 41,
+          "Height": 16,
+          "Confidence": 93.0344
+        },
+        {
+          "Text": ":",
+          "X": 616,
+          "Y": 111,
+          "Width": 6,
+          "Height": 30,
+          "Confidence": 88.5606
+        },
+        {
+          "Text": "1.",
+          "X": 628,
+          "Y": 117,
+          "Width": 10,
+          "Height": 13,
+          "Confidence": 83.2232
+        },
+        {
+          "Text": "宰",
+          "X": 651,
+          "Y": 115,
+          "Width": 8,
+          "Height": 16,
+          "Confidence": 0
+        },
+        {
+          "Text": "性",
+          "X": 661,
+          "Y": 115,
+          "Width": 39,
+          "Height": 16,
+          "Confidence": 0
+        },
+        {
+          "Text": "心",
+          "X": 685,
+          "Y": 111,
+          "Width": 10,
+          "Height": 30,
+          "Confidence": 93.1168
+        },
+        {
+          "Text": "和",
+          "X": 695,
+          "Y": 111,
+          "Width": 8,
+          "Height": 30,
+          "Confidence": 87.5116
+        },
+        {
+          "Text": "2.",
+          "X": 626,
+          "Y": 135,
+          "Width": 12,
+          "Height": 12,
+          "Confidence": 89.9846
+        },
+        {
+          "Text": "正常",
+          "X": 651,
+          "Y": 129,
+          "Width": 35,
+          "Height": 29,
+          "Confidence": 96.8659
+        },
+        {
+          "Text": "范围",
+          "X": 685,
+          "Y": 133,
+          "Width": 39,
+          "Height": 15,
+          "Confidence": 96.0856
+        },
+        {
+          "Text": "心电图",
+          "X": 723,
+          "Y": 129,
+          "Width": 39,
+          "Height": 29,
+          "Confidence": 94.9134
+        },
+        {
+          "Text": "P-R",
+          "X": 87,
+          "Y": 158,
+          "Width": 25,
+          "Height": 12,
+          "Confidence": 92.5107
+        },
+        {
+          "Text": "间",
+          "X": 115,
+          "Y": 156,
+          "Width": 13,
+          "Height": 16,
+          "Confidence": 92.8049
+        },
+        {
+          "Text": "期",
+          "X": 135,
+          "Y": 156,
+          "Width": 11,
+          "Height": 16,
+          "Confidence": 92.6635
+        },
+        {
+          "Text": ":",
+          "X": 150,
+          "Y": 163,
+          "Width": 3,
+          "Height": 8,
+          "Confidence": 78.0312
+        },
+        {
+          "Text": "134",
+          "X": 195,
+          "Y": 158,
+          "Width": 22,
+          "Height": 13,
+          "Confidence": 92.3906
+        },
+        {
+          "Text": "ms",
+          "X": 227,
+          "Y": 162,
+          "Width": 16,
+          "Height": 9,
+          "Confidence": 90.934
+        },
+        {
+          "Text": "9RS",
+          "X": 311,
+          "Y": 156,
+          "Width": 60,
+          "Height": 16,
+          "Confidence": 67.5054
+        },
+        {
+          "Text": "电",
+          "X": 342,
+          "Y": 151,
+          "Width": 16,
+          "Height": 30,
+          "Confidence": 90.9525
+        },
+        {
+          "Text": "轴",
+          "X": 357,
+          "Y": 151,
+          "Width": 18,
+          "Height": 30,
+          "Confidence": 88.6072
+        },
+        {
+          "Text": "/47/",
+          "X": 406,
+          "Y": 157,
+          "Width": 33,
+          "Height": 14,
+          "Confidence": 84.7567
+        },
+        {
+          "Text": "oRS",
+          "X": 83,
+          "Y": 184,
+          "Width": 29,
+          "Height": 28,
+          "Confidence": 47.8965
+        },
+        {
+          "Text": "间",
+          "X": 116,
+          "Y": 188,
+          "Width": 12,
+          "Height": 16,
+          "Confidence": 90.4986
+        },
+        {
+          "Text": "期",
+          "X": 135,
+          "Y": 188,
+          "Width": 18,
+          "Height": 16,
+          "Confidence": 34.8397
+        },
+        {
+          "Text": "99",
+          "X": 193,
+          "Y": 190,
+          "Width": 16,
+          "Height": 12,
+          "Confidence": 92.5056
+        },
+        {
+          "Text": "ms",
+          "X": 219,
+          "Y": 194,
+          "Width": 16,
+          "Height": 9,
+          "Confidence": 72.4564
+        },
+        {
+          "Text": "RV5/SV1",
+          "X": 310,
+          "Y": 190,
+          "Width": 58,
+          "Height": 13,
+          "Confidence": 42.1592
+        },
+        {
+          "Text": "0.71/0.54",
+          "X": 406,
+          "Y": 190,
+          "Width": 76,
+          "Height": 13,
+          "Confidence": 66.9857
+        },
+        {
+          "Text": "mV",
+          "X": 492,
+          "Y": 190,
+          "Width": 16,
+          "Height": 13,
+          "Confidence": 85.4262
+        },
+        {
+          "Text": "0T/oTc",
+          "X": 87,
+          "Y": 222,
+          "Width": 50,
+          "Height": 13,
+          "Confidence": 35.9685
+        },
+        {
+          "Text": "间",
+          "X": 140,
+          "Y": 220,
+          "Width": 32,
+          "Height": 17,
+          "Confidence": 92.2526
+        },
+        {
+          "Text": "期",
+          "X": 161,
+          "Y": 215,
+          "Width": 16,
+          "Height": 30,
+          "Confidence": 92.7873
+        },
+        {
+          "Text": "，",
+          "X": 176,
+          "Y": 228,
+          "Width": 3,
+          "Height": 7,
+          "Confidence": 26.0384
+        },
+        {
+          "Text": "398/424",
+          "X": 193,
+          "Y": 222,
+          "Width": 59,
+          "Height": 13,
+          "Confidence": 84.463
+        },
+        {
+          "Text": "ms",
+          "X": 262,
+          "Y": 226,
+          "Width": 16,
+          "Height": 9,
+          "Confidence": 90.7137
+        },
+        {
+          "Text": "RV5+SV1",
+          "X": 310,
+          "Y": 222,
+          "Width": 58,
+          "Height": 13,
+          "Confidence": 90.5957
+        },
+        {
+          "Text": "1.25",
+          "X": 408,
+          "Y": 222,
+          "Width": 31,
+          "Height": 13,
+          "Confidence": 90.5513
+        },
+        {
+          "Text": "my",
+          "X": 449,
+          "Y": 222,
+          "Width": 16,
+          "Height": 13,
+          "Confidence": 70.6362
+        },
+        {
+          "Text": "审核",
+          "X": 776,
+          "Y": 220,
+          "Width": 45,
+          "Height": 17,
+          "Confidence": 96.632
+        },
+        {
+          "Text": "医生",
+          "X": 828,
+          "Y": 220,
+          "Width": 23,
+          "Height": 16,
+          "Confidence": 30.0956
+        },
+        {
+          "Text": ".成",
+          "X": 867,
+          "Y": 213,
+          "Width": 30,
+          "Height": 39,
+          "Confidence": 20.1404
+        },
+        {
+          "Text": "|AK-。",
+          "X": 896,
+          "Y": 217,
+          "Width": 32,
+          "Height": 31,
+          "Confidence": 0
+        },
+        {
+          "Text": "报告",
+          "X": 950,
+          "Y": 222,
+          "Width": 139,
+          "Height": 17,
+          "Confidence": 91.7093
+        },
+        {
+          "Text": "日",
+          "X": 996,
+          "Y": 213,
+          "Width": 18,
+          "Height": 39,
+          "Confidence": 51.714
+        },
+        {
+          "Text": "期",
+          "X": 1013,
+          "Y": 213,
+          "Width": 13,
+          "Height": 39,
+          "Confidence": 96.6891
+        },
+        {
+          "Text": ";2026-06-12",
+          "X": 1025,
+          "Y": 222,
+          "Width": 90,
+          "Height": 17,
+          "Confidence": 51.609
+        },
+        {
+          "Text": "09:04:21",
+          "X": 1125,
+          "Y": 224,
+          "Width": 66,
+          "Height": 13,
+          "Confidence": 85.4757
+        },
+        {
+          "Text": "|",
+          "X": 85,
+          "Y": 258,
+          "Width": 2,
+          "Height": 22,
+          "Confidence": 80.2253
+        },
+        {
+          "Text": "检查",
+          "X": 107,
+          "Y": 264,
+          "Width": 41,
+          "Height": 13,
+          "Confidence": 80.2253
+        },
+        {
+          "Text": "时",
+          "X": 151,
+          "Y": 265,
+          "Width": 2,
+          "Height": 12,
+          "Confidence": 93.2757
+        },
+        {
+          "Text": "间",
+          "X": 154,
+          "Y": 265,
+          "Width": 9,
+          "Height": 13,
+          "Confidence": 92.8564
+        },
+        {
+          "Text": "6-06-12",
+          "X": 200,
+          "Y": 265,
+          "Width": 52,
+          "Height": 12,
+          "Confidence": 62.6904
+        },
+        {
+          "Text": "08:57:07",
+          "X": 261,
+          "Y": 265,
+          "Width": 59,
+          "Height": 11,
+          "Confidence": 82.897
+        },
+        {
+          "Text": "]",
+          "X": 1195,
+          "Y": 258,
+          "Width": 1,
+          "Height": 22,
+          "Confidence": 92.0552
+        }
+      ],
+      "Lines": [
+        "都昔于大学时局站京世纪斑医改 心电图报告",
+        "ES",
+        "SI | 一=一",
+        "eine Shiltan Nospial AI8iated ta Captal Medical University",
+        "姓名: 刘晖",
+        "性别/年龄: 女/43岁”申请科室: 体检中心",
+        "患者编号: 0017834321",
+        "病案号",
+        "病床",
+        "心",
+        "率",
+        "68 bpm",
+        "心室率:",
+        "68 bpm",
+        "诊断: 1. 宰性心和",
+        "2. 正常范围心电图",
+        "P-R间期:",
+        "134 ms",
+        "9RS电轴",
+        "/47/",
+        "oRS间期",
+        "99 ms",
+        "RV5/SV1",
+        "0.71/0.54 mV",
+        "0T/oTc间期，",
+        "398/424 ms",
+        "RV5+SV1",
+        "1.25 my",
+        "审核医生 .成|AK-。 报告日期;2026-06-12 09:04:21",
+        "| 检查时间",
+        "6-06-12 08:57:07",
+        "]"
+      ],
+      "Text": "都昔于大学时局站京世纪斑医改 心电图报告\n\nES\n\nSI | 一=一\n\neine Shiltan Nospial AI8iated ta Captal Medical University\n\n姓名: 刘晖\n\n性别/年龄: 女/43岁”申请科室: 体检中心\n\n患者编号: 0017834321\n\n病案号\n\n病床\n\n心\n\n率\n\n68 bpm\n\n心室率:\n\n68 bpm\n\n诊断: 1. 宰性心和\n\n2. 正常范围心电图\n\nP-R间期:\n\n134 ms\n\n9RS电轴\n\n/47/\n\noRS间期\n\n99 ms\n\nRV5/SV1\n\n0.71/0.54 mV\n\n0T/oTc间期，\n\n398/424 ms\n\nRV5+SV1\n\n1.25 my\n\n审核医生 .成|AK-。 报告日期;2026-06-12 09:04:21\n\n| 检查时间\n\n6-06-12 08:57:07\n\n]",
+      "Fields": {
+        "姓名": "刘晖",
+        "性别年龄": "女/43岁”",
+        "申请科室": "体检中心",
+        "患者编号": "0017834321",
+        "心率": "68 bpm",
+        "心室率": "68 bpm",
+        "PR间期": "134 ms",
+        "QRS电轴": "/47/",
+        "QRS间期": "99 ms",
+        "RV5SV1": "0.71/0.54 mV",
+        "QTQTc间期": "398/424 ms",
+        "RV5SV1合计": "1.25",
+        "报告日期": "2026-06-12 09:04:21",
+        "诊断": "1. 宰性心和 2. 正常范围心电图"
+      }
+    }
+  ],
+  "FullText": "都昔于大学时局站京世纪斑医改 心电图报告\n\nES\n\nSI | 一=一\n\neine Shiltan Nospial AI8iated ta Captal Medical University\n\n姓名: 刘晖\n\n性别/年龄: 女/43岁”申请科室: 体检中心\n\n患者编号: 0017834321\n\n病案号\n\n病床\n\n心\n\n率\n\n68 bpm\n\n心室率:\n\n68 bpm\n\n诊断: 1. 宰性心和\n\n2. 正常范围心电图\n\nP-R间期:\n\n134 ms\n\n9RS电轴\n\n/47/\n\noRS间期\n\n99 ms\n\nRV5/SV1\n\n0.71/0.54 mV\n\n0T/oTc间期，\n\n398/424 ms\n\nRV5+SV1\n\n1.25 my\n\n审核医生 .成|AK-。 报告日期;2026-06-12 09:04:21\n\n| 检查时间\n\n6-06-12 08:57:07\n\n]",
+  "CombinedFields": {
+    "姓名": "刘晖",
+    "性别年龄": "女/43岁”",
+    "申请科室": "体检中心",
+    "患者编号": "0017834321",
+    "心率": "68 bpm",
+    "心室率": "68 bpm",
+    "PR间期": "134 ms",
+    "QRS电轴": "/47/",
+    "QRS间期": "99 ms",
+    "RV5SV1": "0.71/0.54 mV",
+    "QTQTc间期": "398/424 ms",
+    "RV5SV1合计": "1.25",
+    "报告日期": "2026-06-12 09:04:21",
+    "诊断": "1. 宰性心和 2. 正常范围心电图"
+  }
+}

@@ -1,0 +1,5675 @@
+﻿{
+  "SourcePdfPath": "D:\\Github\\DataSync\\.doc\\Report.pdf",
+  "OutputJsonPath": "D:\\Github\\DataSync\\.doc\\Report.ocr.json",
+  "ConfigPath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocrsettings.json",
+  "TessdataDirectory": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\tessdata",
+  "Language": "chi_sim",
+  "PageSegMode": "SparseText",
+  "RenderScale": 4.17,
+  "CropTopRatio": 0.32,
+  "StartedAt": "2026-06-25T16:48:14.5273893+08:00",
+  "FinishedAt": "2026-06-25T16:48:26.3936703+08:00",
+  "PageCount": 8,
+  "Pages": [
+    {
+      "PageNumber": 1,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-001.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-001-ocr.png",
+      "MeanConfidence": 0.65,
+      "TextItems": [
+        {
+          "Text": "首都",
+          "X": 385,
+          "Y": 57,
+          "Width": 469,
+          "Height": 169,
+          "Confidence": 57.9694
+        },
+        {
+          "Text": "医科",
+          "X": 933,
+          "Y": 57,
+          "Width": 171,
+          "Height": 170,
+          "Confidence": 96.3814
+        },
+        {
+          "Text": "大",
+          "X": 1182,
+          "Y": 57,
+          "Width": 177,
+          "Height": 169,
+          "Confidence": 96.423
+        },
+        {
+          "Text": "学",
+          "X": 1368,
+          "Y": 58,
+          "Width": 201,
+          "Height": 169,
+          "Confidence": 96.1123
+        },
+        {
+          "Text": "附属",
+          "X": 1577,
+          "Y": 59,
+          "Width": 348,
+          "Height": 165,
+          "Confidence": 93.2801
+        },
+        {
+          "Text": "北",
+          "X": 1945,
+          "Y": 60,
+          "Width": 168,
+          "Height": 166,
+          "Confidence": 92.6102
+        },
+        {
+          "Text": "泵",
+          "X": 2112,
+          "Y": 57,
+          "Width": 89,
+          "Height": 37,
+          "Confidence": 0
+        },
+        {
+          "Text": "世纪",
+          "X": 2218,
+          "Y": 59,
+          "Width": 900,
+          "Height": 167,
+          "Confidence": 77.8346
+        },
+        {
+          "Text": "荆",
+          "X": 2642,
+          "Y": 53,
+          "Width": 201,
+          "Height": 229,
+          "Confidence": 71.9514
+        },
+        {
+          "Text": "医",
+          "X": 2842,
+          "Y": 53,
+          "Width": 159,
+          "Height": 229,
+          "Confidence": 66.9622
+        },
+        {
+          "Text": "院",
+          "X": 3000,
+          "Y": 53,
+          "Width": 115,
+          "Height": 229,
+          "Confidence": 33.2915
+        },
+        {
+          "Text": "动态",
+          "X": 1407,
+          "Y": 237,
+          "Width": 249,
+          "Height": 91,
+          "Confidence": 95.78
+        },
+        {
+          "Text": "心电图",
+          "X": 1660,
+          "Y": 237,
+          "Width": 273,
+          "Height": 91,
+          "Confidence": 16.8014
+        },
+        {
+          "Text": "报告",
+          "X": 1934,
+          "Y": 237,
+          "Width": 161,
+          "Height": 92,
+          "Confidence": 87.3514
+        },
+        {
+          "Text": "地",
+          "X": 170,
+          "Y": 337,
+          "Width": 127,
+          "Height": 57,
+          "Confidence": 92.9129
+        },
+        {
+          "Text": "址",
+          "X": 257,
+          "Y": 331,
+          "Width": 49,
+          "Height": 77,
+          "Confidence": 85.1376
+        },
+        {
+          "Text": ":北京",
+          "X": 336,
+          "Y": 336,
+          "Width": 389,
+          "Height": 61,
+          "Confidence": 96.2647
+        },
+        {
+          "Text": "市",
+          "X": 493,
+          "Y": 331,
+          "Width": 68,
+          "Height": 77,
+          "Confidence": 93.1652
+        },
+        {
+          "Text": "海",
+          "X": 560,
+          "Y": 331,
+          "Width": 73,
+          "Height": 77,
+          "Confidence": 92.899
+        },
+        {
+          "Text": "诈",
+          "X": 632,
+          "Y": 331,
+          "Width": 59,
+          "Height": 77,
+          "Confidence": 33.8407
+        },
+        {
+          "Text": "区",
+          "X": 690,
+          "Y": 331,
+          "Width": 68,
+          "Height": 77,
+          "Confidence": 71.7188
+        },
+        {
+          "Text": "羊",
+          "X": 757,
+          "Y": 331,
+          "Width": 74,
+          "Height": 77,
+          "Confidence": 92.3566
+        },
+        {
+          "Text": "坊",
+          "X": 830,
+          "Y": 338,
+          "Width": 31,
+          "Height": 59,
+          "Confidence": 92.8298
+        },
+        {
+          "Text": "店",
+          "X": 892,
+          "Y": 336,
+          "Width": 36,
+          "Height": 60,
+          "Confidence": 92.8966
+        },
+        {
+          "Text": "铁",
+          "X": 960,
+          "Y": 336,
+          "Width": 37,
+          "Height": 61,
+          "Confidence": 91.1333
+        },
+        {
+          "Text": "医",
+          "X": 1032,
+          "Y": 338,
+          "Width": 62,
+          "Height": 58,
+          "Confidence": 91.6438
+        },
+        {
+          "Text": "路",
+          "X": 1099,
+          "Y": 336,
+          "Width": 31,
+          "Height": 61,
+          "Confidence": 96.4998
+        },
+        {
+          "Text": "10",
+          "X": 1147,
+          "Y": 344,
+          "Width": 47,
+          "Height": 46,
+          "Confidence": 93.1034
+        },
+        {
+          "Text": "号",
+          "X": 1210,
+          "Y": 359,
+          "Width": 48,
+          "Height": 38,
+          "Confidence": 89.6137
+        },
+        {
+          "Text": "患",
+          "X": 1614,
+          "Y": 440,
+          "Width": 57,
+          "Height": 66,
+          "Confidence": 69.9852
+        },
+        {
+          "Text": "上",
+          "X": 1783,
+          "Y": 481,
+          "Width": 36,
+          "Height": 26,
+          "Confidence": 9.9794
+        },
+        {
+          "Text": "怕",
+          "X": 1832,
+          "Y": 439,
+          "Width": 65,
+          "Height": 67,
+          "Confidence": 0
+        },
+        {
+          "Text": "姓名",
+          "X": 186,
+          "Y": 528,
+          "Width": 122,
+          "Height": 61,
+          "Confidence": 96.4582
+        },
+        {
+          "Text": ":高",
+          "X": 316,
+          "Y": 524,
+          "Width": 93,
+          "Height": 77,
+          "Confidence": 71.0413
+        },
+        {
+          "Text": "修",
+          "X": 441,
+          "Y": 528,
+          "Width": 38,
+          "Height": 60,
+          "Confidence": 0
+        },
+        {
+          "Text": "佩",
+          "X": 504,
+          "Y": 528,
+          "Width": 42,
+          "Height": 60,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 2205,
+          "Y": 526,
+          "Width": 129,
+          "Height": 58,
+          "Confidence": 92.9326
+        },
+        {
+          "Text": "时",
+          "X": 2356,
+          "Y": 525,
+          "Width": 61,
+          "Height": 60,
+          "Confidence": 88.2876
+        },
+        {
+          "Text": "间",
+          "X": 2426,
+          "Y": 528,
+          "Width": 38,
+          "Height": 56,
+          "Confidence": 92.0776
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 2505,
+          "Y": 527,
+          "Width": 313,
+          "Height": 56,
+          "Confidence": 54.0246
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2854,
+          "Y": 532,
+          "Width": 249,
+          "Height": 46,
+          "Confidence": 79.8027
+        },
+        {
+          "Text": "隆",
+          "X": 196,
+          "Y": 711,
+          "Width": 114,
+          "Height": 61,
+          "Confidence": 46.007
+        },
+        {
+          "Text": "别",
+          "X": 277,
+          "Y": 707,
+          "Width": 44,
+          "Height": 76,
+          "Confidence": 66.7968
+        },
+        {
+          "Text": ":",
+          "X": 334,
+          "Y": 707,
+          "Width": 34,
+          "Height": 76,
+          "Confidence": 71.2444
+        },
+        {
+          "Text": "女",
+          "X": 354,
+          "Y": 711,
+          "Width": 57,
+          "Height": 61,
+          "Confidence": 0
+        },
+        {
+          "Text": "病人",
+          "X": 2218,
+          "Y": 704,
+          "Width": 127,
+          "Height": 61,
+          "Confidence": 95.206
+        },
+        {
+          "Text": "ID:0010268478",
+          "X": 2355,
+          "Y": 712,
+          "Width": 403,
+          "Height": 46,
+          "Confidence": 82.2731
+        },
+        {
+          "Text": "年",
+          "X": 197,
+          "Y": 877,
+          "Width": 60,
+          "Height": 44,
+          "Confidence": 93.8415
+        },
+        {
+          "Text": "上",
+          "X": 271,
+          "Y": 902,
+          "Width": 15,
+          "Height": 24,
+          "Confidence": 24.5812
+        },
+        {
+          "Text": "龄",
+          "X": 264,
+          "Y": 878,
+          "Width": 60,
+          "Height": 60,
+          "Confidence": 50.0851
+        },
+        {
+          "Text": ":",
+          "X": 340,
+          "Y": 925,
+          "Width": 8,
+          "Height": 8,
+          "Confidence": 50.0851
+        },
+        {
+          "Text": ":33",
+          "X": 340,
+          "Y": 886,
+          "Width": 81,
+          "Height": 45,
+          "Confidence": 92.4477
+        },
+        {
+          "Text": "终",
+          "X": 439,
+          "Y": 878,
+          "Width": 40,
+          "Height": 61,
+          "Confidence": 0
+        },
+        {
+          "Text": "病案",
+          "X": 2221,
+          "Y": 889,
+          "Width": 193,
+          "Height": 61,
+          "Confidence": 82.2349
+        },
+        {
+          "Text": "号",
+          "X": 2372,
+          "Y": 885,
+          "Width": 46,
+          "Height": 89,
+          "Confidence": 90.0652
+        },
+        {
+          "Text": "儿",
+          "X": 1682,
+          "Y": 1072,
+          "Width": 13,
+          "Height": 21,
+          "Confidence": 79.3238
+        },
+        {
+          "Text": "人",
+          "X": 1700,
+          "Y": 1060,
+          "Width": 48,
+          "Height": 47,
+          "Confidence": 23.2099
+        },
+        {
+          "Text": "率",
+          "X": 1759,
+          "Y": 1045,
+          "Width": 59,
+          "Height": 71,
+          "Confidence": 85.2566
+        },
+        {
+          "Text": "心",
+          "X": 255,
+          "Y": 1145,
+          "Width": 87,
+          "Height": 61,
+          "Confidence": 91.3663
+        },
+        {
+          "Text": "搏",
+          "X": 353,
+          "Y": 1145,
+          "Width": 27,
+          "Height": 61,
+          "Confidence": 91.6086
+        },
+        {
+          "Text": "数",
+          "X": 416,
+          "Y": 1144,
+          "Width": 31,
+          "Height": 62,
+          "Confidence": 90.2531
+        },
+        {
+          "Text": ":119943",
+          "X": 489,
+          "Y": 1152,
+          "Width": 182,
+          "Height": 46,
+          "Confidence": 92.4562
+        },
+        {
+          "Text": "心动",
+          "X": 1506,
+          "Y": 1145,
+          "Width": 124,
+          "Height": 61,
+          "Confidence": 96.4503
+        },
+        {
+          "Text": "过",
+          "X": 1667,
+          "Y": 1145,
+          "Width": 74,
+          "Height": 60,
+          "Confidence": 92.9992
+        },
+        {
+          "Text": "速",
+          "X": 1740,
+          "Y": 1141,
+          "Width": 60,
+          "Height": 78,
+          "Confidence": 85.3888
+        },
+        {
+          "Text": "(>130",
+          "X": 1814,
+          "Y": 1145,
+          "Width": 143,
+          "Height": 60,
+          "Confidence": 49.673
+        },
+        {
+          "Text": "bpnm",
+          "X": 1992,
+          "Y": 1151,
+          "Width": 95,
+          "Height": 57,
+          "Confidence": 71.402
+        },
+        {
+          "Text": ")",
+          "X": 2120,
+          "Y": 1146,
+          "Width": 16,
+          "Height": 59,
+          "Confidence": 89.4542
+        },
+        {
+          "Text": "20",
+          "X": 2215,
+          "Y": 1152,
+          "Width": 58,
+          "Height": 46,
+          "Confidence": 92.2078
+        },
+        {
+          "Text": "阵",
+          "X": 2342,
+          "Y": 1144,
+          "Width": 62,
+          "Height": 62,
+          "Confidence": 89.9915
+        },
+        {
+          "Text": "(《1%)",
+          "X": 2406,
+          "Y": 1144,
+          "Width": 240,
+          "Height": 62,
+          "Confidence": 71.4131
+        },
+        {
+          "Text": "记录",
+          "X": 185,
+          "Y": 1246,
+          "Width": 129,
+          "Height": 58,
+          "Confidence": 91.6014
+        },
+        {
+          "Text": "时",
+          "X": 333,
+          "Y": 1245,
+          "Width": 46,
+          "Height": 60,
+          "Confidence": 95.8651
+        },
+        {
+          "Text": "长",
+          "X": 413,
+          "Y": 1245,
+          "Width": 34,
+          "Height": 59,
+          "Confidence": 95.8476
+        },
+        {
+          "Text": ":24:00:00",
+          "X": 485,
+          "Y": 1252,
+          "Width": 249,
+          "Height": 46,
+          "Confidence": 80.3614
+        },
+        {
+          "Text": "心动",
+          "X": 1506,
+          "Y": 1245,
+          "Width": 124,
+          "Height": 60,
+          "Confidence": 95.5412
+        },
+        {
+          "Text": "过",
+          "X": 1664,
+          "Y": 1245,
+          "Width": 64,
+          "Height": 58,
+          "Confidence": 96.9008
+        },
+        {
+          "Text": "组",
+          "X": 1729,
+          "Y": 1245,
+          "Width": 37,
+          "Height": 60,
+          "Confidence": 43.5012
+        },
+        {
+          "Text": "〈《55",
+          "X": 1814,
+          "Y": 1245,
+          "Width": 111,
+          "Height": 59,
+          "Confidence": 56.0311
+        },
+        {
+          "Text": "bpnm",
+          "X": 1960,
+          "Y": 1251,
+          "Width": 95,
+          "Height": 56,
+          "Confidence": 31.609
+        },
+        {
+          "Text": ")",
+          "X": 2089,
+          "Y": 1246,
+          "Width": 16,
+          "Height": 58,
+          "Confidence": 73.6437
+        },
+        {
+          "Text": "阵",
+          "X": 2250,
+          "Y": 1244,
+          "Width": 84,
+          "Height": 61,
+          "Confidence": 87.6509
+        },
+        {
+          "Text": "(《",
+          "X": 2333,
+          "Y": 1235,
+          "Width": 70,
+          "Height": 74,
+          "Confidence": 60.3107
+        },
+        {
+          "Text": "工",
+          "X": 2445,
+          "Y": 1252,
+          "Width": 19,
+          "Height": 46,
+          "Confidence": 41.6241
+        },
+        {
+          "Text": "%)",
+          "X": 2502,
+          "Y": 1246,
+          "Width": 81,
+          "Height": 58,
+          "Confidence": 7.6535
+        },
+        {
+          "Text": "均",
+          "X": 218,
+          "Y": 1345,
+          "Width": 126,
+          "Height": 61,
+          "Confidence": 25.9778
+        },
+        {
+          "Text": "心",
+          "X": 347,
+          "Y": 1354,
+          "Width": 64,
+          "Height": 46,
+          "Confidence": 91.0359
+        },
+        {
+          "Text": "率",
+          "X": 418,
+          "Y": 1345,
+          "Width": 29,
+          "Height": 61,
+          "Confidence": 88.2621
+        },
+        {
+          "Text": ":83",
+          "X": 485,
+          "Y": 1353,
+          "Width": 58,
+          "Height": 45,
+          "Confidence": 87.9367
+        },
+        {
+          "Text": "bpm",
+          "X": 578,
+          "Y": 1352,
+          "Width": 96,
+          "Height": 56,
+          "Confidence": 82.1231
+        },
+        {
+          "Text": "停",
+          "X": 1504,
+          "Y": 1345,
+          "Width": 127,
+          "Height": 61,
+          "Confidence": 89.2766
+        },
+        {
+          "Text": "搏",
+          "X": 1649,
+          "Y": 1345,
+          "Width": 15,
+          "Height": 60,
+          "Confidence": 71.3867
+        },
+        {
+          "Text": "(>",
+          "X": 1670,
+          "Y": 1345,
+          "Width": 25,
+          "Height": 60,
+          "Confidence": 45.7777
+        },
+        {
+          "Text": "2000",
+          "X": 1733,
+          "Y": 1353,
+          "Width": 122,
+          "Height": 45,
+          "Confidence": 45.7777
+        },
+        {
+          "Text": "ms)",
+          "X": 1890,
+          "Y": 1346,
+          "Width": 81,
+          "Height": 59,
+          "Confidence": 88.215
+        },
+        {
+          "Text": ":0",
+          "X": 2018,
+          "Y": 1353,
+          "Width": 26,
+          "Height": 45,
+          "Confidence": 92.2611
+        },
+        {
+          "Text": "次",
+          "X": 2083,
+          "Y": 1355,
+          "Width": 59,
+          "Height": 51,
+          "Confidence": 74.5719
+        },
+        {
+          "Text": "最",
+          "X": 187,
+          "Y": 1445,
+          "Width": 144,
+          "Height": 60,
+          "Confidence": 74.3255
+        },
+        {
+          "Text": "快",
+          "X": 338,
+          "Y": 1459,
+          "Width": 19,
+          "Height": 41,
+          "Confidence": 92.1711
+        },
+        {
+          "Text": "心",
+          "X": 367,
+          "Y": 1445,
+          "Width": 103,
+          "Height": 60,
+          "Confidence": 92.9735
+        },
+        {
+          "Text": "鞭",
+          "X": 418,
+          "Y": 1441,
+          "Width": 40,
+          "Height": 77,
+          "Confidence": 0
+        },
+        {
+          "Text": ":158",
+          "X": 489,
+          "Y": 1452,
+          "Width": 86,
+          "Height": 46,
+          "Confidence": 92.0588
+        },
+        {
+          "Text": "bpm",
+          "X": 610,
+          "Y": 1451,
+          "Width": 95,
+          "Height": 56,
+          "Confidence": 89.3135
+        },
+        {
+          "Text": "@",
+          "X": 738,
+          "Y": 1452,
+          "Width": 30,
+          "Height": 46,
+          "Confidence": 89.3135
+        },
+        {
+          "Text": "04/15",
+          "X": 802,
+          "Y": 1447,
+          "Width": 154,
+          "Height": 56,
+          "Confidence": 77.6627
+        },
+        {
+          "Text": "08:43:46",
+          "X": 992,
+          "Y": 1452,
+          "Width": 248,
+          "Height": 47,
+          "Confidence": 85.0815
+        },
+        {
+          "Text": "最",
+          "X": 1505,
+          "Y": 1445,
+          "Width": 322,
+          "Height": 60,
+          "Confidence": 94.9018
+        },
+        {
+          "Text": "长",
+          "X": 1600,
+          "Y": 1437,
+          "Width": 63,
+          "Height": 72,
+          "Confidence": 96.5373
+        },
+        {
+          "Text": "如",
+          "X": 1663,
+          "Y": 1437,
+          "Width": 50,
+          "Height": 72,
+          "Confidence": 27.7479
+        },
+        {
+          "Text": "间",
+          "X": 1712,
+          "Y": 1445,
+          "Width": 86,
+          "Height": 60,
+          "Confidence": 0
+        },
+        {
+          "Text": "期",
+          "X": 1798,
+          "Y": 1437,
+          "Width": 54,
+          "Height": 72,
+          "Confidence": 92.28
+        },
+        {
+          "Text": ":1457",
+          "X": 1871,
+          "Y": 1452,
+          "Width": 117,
+          "Height": 46,
+          "Confidence": 92.244
+        },
+        {
+          "Text": "ms",
+          "X": 2023,
+          "Y": 1467,
+          "Width": 60,
+          "Height": 31,
+          "Confidence": 92.5456
+        },
+        {
+          "Text": "@",
+          "X": 2118,
+          "Y": 1452,
+          "Width": 30,
+          "Height": 46,
+          "Confidence": 92.5456
+        },
+        {
+          "Text": "04/15",
+          "X": 2183,
+          "Y": 1447,
+          "Width": 154,
+          "Height": 56,
+          "Confidence": 62.8779
+        },
+        {
+          "Text": "01:59:19",
+          "X": 2374,
+          "Y": 1452,
+          "Width": 248,
+          "Height": 46,
+          "Confidence": 79.7754
+        },
+        {
+          "Text": "时",
+          "X": 188,
+          "Y": 1544,
+          "Width": 169,
+          "Height": 41,
+          "Confidence": 71.7101
+        },
+        {
+          "Text": "人",
+          "X": 245,
+          "Y": 1540,
+          "Width": 41,
+          "Height": 45,
+          "Confidence": 0
+        },
+        {
+          "Text": "恒",
+          "X": 285,
+          "Y": 1544,
+          "Width": 46,
+          "Height": 41,
+          "Confidence": 0
+        },
+        {
+          "Text": "下",
+          "X": 364,
+          "Y": 1569,
+          "Width": 14,
+          "Height": 16,
+          "Confidence": 0
+        },
+        {
+          "Text": "7",
+          "X": 393,
+          "Y": 1560,
+          "Width": 9,
+          "Height": 9,
+          "Confidence": 0
+        },
+        {
+          "Text": "冯",
+          "X": 414,
+          "Y": 1545,
+          "Width": 29,
+          "Height": 40,
+          "Confidence": 0
+        },
+        {
+          "Text": ".4",
+          "X": 484,
+          "Y": 1553,
+          "Width": 59,
+          "Height": 32,
+          "Confidence": 23.931
+        },
+        {
+          "Text": "了",
+          "X": 527,
+          "Y": 1540,
+          "Width": 23,
+          "Height": 45,
+          "Confidence": 52.4758
+        },
+        {
+          "Text": "rn",
+          "X": 578,
+          "Y": 1552,
+          "Width": 94,
+          "Height": 33,
+          "Confidence": 46.5146
+        },
+        {
+          "Text": "mmD",
+          "X": 706,
+          "Y": 1553,
+          "Width": 30,
+          "Height": 32,
+          "Confidence": 0
+        },
+        {
+          "Text": "和",
+          "X": 735,
+          "Y": 1540,
+          "Width": 26,
+          "Height": 45,
+          "Confidence": 48.2031
+        },
+        {
+          "Text": "nn/",
+          "X": 770,
+          "Y": 1547,
+          "Width": 154,
+          "Height": 38,
+          "Confidence": 4.3643
+        },
+        {
+          "Text": "NT.FO.1O",
+          "X": 961,
+          "Y": 1553,
+          "Width": 248,
+          "Height": 32,
+          "Confidence": 6.6695
+        },
+        {
+          "Text": "TA、",
+          "X": 1502,
+          "Y": 1553,
+          "Width": 62,
+          "Height": 32,
+          "Confidence": 23.9374
+        },
+        {
+          "Text": "FRRO",
+          "X": 1633,
+          "Y": 1553,
+          "Width": 120,
+          "Height": 32,
+          "Confidence": 31
+        },
+        {
+          "Text": "TTC",
+          "X": 1820,
+          "Y": 1567,
+          "Width": 57,
+          "Height": 18,
+          "Confidence": 22.3732
+        }
+      ],
+      "Lines": [
+        "首都医科大学附属北泵世纪荆医院",
+        "动态心电图报告",
+        "地址:北京市海诈区羊坊店铁医路10号",
+        "患",
+        "上  怕",
+        "姓名:高修佩",
+        "记录时间:2026/04/14 09:56:23",
+        "隆别 :女",
+        "病人ID:0010268478",
+        "年上 龄 :  :33终",
+        "病案号",
+        "儿人 率",
+        "心搏数:119943",
+        "心动过速 (>130 bpnm )",
+        "20 阵(《1%)",
+        "记录时长:24:00:00",
+        "心动过组 〈《55 bpnm )",
+        "阵(《工%)",
+        "均心率:83 bpm",
+        "停搏(> 2000 ms) :0 次",
+        "最快心鞭:158 bpm @ 04/15 08:43:46",
+        "最长如间期:1457 ms @ 04/15 01:59:19",
+        "时人恒下7冯.4了 rn mmD和nn/ NT.FO.1O",
+        "TA、 FRRO",
+        "TTC"
+      ],
+      "Text": "首都医科大学附属北泵世纪荆医院\n\n动态心电图报告\n\n地址:北京市海诈区羊坊店铁医路10号\n\n患\n\n上  怕\n\n姓名:高修佩\n\n记录时间:2026/04/14 09:56:23\n\n隆别 :女\n\n病人ID:0010268478\n\n年上 龄 :  :33终\n\n病案号\n\n儿人 率\n\n心搏数:119943\n\n心动过速 (>130 bpnm )\n\n20 阵(《1%)\n\n记录时长:24:00:00\n\n心动过组 〈《55 bpnm )\n\n阵(《工%)\n\n均心率:83 bpm\n\n停搏(> 2000 ms) :0 次\n\n最快心鞭:158 bpm @ 04/15 08:43:46\n\n最长如间期:1457 ms @ 04/15 01:59:19\n\n时人恒下7冯.4了 rn mmD和nn/ NT.FO.1O\n\nTA、 FRRO\n\nTTC",
+      "Fields": {
+        "病案号": "儿人 率 心搏数:119943 心动过速 (>130 bpnm ) 20 阵(《1%) 记录时长:24:00:00 心动过组 〈《55 bpnm ) 阵(《工%) 均",
+        "心率": "83 bpm"
+      }
+    },
+    {
+      "PageNumber": 2,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-002.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-002-ocr.png",
+      "MeanConfidence": 0.68,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.374
+        },
+        {
+          "Text": ":高",
+          "X": 400,
+          "Y": 169,
+          "Width": 76,
+          "Height": 54,
+          "Confidence": 71.6576
+        },
+        {
+          "Text": "佩",
+          "X": 478,
+          "Y": 169,
+          "Width": 53,
+          "Height": 53,
+          "Confidence": 0
+        },
+        {
+          "Text": "佩",
+          "X": 533,
+          "Y": 172,
+          "Width": 27,
+          "Height": 48,
+          "Confidence": 1.8213
+        },
+        {
+          "Text": "记录",
+          "X": 1338,
+          "Y": 170,
+          "Width": 108,
+          "Height": 52,
+          "Confidence": 92.2484
+        },
+        {
+          "Text": "时",
+          "X": 1464,
+          "Y": 170,
+          "Width": 52,
+          "Height": 52,
+          "Confidence": 89.5138
+        },
+        {
+          "Text": "间",
+          "X": 1523,
+          "Y": 174,
+          "Width": 34,
+          "Height": 48,
+          "Confidence": 92.6306
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1593,
+          "Y": 172,
+          "Width": 280,
+          "Height": 49,
+          "Confidence": 79.7788
+        },
+        {
+          "Text": "09:56:23",
+          "X": 1905,
+          "Y": 177,
+          "Width": 222,
+          "Height": 40,
+          "Confidence": 84.5831
+        },
+        {
+          "Text": "4",
+          "X": 1463,
+          "Y": 330,
+          "Width": 71,
+          "Height": 57,
+          "Confidence": 96.8149
+        },
+        {
+          "Text": "小",
+          "X": 1534,
+          "Y": 321,
+          "Width": 45,
+          "Height": 75,
+          "Confidence": 96.5034
+        },
+        {
+          "Text": "时",
+          "X": 1617,
+          "Y": 321,
+          "Width": 47,
+          "Height": 75,
+          "Confidence": 97.002
+        },
+        {
+          "Text": "数据",
+          "X": 1673,
+          "Y": 320,
+          "Width": 239,
+          "Height": 77,
+          "Confidence": 96.093
+        },
+        {
+          "Text": "图",
+          "X": 1857,
+          "Y": 316,
+          "Width": 56,
+          "Height": 110,
+          "Confidence": 95.5992
+        },
+        {
+          "Text": "170",
+          "X": 571,
+          "Y": 466,
+          "Width": 78,
+          "Height": 39,
+          "Confidence": 88.1271
+        },
+        {
+          "Text": "了",
+          "X": 2523,
+          "Y": 440,
+          "Width": 38,
+          "Height": 85,
+          "Confidence": 35.3441
+        },
+        {
+          "Text": "LL",
+          "X": 2527,
+          "Y": 444,
+          "Width": 117,
+          "Height": 59,
+          "Confidence": 50.7216
+        },
+        {
+          "Text": "|",
+          "X": 2892,
+          "Y": 439,
+          "Width": 5,
+          "Height": 64,
+          "Confidence": 70.6236
+        },
+        {
+          "Text": "]",
+          "X": 3008,
+          "Y": 441,
+          "Width": 25,
+          "Height": 62,
+          "Confidence": 54.6933
+        },
+        {
+          "Text": "上",
+          "X": 3141,
+          "Y": 441,
+          "Width": 62,
+          "Height": 62,
+          "Confidence": 0
+        },
+        {
+          "Text": "儿",
+          "X": 381,
+          "Y": 540,
+          "Width": 9,
+          "Height": 16,
+          "Confidence": 67.0708
+        },
+        {
+          "Text": "人",
+          "X": 395,
+          "Y": 531,
+          "Width": 36,
+          "Height": 36,
+          "Confidence": 0
+        },
+        {
+          "Text": "140",
+          "X": 571,
+          "Y": 536,
+          "Width": 78,
+          "Height": 39,
+          "Confidence": 87.6219
+        },
+        {
+          "Text": "V9",
+          "X": 2520,
+          "Y": 528,
+          "Width": 60,
+          "Height": 45,
+          "Confidence": 82.2223
+        },
+        {
+          "Text": "过",
+          "X": 2711,
+          "Y": 602,
+          "Width": 9,
+          "Height": 10,
+          "Confidence": 32.9018
+        },
+        {
+          "Text": "人",
+          "X": 2731,
+          "Y": 587,
+          "Width": 4,
+          "Height": 10,
+          "Confidence": 70.8874
+        },
+        {
+          "Text": "县",
+          "X": 2756,
+          "Y": 578,
+          "Width": 32,
+          "Height": 45,
+          "Confidence": 27.7079
+        },
+        {
+          "Text": "心",
+          "X": 2793,
+          "Y": 580,
+          "Width": 30,
+          "Height": 39,
+          "Confidence": 57.3404
+        },
+        {
+          "Text": "47",
+          "X": 2859,
+          "Y": 584,
+          "Width": 88,
+          "Height": 34,
+          "Confidence": 42.791
+        },
+        {
+          "Text": "(bpm)",
+          "X": 2960,
+          "Y": 578,
+          "Width": 103,
+          "Height": 44,
+          "Confidence": 70.2473
+        },
+        {
+          "Text": "(bpm)",
+          "X": 375,
+          "Y": 620,
+          "Width": 117,
+          "Height": 54,
+          "Confidence": 79.9207
+        },
+        {
+          "Text": "110",
+          "X": 571,
+          "Y": 605,
+          "Width": 78,
+          "Height": 40,
+          "Confidence": 90.3674
+        },
+        {
+          "Text": "80",
+          "X": 596,
+          "Y": 674,
+          "Width": 53,
+          "Height": 39,
+          "Confidence": 91.2544
+        },
+        {
+          "Text": "FL",
+          "X": 2527,
+          "Y": 597,
+          "Width": 710,
+          "Height": 131,
+          "Confidence": 37.4024
+        },
+        {
+          "Text": "50",
+          "X": 598,
+          "Y": 744,
+          "Width": 51,
+          "Height": 39,
+          "Confidence": 76.1358
+        },
+        {
+          "Text": "V9",
+          "X": 2520,
+          "Y": 745,
+          "Width": 60,
+          "Height": 45,
+          "Confidence": 85.2197
+        },
+        {
+          "Text": "最",
+          "X": 2671,
+          "Y": 786,
+          "Width": 64,
+          "Height": 46,
+          "Confidence": 93.1428
+        },
+        {
+          "Text": "快",
+          "X": 2741,
+          "Y": 785,
+          "Width": 51,
+          "Height": 47,
+          "Confidence": 92.2166
+        },
+        {
+          "Text": "心率",
+          "X": 2802,
+          "Y": 781,
+          "Width": 76,
+          "Height": 57,
+          "Confidence": 93.8751
+        },
+        {
+          "Text": "158(bpm)",
+          "X": 2891,
+          "Y": 786,
+          "Width": 184,
+          "Height": 43,
+          "Confidence": 90.686
+        },
+        {
+          "Text": "2800",
+          "X": 2542,
+          "Y": 887,
+          "Width": 109,
+          "Height": 39,
+          "Confidence": 92.4682
+        },
+        {
+          "Text": "儿",
+          "X": 381,
+          "Y": 940,
+          "Width": 9,
+          "Height": 16,
+          "Confidence": 67.2323
+        },
+        {
+          "Text": "人",
+          "X": 395,
+          "Y": 931,
+          "Width": 36,
+          "Height": 36,
+          "Confidence": 0
+        },
+        {
+          "Text": "1250",
+          "X": 571,
+          "Y": 918,
+          "Width": 78,
+          "Height": 39,
+          "Confidence": 76.7185
+        },
+        {
+          "Text": "2100",
+          "X": 2542,
+          "Y": 944,
+          "Width": 109,
+          "Height": 39,
+          "Confidence": 91.3544
+        },
+        {
+          "Text": "上",
+          "X": 482,
+          "Y": 1009,
+          "Width": 32,
+          "Height": 25,
+          "Confidence": 50.0578
+        },
+        {
+          "Text": "变",
+          "X": 351,
+          "Y": 1002,
+          "Width": 54,
+          "Height": 53,
+          "Confidence": 88.1193
+        },
+        {
+          "Text": "工",
+          "X": 481,
+          "Y": 1047,
+          "Width": 36,
+          "Height": 5,
+          "Confidence": 85.9061
+        },
+        {
+          "Text": "100",
+          "X": 571,
+          "Y": 1022,
+          "Width": 78,
+          "Height": 40,
+          "Confidence": 90.1502
+        },
+        {
+          "Text": "1400",
+          "X": 2544,
+          "Y": 1000,
+          "Width": 107,
+          "Height": 39,
+          "Confidence": 91.5311
+        },
+        {
+          "Text": "700",
+          "X": 2571,
+          "Y": 1057,
+          "Width": 80,
+          "Height": 40,
+          "Confidence": 49.0078
+        },
+        {
+          "Text": "下",
+          "X": 3137,
+          "Y": 1130,
+          "Width": 116,
+          "Height": 4,
+          "Confidence": 48.7188
+        },
+        {
+          "Text": "SDNN",
+          "X": 310,
+          "Y": 1110,
+          "Width": 125,
+          "Height": 46,
+          "Confidence": 91.8994
+        },
+        {
+          "Text": "(ms)",
+          "X": 448,
+          "Y": 1103,
+          "Width": 100,
+          "Height": 59,
+          "Confidence": 88.6647
+        },
+        {
+          "Text": "50",
+          "X": 598,
+          "Y": 1125,
+          "Width": 51,
+          "Height": 39,
+          "Confidence": 81.1817
+        },
+        {
+          "Text": "全",
+          "X": 2968,
+          "Y": 1164,
+          "Width": 130,
+          "Height": 85,
+          "Confidence": 0
+        },
+        {
+          "Text": "CC",
+          "X": 3120,
+          "Y": 1164,
+          "Width": 72,
+          "Height": 39,
+          "Confidence": 43.2339
+        },
+        {
+          "Text": "400",
+          "X": 2742,
+          "Y": 1164,
+          "Width": 85,
+          "Height": 39,
+          "Confidence": 88.6399
+        },
+        {
+          "Text": "0",
+          "X": 2803,
+          "Y": 1210,
+          "Width": 21,
+          "Height": 34,
+          "Confidence": 41.918
+        },
+        {
+          "Text": "89",
+          "X": 2862,
+          "Y": 1164,
+          "Width": 84,
+          "Height": 85,
+          "Confidence": 32.5323
+        },
+        {
+          "Text": "RR",
+          "X": 2949,
+          "Y": 1210,
+          "Width": 59,
+          "Height": 36,
+          "Confidence": 91.7391
+        },
+        {
+          "Text": "团",
+          "X": 3015,
+          "Y": 1205,
+          "Width": 27,
+          "Height": 40,
+          "Confidence": 0
+        },
+        {
+          "Text": "其",
+          "X": 3055,
+          "Y": 1203,
+          "Width": 20,
+          "Height": 40,
+          "Confidence": 62.381
+        },
+        {
+          "Text": "80",
+          "X": 596,
+          "Y": 1281,
+          "Width": 53,
+          "Height": 39,
+          "Confidence": 91.1252
+        },
+        {
+          "Text": "一",
+          "X": 481,
+          "Y": 1346,
+          "Width": 36,
+          "Height": 6,
+          "Confidence": 71.5474
+        },
+        {
+          "Text": "60",
+          "X": 597,
+          "Y": 1332,
+          "Width": 52,
+          "Height": 38,
+          "Confidence": 89.1564
+        },
+        {
+          "Text": "1600",
+          "X": 2595,
+          "Y": 1316,
+          "Width": 56,
+          "Height": 21,
+          "Confidence": 83.9912
+        },
+        {
+          "Text": "〈",
+          "X": 361,
+          "Y": 1370,
+          "Width": 14,
+          "Height": 51,
+          "Confidence": 86.0295
+        },
+        {
+          "Text": "个",
+          "X": 379,
+          "Y": 1369,
+          "Width": 127,
+          "Height": 53,
+          "Confidence": 70.6397
+        },
+        {
+          "Text": "数",
+          "X": 454,
+          "Y": 1365,
+          "Width": 35,
+          "Height": 78,
+          "Confidence": 90.49
+        },
+        {
+          "Text": ")",
+          "X": 488,
+          "Y": 1365,
+          "Width": 21,
+          "Height": 78,
+          "Confidence": 91.3936
+        },
+        {
+          "Text": "40",
+          "X": 594,
+          "Y": 1382,
+          "Width": 55,
+          "Height": 37,
+          "Confidence": 90.8418
+        },
+        {
+          "Text": "1200",
+          "X": 2595,
+          "Y": 1389,
+          "Width": 56,
+          "Height": 21,
+          "Confidence": 93.1051
+        },
+        {
+          "Text": "20",
+          "X": 597,
+          "Y": 1432,
+          "Width": 52,
+          "Height": 38,
+          "Confidence": 89.9269
+        },
+        {
+          "Text": "800",
+          "X": 2608,
+          "Y": 1462,
+          "Width": 43,
+          "Height": 21,
+          "Confidence": 91.3993
+        },
+        {
+          "Text": "上",
+          "X": 444,
+          "Y": 1553,
+          "Width": 42,
+          "Height": 32,
+          "Confidence": 25.2437
+        },
+        {
+          "Text": "80",
+          "X": 596,
+          "Y": 1530,
+          "Width": 53,
+          "Height": 40,
+          "Confidence": 90.9551
+        },
+        {
+          "Text": "机",
+          "X": 603,
+          "Y": 1582,
+          "Width": 43,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": "400",
+          "X": 2607,
+          "Y": 1535,
+          "Width": 44,
+          "Height": 21,
+          "Confidence": 92.3906
+        }
+      ],
+      "Lines": [
+        "姓名:高佩佩",
+        "记录时间:2026/04/14 09:56:23",
+        "4小时数据图",
+        "170",
+        "了LL",
+        "|",
+        "]",
+        "上",
+        "儿人",
+        "140",
+        "V9",
+        "过人县心",
+        "47 (bpm)",
+        "(bpm)",
+        "110",
+        "80",
+        "FL",
+        "50",
+        "V9",
+        "最快心率 158(bpm)",
+        "2800",
+        "儿人",
+        "1250",
+        "2100",
+        "上",
+        "变",
+        "工 100",
+        "1400",
+        "700",
+        "下",
+        "SDNN (ms)",
+        "50",
+        "全CC",
+        "400 0 89",
+        "RR团其",
+        "80",
+        "一",
+        "60",
+        "1600",
+        "〈个数)",
+        "40",
+        "1200",
+        "20",
+        "800",
+        "上",
+        "80",
+        "机",
+        "400"
+      ],
+      "Text": "姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n4小时数据图\n\n170\n\n了LL\n\n|\n\n]\n\n上\n\n儿人\n\n140\n\nV9\n\n过人县心\n\n47 (bpm)\n\n(bpm)\n\n110\n\n80\n\nFL\n\n50\n\nV9\n\n最快心率 158(bpm)\n\n2800\n\n儿人\n\n1250\n\n2100\n\n上\n\n变\n\n工 100\n\n1400\n\n700\n\n下\n\nSDNN (ms)\n\n50\n\n全CC\n\n400 0 89\n\nRR团其\n\n80\n\n一\n\n60\n\n1600\n\n〈个数)\n\n40\n\n1200\n\n20\n\n800\n\n上\n\n80\n\n机\n\n400",
+      "Fields": {
+        "心率": "158"
+      }
+    },
+    {
+      "PageNumber": 3,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-003.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-003-ocr.png",
+      "MeanConfidence": 0.71,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.2274
+        },
+        {
+          "Text": ":高",
+          "X": 374,
+          "Y": 169,
+          "Width": 186,
+          "Height": 54,
+          "Confidence": 92.6988
+        },
+        {
+          "Text": "侯",
+          "X": 477,
+          "Y": 164,
+          "Width": 53,
+          "Height": 69,
+          "Confidence": 14.5416
+        },
+        {
+          "Text": "佩",
+          "X": 529,
+          "Y": 164,
+          "Width": 35,
+          "Height": 69,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1505,
+          "Y": 171,
+          "Width": 108,
+          "Height": 51,
+          "Confidence": 95.0841
+        },
+        {
+          "Text": "时",
+          "X": 1628,
+          "Y": 169,
+          "Width": 63,
+          "Height": 53,
+          "Confidence": 92.3322
+        },
+        {
+          "Text": "间",
+          "X": 1692,
+          "Y": 174,
+          "Width": 32,
+          "Height": 48,
+          "Confidence": 88.2063
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1739,
+          "Y": 171,
+          "Width": 300,
+          "Height": 50,
+          "Confidence": 76.4286
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 86.2873
+        },
+        {
+          "Text": "HRV",
+          "X": 1586,
+          "Y": 331,
+          "Width": 124,
+          "Height": 56,
+          "Confidence": 92.5429
+        },
+        {
+          "Text": "时",
+          "X": 1775,
+          "Y": 321,
+          "Width": 57,
+          "Height": 75,
+          "Confidence": 93.2872
+        },
+        {
+          "Text": "域",
+          "X": 1862,
+          "Y": 320,
+          "Width": 53,
+          "Height": 77,
+          "Confidence": 91.3616
+        },
+        {
+          "Text": "报告",
+          "X": 1956,
+          "Y": 320,
+          "Width": 124,
+          "Height": 78,
+          "Confidence": 59.1737
+        },
+        {
+          "Text": "天",
+          "X": 249,
+          "Y": 532,
+          "Width": 293,
+          "Height": 4,
+          "Confidence": 56.5349
+        },
+        {
+          "Text": "一",
+          "X": 549,
+          "Y": 532,
+          "Width": 287,
+          "Height": 4,
+          "Confidence": 12.3751
+        },
+        {
+          "Text": "一",
+          "X": 908,
+          "Y": 532,
+          "Width": 75,
+          "Height": 4,
+          "Confidence": 66.6625
+        },
+        {
+          "Text": "一",
+          "X": 990,
+          "Y": 532,
+          "Width": 11,
+          "Height": 4,
+          "Confidence": 15.0324
+        },
+        {
+          "Text": "天",
+          "X": 1750,
+          "Y": 532,
+          "Width": 146,
+          "Height": 4,
+          "Confidence": 52.1777
+        },
+        {
+          "Text": "一",
+          "X": 1898,
+          "Y": 532,
+          "Width": 605,
+          "Height": 4,
+          "Confidence": 9.3942
+        },
+        {
+          "Text": "一",
+          "X": 2113,
+          "Y": 517,
+          "Width": 148,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "一",
+          "X": 2260,
+          "Y": 517,
+          "Width": 148,
+          "Height": 28,
+          "Confidence": 20.7525
+        },
+        {
+          "Text": "一",
+          "X": 2407,
+          "Y": 517,
+          "Width": 85,
+          "Height": 28,
+          "Confidence": 72.2455
+        },
+        {
+          "Text": "一",
+          "X": 2491,
+          "Y": 517,
+          "Width": 17,
+          "Height": 28,
+          "Confidence": 11.6859
+        },
+        {
+          "Text": "1600",
+          "X": 151,
+          "Y": 659,
+          "Width": 82,
+          "Height": 30,
+          "Confidence": 91.4348
+        },
+        {
+          "Text": "1600",
+          "X": 1652,
+          "Y": 659,
+          "Width": 82,
+          "Height": 30,
+          "Confidence": 90.8975
+        },
+        {
+          "Text": "1200",
+          "X": 151,
+          "Y": 810,
+          "Width": 82,
+          "Height": 29,
+          "Confidence": 92.2597
+        },
+        {
+          "Text": "1200",
+          "X": 1652,
+          "Y": 810,
+          "Width": 82,
+          "Height": 29,
+          "Confidence": 92.3436
+        },
+        {
+          "Text": "800",
+          "X": 171,
+          "Y": 960,
+          "Width": 62,
+          "Height": 30,
+          "Confidence": 91.1992
+        },
+        {
+          "Text": "800",
+          "X": 1671,
+          "Y": 960,
+          "Width": 63,
+          "Height": 30,
+          "Confidence": 92.4677
+        },
+        {
+          "Text": "400",
+          "X": 168,
+          "Y": 1109,
+          "Width": 65,
+          "Height": 30,
+          "Confidence": 91.9362
+        },
+        {
+          "Text": "400",
+          "X": 1669,
+          "Y": 1109,
+          "Width": 65,
+          "Height": 30,
+          "Confidence": 92.0228
+        },
+        {
+          "Text": "400",
+          "X": 362,
+          "Y": 1309,
+          "Width": 65,
+          "Height": 30,
+          "Confidence": 92.1261
+        },
+        {
+          "Text": "800",
+          "X": 511,
+          "Y": 1309,
+          "Width": 62,
+          "Height": 30,
+          "Confidence": 92.4865
+        },
+        {
+          "Text": "1200",
+          "X": 649,
+          "Y": 1309,
+          "Width": 83,
+          "Height": 30,
+          "Confidence": 92.0424
+        },
+        {
+          "Text": "1600",
+          "X": 797,
+          "Y": 1309,
+          "Width": 81,
+          "Height": 30,
+          "Confidence": 92.2132
+        },
+        {
+          "Text": "2000",
+          "X": 911,
+          "Y": 1280,
+          "Width": 90,
+          "Height": 59,
+          "Confidence": 92.4762
+        },
+        {
+          "Text": "400",
+          "X": 1863,
+          "Y": 1309,
+          "Width": 65,
+          "Height": 30,
+          "Confidence": 92.3997
+        },
+        {
+          "Text": "800",
+          "X": 2013,
+          "Y": 1309,
+          "Width": 62,
+          "Height": 30,
+          "Confidence": 92.1771
+        },
+        {
+          "Text": "1200",
+          "X": 2151,
+          "Y": 1309,
+          "Width": 82,
+          "Height": 30,
+          "Confidence": 90.6184
+        },
+        {
+          "Text": "1600",
+          "X": 2298,
+          "Y": 1309,
+          "Width": 82,
+          "Height": 30,
+          "Confidence": 91.8778
+        },
+        {
+          "Text": "2000",
+          "X": 2413,
+          "Y": 1281,
+          "Width": 87,
+          "Height": 58,
+          "Confidence": 92.6897
+        },
+        {
+          "Text": "RR",
+          "X": 529,
+          "Y": 1376,
+          "Width": 47,
+          "Height": 34,
+          "Confidence": 92.0187
+        },
+        {
+          "Text": "散",
+          "X": 592,
+          "Y": 1369,
+          "Width": 45,
+          "Height": 46,
+          "Confidence": 43.0544
+        },
+        {
+          "Text": "点",
+          "X": 645,
+          "Y": 1370,
+          "Width": 27,
+          "Height": 44,
+          "Confidence": 93.2753
+        },
+        {
+          "Text": "攻",
+          "X": 683,
+          "Y": 1373,
+          "Width": 32,
+          "Height": 34,
+          "Confidence": 0
+        },
+        {
+          "Text": "NN",
+          "X": 2029,
+          "Y": 1364,
+          "Width": 65,
+          "Height": 61,
+          "Confidence": 93.2316
+        },
+        {
+          "Text": "散",
+          "X": 2093,
+          "Y": 1368,
+          "Width": 45,
+          "Height": 47,
+          "Confidence": 59.1018
+        },
+        {
+          "Text": "点",
+          "X": 2147,
+          "Y": 1370,
+          "Width": 26,
+          "Height": 44,
+          "Confidence": 96.6414
+        },
+        {
+          "Text": "图",
+          "X": 2185,
+          "Y": 1373,
+          "Width": 32,
+          "Height": 34,
+          "Confidence": 90.8024
+        },
+        {
+          "Text": "2800",
+          "X": 149,
+          "Y": 1543,
+          "Width": 84,
+          "Height": 30,
+          "Confidence": 89.6034
+        },
+        {
+          "Text": "和",
+          "X": 463,
+          "Y": 1481,
+          "Width": 48,
+          "Height": 104,
+          "Confidence": 62.999
+        },
+        {
+          "Text": "28400",
+          "X": 1628,
+          "Y": 1543,
+          "Width": 106,
+          "Height": 30,
+          "Confidence": 89.6409
+        }
+      ],
+      "Lines": [
+        "姓名:高侯佩",
+        "记录时间:2026/04/14 09:56:23",
+        "HRV 时域报告",
+        "天一一一",
+        "天一一一一一",
+        "1600",
+        "1600",
+        "1200",
+        "1200",
+        "800",
+        "800",
+        "400",
+        "400",
+        "400",
+        "800",
+        "1200",
+        "1600 2000",
+        "400",
+        "800",
+        "1200",
+        "1600 2000",
+        "RR散点攻",
+        "NN散点图",
+        "2800",
+        "和",
+        "28400"
+      ],
+      "Text": "姓名:高侯佩\n\n记录时间:2026/04/14 09:56:23\n\nHRV 时域报告\n\n天一一一\n\n天一一一一一\n\n1600\n\n1600\n\n1200\n\n1200\n\n800\n\n800\n\n400\n\n400\n\n400\n\n800\n\n1200\n\n1600 2000\n\n400\n\n800\n\n1200\n\n1600 2000\n\nRR散点攻\n\nNN散点图\n\n2800\n\n和\n\n28400",
+      "Fields": {}
+    },
+    {
+      "PageNumber": 4,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-004.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-004-ocr.png",
+      "MeanConfidence": 0.73,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.581
+        },
+        {
+          "Text": ":高",
+          "X": 374,
+          "Y": 169,
+          "Width": 186,
+          "Height": 54,
+          "Confidence": 85.4038
+        },
+        {
+          "Text": "佩",
+          "X": 483,
+          "Y": 165,
+          "Width": 49,
+          "Height": 78,
+          "Confidence": 0
+        },
+        {
+          "Text": "侯",
+          "X": 531,
+          "Y": 165,
+          "Width": 30,
+          "Height": 78,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1504,
+          "Y": 171,
+          "Width": 109,
+          "Height": 51,
+          "Confidence": 93.1315
+        },
+        {
+          "Text": "时",
+          "X": 1629,
+          "Y": 169,
+          "Width": 60,
+          "Height": 53,
+          "Confidence": 93.0823
+        },
+        {
+          "Text": "间",
+          "X": 1691,
+          "Y": 174,
+          "Width": 33,
+          "Height": 48,
+          "Confidence": 92.0841
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1739,
+          "Y": 171,
+          "Width": 300,
+          "Height": 50,
+          "Confidence": 70.5756
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 81.2715
+        },
+        {
+          "Text": "心率",
+          "X": 1466,
+          "Y": 320,
+          "Width": 739,
+          "Height": 78,
+          "Confidence": 96.7447
+        },
+        {
+          "Text": "变异",
+          "X": 1672,
+          "Y": 278,
+          "Width": 158,
+          "Height": 168,
+          "Confidence": 96.2962
+        },
+        {
+          "Text": "功率",
+          "X": 1829,
+          "Y": 278,
+          "Width": 169,
+          "Height": 168,
+          "Confidence": 90.6981
+        },
+        {
+          "Text": "谱",
+          "X": 1997,
+          "Y": 278,
+          "Width": 74,
+          "Height": 168,
+          "Confidence": 90.8148
+        },
+        {
+          "Text": "报告",
+          "X": 2071,
+          "Y": 278,
+          "Width": 137,
+          "Height": 168,
+          "Confidence": 64.152
+        },
+        {
+          "Text": "功率",
+          "X": 254,
+          "Y": 435,
+          "Width": 571,
+          "Height": 61,
+          "Confidence": 92.9302
+        },
+        {
+          "Text": "谱",
+          "X": 404,
+          "Y": 430,
+          "Width": 67,
+          "Height": 75,
+          "Confidence": 89.6639
+        },
+        {
+          "Text": "密",
+          "X": 470,
+          "Y": 430,
+          "Width": 80,
+          "Height": 75,
+          "Confidence": 77.757
+        },
+        {
+          "Text": "度",
+          "X": 550,
+          "Y": 430,
+          "Width": 43,
+          "Height": 75,
+          "Confidence": 89.141
+        },
+        {
+          "Text": "(ms2/Hz)",
+          "X": 610,
+          "Y": 435,
+          "Width": 215,
+          "Height": 61,
+          "Confidence": 62.6656
+        },
+        {
+          "Text": "50",
+          "X": 194,
+          "Y": 509,
+          "Width": 39,
+          "Height": 30,
+          "Confidence": 72.7326
+        },
+        {
+          "Text": "TP:3378.",
+          "X": 2753,
+          "Y": 620,
+          "Width": 363,
+          "Height": 45,
+          "Confidence": 92.0079
+        },
+        {
+          "Text": "28",
+          "X": 2966,
+          "Y": 616,
+          "Width": 38,
+          "Height": 60,
+          "Confidence": 93.0676
+        },
+        {
+          "Text": "ms2)",
+          "X": 3030,
+          "Y": 616,
+          "Width": 91,
+          "Height": 60,
+          "Confidence": 84.6857
+        },
+        {
+          "Text": "40",
+          "X": 191,
+          "Y": 693,
+          "Width": 42,
+          "Height": 30,
+          "Confidence": 90.1016
+        },
+        {
+          "Text": "ULF:22885.",
+          "X": 2752,
+          "Y": 786,
+          "Width": 414,
+          "Height": 45,
+          "Confidence": 90.4974
+        },
+        {
+          "Text": "03",
+          "X": 3019,
+          "Y": 779,
+          "Width": 38,
+          "Height": 58,
+          "Confidence": 92.6569
+        },
+        {
+          "Text": "(ms2)",
+          "X": 3070,
+          "Y": 779,
+          "Width": 99,
+          "Height": 58,
+          "Confidence": 91.6892
+        },
+        {
+          "Text": "30",
+          "X": 194,
+          "Y": 876,
+          "Width": 39,
+          "Height": 30,
+          "Confidence": 89.8909
+        },
+        {
+          "Text": "VLF:2021.",
+          "X": 2753,
+          "Y": 954,
+          "Width": 389,
+          "Height": 44,
+          "Confidence": 88.1645
+        },
+        {
+          "Text": "19",
+          "X": 2995,
+          "Y": 946,
+          "Width": 37,
+          "Height": 58,
+          "Confidence": 93.0643
+        },
+        {
+          "Text": "(ms2)",
+          "X": 3046,
+          "Y": 946,
+          "Width": 99,
+          "Height": 58,
+          "Confidence": 91.4165
+        },
+        {
+          "Text": "20",
+          "X": 193,
+          "Y": 1059,
+          "Width": 40,
+          "Height": 30,
+          "Confidence": 88.8763
+        },
+        {
+          "Text": "LF:610.",
+          "X": 2753,
+          "Y": 1120,
+          "Width": 338,
+          "Height": 44,
+          "Confidence": 90.7609
+        },
+        {
+          "Text": "80",
+          "X": 2940,
+          "Y": 1116,
+          "Width": 42,
+          "Height": 60,
+          "Confidence": 28.49
+        },
+        {
+          "Text": "(ms2)",
+          "X": 2992,
+          "Y": 1120,
+          "Width": 99,
+          "Height": 44,
+          "Confidence": 28.49
+        },
+        {
+          "Text": "10",
+          "X": 195,
+          "Y": 1242,
+          "Width": 38,
+          "Height": 30,
+          "Confidence": 92.4864
+        },
+        {
+          "Text": "HF:746.",
+          "X": 2752,
+          "Y": 1287,
+          "Width": 339,
+          "Height": 44,
+          "Confidence": 89.1196
+        },
+        {
+          "Text": "29",
+          "X": 2943,
+          "Y": 1283,
+          "Width": 38,
+          "Height": 60,
+          "Confidence": 92.5069
+        },
+        {
+          "Text": "(ms2)",
+          "X": 2995,
+          "Y": 1287,
+          "Width": 96,
+          "Height": 44,
+          "Confidence": 91.5034
+        },
+        {
+          "Text": "0.0",
+          "X": 226,
+          "Y": 1476,
+          "Width": 48,
+          "Height": 30,
+          "Confidence": 92.929
+        },
+        {
+          "Text": "0.1",
+          "X": 659,
+          "Y": 1476,
+          "Width": 42,
+          "Height": 30,
+          "Confidence": 88.5414
+        },
+        {
+          "Text": "0.2",
+          "X": 1093,
+          "Y": 1476,
+          "Width": 48,
+          "Height": 30,
+          "Confidence": 92.1685
+        },
+        {
+          "Text": "0.3",
+          "X": 1526,
+          "Y": 1476,
+          "Width": 49,
+          "Height": 30,
+          "Confidence": 92.6756
+        },
+        {
+          "Text": "0.4",
+          "X": 1961,
+          "Y": 1476,
+          "Width": 48,
+          "Height": 30,
+          "Confidence": 90.561
+        },
+        {
+          "Text": "0.5",
+          "X": 2364,
+          "Y": 1476,
+          "Width": 48,
+          "Height": 30,
+          "Confidence": 26.3125
+        },
+        {
+          "Text": "924",
+          "X": 1089,
+          "Y": 1531,
+          "Width": 75,
+          "Height": 54,
+          "Confidence": 0
+        },
+        {
+          "Text": "小",
+          "X": 1166,
+          "Y": 1537,
+          "Width": 30,
+          "Height": 48,
+          "Confidence": 93.3618
+        },
+        {
+          "Text": "时",
+          "X": 1223,
+          "Y": 1536,
+          "Width": 51,
+          "Height": 49,
+          "Confidence": 92.8177
+        },
+        {
+          "Text": "功",
+          "X": 1278,
+          "Y": 1536,
+          "Width": 32,
+          "Height": 49,
+          "Confidence": 65.4154
+        },
+        {
+          "Text": "变",
+          "X": 1334,
+          "Y": 1536,
+          "Width": 52,
+          "Height": 49,
+          "Confidence": 83.951
+        },
+        {
+          "Text": "谤",
+          "X": 1387,
+          "Y": 1535,
+          "Width": 38,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "区",
+          "X": 1437,
+          "Y": 1537,
+          "Width": 42,
+          "Height": 48,
+          "Confidence": 60.1747
+        },
+        {
+          "Text": "呆",
+          "X": 2162,
+          "Y": 1536,
+          "Width": 60,
+          "Height": 49,
+          "Confidence": 0
+        },
+        {
+          "Text": "变",
+          "X": 2245,
+          "Y": 1537,
+          "Width": 44,
+          "Height": 48,
+          "Confidence": 0
+        },
+        {
+          "Text": "HA",
+          "X": 2307,
+          "Y": 1502,
+          "Width": 100,
+          "Height": 83,
+          "Confidence": 39.3061
+        }
+      ],
+      "Lines": [
+        "姓名:高佩侯",
+        "记录时间:2026/04/14 09:56:23",
+        "心率变异功率谱报告",
+        "功率谱密度 (ms2/Hz)",
+        "50",
+        "TP:3378. 28 ms2)",
+        "40",
+        "ULF:22885. 03 (ms2)",
+        "30",
+        "VLF:2021. 19 (ms2)",
+        "20",
+        "LF:610. 80 (ms2)",
+        "10",
+        "HF:746. 29 (ms2)",
+        "0.0",
+        "0.1",
+        "0.2",
+        "0.3",
+        "0.4",
+        "0.5",
+        "924小时功变谤区",
+        "呆变HA"
+      ],
+      "Text": "姓名:高佩侯\n\n记录时间:2026/04/14 09:56:23\n\n心率变异功率谱报告\n\n功率谱密度 (ms2/Hz)\n\n50\n\nTP:3378. 28 ms2)\n\n40\n\nULF:22885. 03 (ms2)\n\n30\n\nVLF:2021. 19 (ms2)\n\n20\n\nLF:610. 80 (ms2)\n\n10\n\nHF:746. 29 (ms2)\n\n0.0\n\n0.1\n\n0.2\n\n0.3\n\n0.4\n\n0.5\n\n924小时功变谤区\n\n呆变HA",
+      "Fields": {}
+    },
+    {
+      "PageNumber": 5,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-005.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-005-ocr.png",
+      "MeanConfidence": 0.47,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.5412
+        },
+        {
+          "Text": ":高",
+          "X": 362,
+          "Y": 165,
+          "Width": 104,
+          "Height": 79,
+          "Confidence": 89.2047
+        },
+        {
+          "Text": "佩",
+          "X": 476,
+          "Y": 169,
+          "Width": 46,
+          "Height": 53,
+          "Confidence": 1.2558
+        },
+        {
+          "Text": "佩",
+          "X": 530,
+          "Y": 172,
+          "Width": 30,
+          "Height": 49,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1504,
+          "Y": 171,
+          "Width": 109,
+          "Height": 51,
+          "Confidence": 93.4212
+        },
+        {
+          "Text": "时",
+          "X": 1632,
+          "Y": 170,
+          "Width": 51,
+          "Height": 52,
+          "Confidence": 93.0425
+        },
+        {
+          "Text": "间",
+          "X": 1691,
+          "Y": 174,
+          "Width": 33,
+          "Height": 48,
+          "Confidence": 89.7769
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1759,
+          "Y": 171,
+          "Width": 280,
+          "Height": 50,
+          "Confidence": 78.3554
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 77.5001
+        },
+        {
+          "Text": "片段",
+          "X": 1715,
+          "Y": 320,
+          "Width": 239,
+          "Height": 77,
+          "Confidence": 95.445
+        },
+        {
+          "Text": "图",
+          "X": 1910,
+          "Y": 316,
+          "Width": 49,
+          "Height": 110,
+          "Confidence": 96.3953
+        },
+        {
+          "Text": "HR:",
+          "X": 1736,
+          "Y": 442,
+          "Width": 72,
+          "Height": 41,
+          "Confidence": 76.5257
+        },
+        {
+          "Text": "10",
+          "X": 2759,
+          "Y": 442,
+          "Width": 48,
+          "Height": 41,
+          "Confidence": 91.7778
+        },
+        {
+          "Text": "TIY",
+          "X": 2836,
+          "Y": 437,
+          "Width": 142,
+          "Height": 98,
+          "Confidence": 27.6248
+        },
+        {
+          "Text": "25.",
+          "X": 3002,
+          "Y": 442,
+          "Width": 68,
+          "Height": 75,
+          "Confidence": 76.0585
+        },
+        {
+          "Text": "0",
+          "X": 3091,
+          "Y": 442,
+          "Width": 23,
+          "Height": 41,
+          "Confidence": 93.84
+        },
+        {
+          "Text": "0/S",
+          "X": 3186,
+          "Y": 437,
+          "Width": 66,
+          "Height": 82,
+          "Confidence": 28.997
+        },
+        {
+          "Text": "04/15",
+          "X": 337,
+          "Y": 437,
+          "Width": 137,
+          "Height": 50,
+          "Confidence": 79.2938
+        },
+        {
+          "Text": "08:43:46",
+          "X": 507,
+          "Y": 442,
+          "Width": 222,
+          "Height": 41,
+          "Confidence": 85.7339
+        },
+        {
+          "Text": "-最",
+          "X": 750,
+          "Y": 436,
+          "Width": 137,
+          "Height": 99,
+          "Confidence": 49.4386
+        },
+        {
+          "Text": "快",
+          "X": 934,
+          "Y": 516,
+          "Width": 4,
+          "Height": 3,
+          "Confidence": 71.4102
+        },
+        {
+          "Text": ".",
+          "X": 940,
+          "Y": 464,
+          "Width": 14,
+          "Height": 55,
+          "Confidence": 20.2772
+        },
+        {
+          "Text": "心率",
+          "X": 958,
+          "Y": 436,
+          "Width": 124,
+          "Height": 69,
+          "Confidence": 3.5986
+        },
+        {
+          "Text": "158",
+          "X": 1855,
+          "Y": 442,
+          "Width": 76,
+          "Height": 41,
+          "Confidence": 90.06
+        },
+        {
+          "Text": "bpm",
+          "X": 1964,
+          "Y": 441,
+          "Width": 82,
+          "Height": 76,
+          "Confidence": 80.8123
+        },
+        {
+          "Text": "2",
+          "X": 266,
+          "Y": 532,
+          "Width": 221,
+          "Height": 3,
+          "Confidence": 25.8363
+        },
+        {
+          "Text": "N",
+          "X": 496,
+          "Y": 502,
+          "Width": 24,
+          "Height": 47,
+          "Confidence": 80.5338
+        },
+        {
+          "Text": ":383:",
+          "X": 533,
+          "Y": 502,
+          "Width": 71,
+          "Height": 49,
+          "Confidence": 37.0625
+        },
+        {
+          "Text": "2",
+          "X": 617,
+          "Y": 532,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 40.4915
+        },
+        {
+          "Text": "N:",
+          "X": 650,
+          "Y": 502,
+          "Width": 37,
+          "Height": 47,
+          "Confidence": 61.5003
+        },
+        {
+          "Text": ":379:",
+          "X": 700,
+          "Y": 502,
+          "Width": 70,
+          "Height": 49,
+          "Confidence": 75.1482
+        },
+        {
+          "Text": "IN",
+          "X": 800,
+          "Y": 525,
+          "Width": 54,
+          "Height": 26,
+          "Confidence": 33.8738
+        },
+        {
+          "Text": ":383",
+          "X": 851,
+          "Y": 525,
+          "Width": 87,
+          "Height": 26,
+          "Confidence": 65.1217
+        },
+        {
+          "Text": "|",
+          "X": 919,
+          "Y": 521,
+          "Width": 3,
+          "Height": 41,
+          "Confidence": 65.1217
+        },
+        {
+          "Text": ":",
+          "X": 929,
+          "Y": 521,
+          "Width": 14,
+          "Height": 41,
+          "Confidence": 78.1998
+        },
+        {
+          "Text": ":",
+          "X": 950,
+          "Y": 532,
+          "Width": 4,
+          "Height": 36,
+          "Confidence": 40.4596
+        },
+        {
+          "Text": "NN",
+          "X": 968,
+          "Y": 516,
+          "Width": 24,
+          "Height": 52,
+          "Confidence": 13.9069
+        },
+        {
+          "Text": ":379|::N",
+          "X": 1017,
+          "Y": 516,
+          "Width": 133,
+          "Height": 35,
+          "Confidence": 79.8271
+        },
+        {
+          "Text": "|383.",
+          "X": 1181,
+          "Y": 516,
+          "Width": 56,
+          "Height": 35,
+          "Confidence": 70.9512
+        },
+        {
+          "Text": "|::N:|383:|:N",
+          "X": 1267,
+          "Y": 516,
+          "Width": 221,
+          "Height": 35,
+          "Confidence": 6.7861
+        },
+        {
+          "Text": ":",
+          "X": 1484,
+          "Y": 516,
+          "Width": 4,
+          "Height": 35,
+          "Confidence": 48.7631
+        },
+        {
+          "Text": "387",
+          "X": 1508,
+          "Y": 502,
+          "Width": 44,
+          "Height": 47,
+          "Confidence": 44.4791
+        },
+        {
+          "Text": ":",
+          "X": 1568,
+          "Y": 516,
+          "Width": 3,
+          "Height": 35,
+          "Confidence": 44.4791
+        },
+        {
+          "Text": ":N:",
+          "X": 1601,
+          "Y": 516,
+          "Width": 37,
+          "Height": 35,
+          "Confidence": 78.2006
+        },
+        {
+          "Text": ":387::",
+          "X": 1651,
+          "Y": 502,
+          "Width": 87,
+          "Height": 49,
+          "Confidence": 53.9524
+        },
+        {
+          "Text": "IN:",
+          "X": 1768,
+          "Y": 516,
+          "Width": 37,
+          "Height": 35,
+          "Confidence": 46.6411
+        },
+        {
+          "Text": "387::",
+          "X": 1818,
+          "Y": 502,
+          "Width": 87,
+          "Height": 49,
+          "Confidence": 38.9121
+        },
+        {
+          "Text": "N",
+          "X": 1935,
+          "Y": 525,
+          "Width": 15,
+          "Height": 24,
+          "Confidence": 90.3655
+        },
+        {
+          "Text": ":",
+          "X": 1968,
+          "Y": 516,
+          "Width": 3,
+          "Height": 35,
+          "Confidence": 86.9406
+        },
+        {
+          "Text": "387",
+          "X": 1985,
+          "Y": 502,
+          "Width": 52,
+          "Height": 47,
+          "Confidence": 56.5506
+        },
+        {
+          "Text": ":",
+          "X": 2051,
+          "Y": 516,
+          "Width": 4,
+          "Height": 35,
+          "Confidence": 56.5506
+        },
+        {
+          "Text": ":|N:",
+          "X": 2068,
+          "Y": 512,
+          "Width": 54,
+          "Height": 50,
+          "Confidence": 78.3949
+        },
+        {
+          "Text": ":387",
+          "X": 2135,
+          "Y": 502,
+          "Width": 70,
+          "Height": 49,
+          "Confidence": 33.3215
+        },
+        {
+          "Text": ":|N:",
+          "X": 2218,
+          "Y": 525,
+          "Width": 70,
+          "Height": 24,
+          "Confidence": 26.0398
+        },
+        {
+          "Text": "383:",
+          "X": 2302,
+          "Y": 502,
+          "Width": 70,
+          "Height": 49,
+          "Confidence": 81.048
+        },
+        {
+          "Text": ":N",
+          "X": 2402,
+          "Y": 502,
+          "Width": 32,
+          "Height": 49,
+          "Confidence": 62.0877
+        },
+        {
+          "Text": ":",
+          "X": 2451,
+          "Y": 532,
+          "Width": 4,
+          "Height": 3,
+          "Confidence": 85.5525
+        },
+        {
+          "Text": ":387",
+          "X": 2451,
+          "Y": 502,
+          "Width": 68,
+          "Height": 49,
+          "Confidence": 88.9514
+        },
+        {
+          "Text": "2",
+          "X": 2535,
+          "Y": 532,
+          "Width": 4,
+          "Height": 3,
+          "Confidence": 41.7777
+        },
+        {
+          "Text": ":N:",
+          "X": 2569,
+          "Y": 502,
+          "Width": 37,
+          "Height": 47,
+          "Confidence": 30.3696
+        },
+        {
+          "Text": ":387",
+          "X": 2618,
+          "Y": 502,
+          "Width": 70,
+          "Height": 47,
+          "Confidence": 49.4797
+        },
+        {
+          "Text": "2",
+          "X": 2702,
+          "Y": 532,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 25.2194
+        },
+        {
+          "Text": "N",
+          "X": 2739,
+          "Y": 502,
+          "Width": 19,
+          "Height": 47,
+          "Confidence": 92.5569
+        },
+        {
+          "Text": ":",
+          "X": 2769,
+          "Y": 532,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 20.058
+        },
+        {
+          "Text": ":387:",
+          "X": 2785,
+          "Y": 502,
+          "Width": 71,
+          "Height": 49,
+          "Confidence": 83.8447
+        },
+        {
+          "Text": ":N",
+          "X": 2885,
+          "Y": 516,
+          "Width": 32,
+          "Height": 35,
+          "Confidence": 52.1567
+        },
+        {
+          "Text": ":",
+          "X": 2929,
+          "Y": 502,
+          "Width": 10,
+          "Height": 33,
+          "Confidence": 74.5867
+        },
+        {
+          "Text": ":379",
+          "X": 2935,
+          "Y": 516,
+          "Width": 64,
+          "Height": 35,
+          "Confidence": 47.8487
+        },
+        {
+          "Text": ":N|",
+          "X": 3036,
+          "Y": 516,
+          "Width": 40,
+          "Height": 35,
+          "Confidence": 52.6867
+        },
+        {
+          "Text": ":387|",
+          "X": 3103,
+          "Y": 516,
+          "Width": 87,
+          "Height": 35,
+          "Confidence": 90.4228
+        },
+        {
+          "Text": ":",
+          "X": 3182,
+          "Y": 512,
+          "Width": 13,
+          "Height": 50,
+          "Confidence": 90.4228
+        },
+        {
+          "Text": ":N",
+          "X": 3202,
+          "Y": 516,
+          "Width": 37,
+          "Height": 52,
+          "Confidence": 28.0263
+        },
+        {
+          "Text": "157",
+          "X": 547,
+          "Y": 567,
+          "Width": 50,
+          "Height": 25,
+          "Confidence": 79.8202
+        },
+        {
+          "Text": "---",
+          "X": 601,
+          "Y": 566,
+          "Width": 53,
+          "Height": 2,
+          "Confidence": 13.4308
+        },
+        {
+          "Text": "-|--",
+          "X": 683,
+          "Y": 566,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 13.4308
+        },
+        {
+          "Text": "--",
+          "X": 683,
+          "Y": 549,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 3.5695
+        },
+        {
+          "Text": "158",
+          "X": 708,
+          "Y": 549,
+          "Width": 112,
+          "Height": 43,
+          "Confidence": 92.7889
+        },
+        {
+          "Text": "一",
+          "X": 775,
+          "Y": 545,
+          "Width": 19,
+          "Height": 60,
+          "Confidence": 18.7563
+        },
+        {
+          "Text": "…",
+          "X": 794,
+          "Y": 545,
+          "Width": 30,
+          "Height": 60,
+          "Confidence": 17.7061
+        },
+        {
+          "Text": "-157",
+          "X": 851,
+          "Y": 566,
+          "Width": 87,
+          "Height": 26,
+          "Confidence": 74.9982
+        },
+        {
+          "Text": "上",
+          "X": 914,
+          "Y": 562,
+          "Width": 28,
+          "Height": 43,
+          "Confidence": 7.5327
+        },
+        {
+          "Text": "-158",
+          "X": 1017,
+          "Y": 566,
+          "Width": 58,
+          "Height": 26,
+          "Confidence": 92.2516
+        },
+        {
+          "Text": "157-",
+          "X": 1182,
+          "Y": 566,
+          "Width": 55,
+          "Height": 26,
+          "Confidence": 79.2937
+        },
+        {
+          "Text": "一",
+          "X": 1268,
+          "Y": 566,
+          "Width": 36,
+          "Height": 2,
+          "Confidence": 95.16
+        },
+        {
+          "Text": "-|157-",
+          "X": 1318,
+          "Y": 566,
+          "Width": 87,
+          "Height": 26,
+          "Confidence": 52.3305
+        },
+        {
+          "Text": "155-",
+          "X": 1434,
+          "Y": 549,
+          "Width": 137,
+          "Height": 43,
+          "Confidence": 41.4134
+        },
+        {
+          "Text": "一",
+          "X": 1601,
+          "Y": 566,
+          "Width": 114,
+          "Height": 26,
+          "Confidence": 96.6471
+        },
+        {
+          "Text": "一",
+          "X": 1645,
+          "Y": 562,
+          "Width": 25,
+          "Height": 43,
+          "Confidence": 45.4766
+        },
+        {
+          "Text": "155",
+          "X": 1669,
+          "Y": 566,
+          "Width": 46,
+          "Height": 26,
+          "Confidence": 78.2293
+        },
+        {
+          "Text": "155",
+          "X": 1826,
+          "Y": 567,
+          "Width": 51,
+          "Height": 25,
+          "Confidence": 77.8996
+        },
+        {
+          "Text": "-",
+          "X": 1884,
+          "Y": 566,
+          "Width": 21,
+          "Height": 2,
+          "Confidence": 87.0149
+        },
+        {
+          "Text": "-|",
+          "X": 1902,
+          "Y": 549,
+          "Width": 27,
+          "Height": 28,
+          "Confidence": 29.8831
+        },
+        {
+          "Text": "-..",
+          "X": 1934,
+          "Y": 566,
+          "Width": 37,
+          "Height": 2,
+          "Confidence": 29.8831
+        },
+        {
+          "Text": "155",
+          "X": 1986,
+          "Y": 567,
+          "Width": 51,
+          "Height": 25,
+          "Confidence": 62.1853
+        },
+        {
+          "Text": "-",
+          "X": 2052,
+          "Y": 566,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 51.0054
+        },
+        {
+          "Text": "-|..-",
+          "X": 2102,
+          "Y": 566,
+          "Width": 37,
+          "Height": 2,
+          "Confidence": 23.8382
+        },
+        {
+          "Text": "155",
+          "X": 2148,
+          "Y": 567,
+          "Width": 51,
+          "Height": 25,
+          "Confidence": 72.4917
+        },
+        {
+          "Text": "。",
+          "X": 2285,
+          "Y": 549,
+          "Width": 3,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "157",
+          "X": 2308,
+          "Y": 567,
+          "Width": 51,
+          "Height": 25,
+          "Confidence": 88.5857
+        },
+        {
+          "Text": "--",
+          "X": 2368,
+          "Y": 566,
+          "Width": 38,
+          "Height": 2,
+          "Confidence": 12.6316
+        },
+        {
+          "Text": "-|",
+          "X": 2400,
+          "Y": 549,
+          "Width": 29,
+          "Height": 28,
+          "Confidence": 1.7518
+        },
+        {
+          "Text": ".-",
+          "X": 2435,
+          "Y": 566,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 1.7518
+        },
+        {
+          "Text": "155",
+          "X": 2469,
+          "Y": 567,
+          "Width": 50,
+          "Height": 25,
+          "Confidence": 76.5056
+        },
+        {
+          "Text": "--",
+          "X": 2602,
+          "Y": 549,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 20.4094
+        },
+        {
+          "Text": "155",
+          "X": 2630,
+          "Y": 567,
+          "Width": 51,
+          "Height": 25,
+          "Confidence": 78.7791
+        },
+        {
+          "Text": "。",
+          "X": 2769,
+          "Y": 549,
+          "Width": 3,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "155-……-",
+          "X": 2792,
+          "Y": 549,
+          "Width": 114,
+          "Height": 43,
+          "Confidence": 0
+        },
+        {
+          "Text": "-1158",
+          "X": 2935,
+          "Y": 549,
+          "Width": 137,
+          "Height": 43,
+          "Confidence": 22.6281
+        },
+        {
+          "Text": "-155",
+          "X": 3103,
+          "Y": 566,
+          "Width": 87,
+          "Height": 26,
+          "Confidence": 92.9721
+        },
+        {
+          "Text": "二",
+          "X": 3166,
+          "Y": 562,
+          "Width": 28,
+          "Height": 43,
+          "Confidence": 0
+        },
+        {
+          "Text": "-",
+          "X": 817,
+          "Y": 716,
+          "Width": 4,
+          "Height": 3,
+          "Confidence": 33.269
+        },
+        {
+          "Text": "-",
+          "X": 851,
+          "Y": 716,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": "-",
+          "X": 984,
+          "Y": 716,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": "|",
+          "X": 543,
+          "Y": 730,
+          "Width": 2,
+          "Height": 19,
+          "Confidence": 83.3584
+        },
+        {
+          "Text": "[用",
+          "X": 593,
+          "Y": 680,
+          "Width": 57,
+          "Height": 69,
+          "Confidence": 3.5076
+        },
+        {
+          "Text": "和",
+          "X": 695,
+          "Y": 701,
+          "Width": 54,
+          "Height": 48,
+          "Confidence": 16.2079
+        },
+        {
+          "Text": "册",
+          "X": 722,
+          "Y": 697,
+          "Width": 36,
+          "Height": 63,
+          "Confidence": 0
+        },
+        {
+          "Text": "和",
+          "X": 778,
+          "Y": 729,
+          "Width": 20,
+          "Height": 20,
+          "Confidence": 0
+        },
+        {
+          "Text": "由",
+          "X": 588,
+          "Y": 752,
+          "Width": 46,
+          "Height": 19,
+          "Confidence": 1.5403
+        },
+        {
+          "Text": "用",
+          "X": 847,
+          "Y": 722,
+          "Width": 16,
+          "Height": 27,
+          "Confidence": 61.2989
+        },
+        {
+          "Text": "-----",
+          "X": 851,
+          "Y": 783,
+          "Width": 103,
+          "Height": 2,
+          "Confidence": 9.9241
+        },
+        {
+          "Text": "上",
+          "X": 962,
+          "Y": 693,
+          "Width": 165,
+          "Height": 56,
+          "Confidence": 41.1091
+        },
+        {
+          "Text": "中",
+          "X": 395,
+          "Y": 998,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 25.2412
+        },
+        {
+          "Text": "出",
+          "X": 605,
+          "Y": 1034,
+          "Width": 24,
+          "Height": 49,
+          "Confidence": 57.9176
+        },
+        {
+          "Text": "册",
+          "X": 649,
+          "Y": 1052,
+          "Width": 5,
+          "Height": 31,
+          "Confidence": 0
+        },
+        {
+          "Text": "志",
+          "X": 693,
+          "Y": 1052,
+          "Width": 10,
+          "Height": 31,
+          "Confidence": 0
+        },
+        {
+          "Text": "骨",
+          "X": 754,
+          "Y": 1011,
+          "Width": 58,
+          "Height": 72,
+          "Confidence": 0
+        },
+        {
+          "Text": "|",
+          "X": 860,
+          "Y": 1053,
+          "Width": 4,
+          "Height": 30,
+          "Confidence": 76.1557
+        },
+        {
+          "Text": "|",
+          "X": 914,
+          "Y": 1054,
+          "Width": 56,
+          "Height": 29,
+          "Confidence": 48.7628
+        },
+        {
+          "Text": "-",
+          "X": 2102,
+          "Y": 1050,
+          "Width": 3,
+          "Height": 2,
+          "Confidence": 69.0162
+        },
+        {
+          "Text": "-",
+          "X": 2117,
+          "Y": 1050,
+          "Width": 5,
+          "Height": 2,
+          "Confidence": 69.0162
+        },
+        {
+          "Text": "-三",
+          "X": 2134,
+          "Y": 1050,
+          "Width": 21,
+          "Height": 2,
+          "Confidence": 39.3597
+        },
+        {
+          "Text": "中",
+          "X": 802,
+          "Y": 1085,
+          "Width": 3,
+          "Height": 16,
+          "Confidence": 14.051
+        },
+        {
+          "Text": "出",
+          "X": 824,
+          "Y": 1085,
+          "Width": 3,
+          "Height": 18,
+          "Confidence": 20.8799
+        },
+        {
+          "Text": "有.",
+          "X": 851,
+          "Y": 1100,
+          "Width": 103,
+          "Height": 2,
+          "Confidence": 39.5874
+        },
+        {
+          "Text": "WA",
+          "X": 957,
+          "Y": 1085,
+          "Width": 64,
+          "Height": 27,
+          "Confidence": 40.6764
+        },
+        {
+          "Text": "也",
+          "X": 1609,
+          "Y": 1069,
+          "Width": 110,
+          "Height": 114,
+          "Confidence": 15.9743
+        },
+        {
+          "Text": "-|",
+          "X": 266,
+          "Y": 1366,
+          "Width": 19,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "-|.",
+          "X": 297,
+          "Y": 1366,
+          "Width": 23,
+          "Height": 28,
+          "Confidence": 70.4059
+        },
+        {
+          "Text": "-",
+          "X": 366,
+          "Y": 1383,
+          "Width": 38,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "-",
+          "X": 397,
+          "Y": 1367,
+          "Width": 11,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "川",
+          "X": 390,
+          "Y": 1323,
+          "Width": 24,
+          "Height": 30,
+          "Confidence": 37.8069
+        },
+        {
+          "Text": "-人",
+          "X": 3103,
+          "Y": 1366,
+          "Width": 102,
+          "Height": 3,
+          "Confidence": 16.7888
+        },
+        {
+          "Text": "出",
+          "X": 571,
+          "Y": 1361,
+          "Width": 74,
+          "Height": 55,
+          "Confidence": 36.7257
+        },
+        {
+          "Text": "-[]",
+          "X": 267,
+          "Y": 1553,
+          "Width": 40,
+          "Height": 32,
+          "Confidence": 36.5961
+        },
+        {
+          "Text": "|",
+          "X": 317,
+          "Y": 1566,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 9.8034
+        },
+        {
+          "Text": ".|",
+          "X": 350,
+          "Y": 1566,
+          "Width": 2889,
+          "Height": 3,
+          "Confidence": 9.8034
+        }
+      ],
+      "Lines": [
+        "姓名:高佩佩",
+        "记录时间:2026/04/14 09:56:23",
+        "片段图",
+        "HR:",
+        "10 TIY 25. 0",
+        "0/S",
+        "04/15 08:43:46  -最快. 心率",
+        "158 bpm",
+        "2N :383: 2 N: :379:   IN :383 | :   : NN  :379|::N |383. |::N:|383:|:N  : 387 :    :N:  :387::    IN:  387::    N :  387 :    :|N:  :387 :|N: 383:    :N :  :387 2 :N: :387 2 N : :387:   :N :  :379   :N| :387| :    :N",
+        "157",
+        "--- -|--",
+        "--",
+        "158一…",
+        "-157上",
+        "-158",
+        "157-",
+        "一-|157-",
+        "155-",
+        "一一155",
+        "155",
+        "- -| -..",
+        "155",
+        "- -|..-",
+        "155",
+        "。",
+        "157",
+        "-- -| .-",
+        "155",
+        "--",
+        "155",
+        "。",
+        "155-……-",
+        "-1158",
+        "-155二",
+        "-",
+        "-",
+        "-",
+        "| [用 和册和",
+        "由",
+        "用",
+        "-----",
+        "上",
+        "中",
+        "出",
+        "册 志",
+        "骨  |",
+        "|",
+        "- - -三",
+        "中出",
+        "有.",
+        "WA",
+        "也",
+        "-| -|.  - -",
+        "川",
+        "-人",
+        "出",
+        "-[]| .|"
+      ],
+      "Text": "姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\nHR:\n\n10 TIY 25. 0\n\n0/S\n\n04/15 08:43:46  -最快. 心率\n\n158 bpm\n\n2N :383: 2 N: :379:   IN :383 | :   : NN  :379|::N |383. |::N:|383:|:N  : 387 :    :N:  :387::    IN:  387::    N :  387 :    :|N:  :387 :|N: 383:    :N :  :387 2 :N: :387 2 N : :387:   :N :  :379   :N| :387| :    :N\n\n157\n\n--- -|--\n\n--\n\n158一…\n\n-157上\n\n-158\n\n157-\n\n一-|157-\n\n155-\n\n一一155\n\n155\n\n- -| -..\n\n155\n\n- -|..-\n\n155\n\n。\n\n157\n\n-- -| .-\n\n155\n\n--\n\n155\n\n。\n\n155-……-\n\n-1158\n\n-155二\n\n-\n\n-\n\n-\n\n| [用 和册和\n\n由\n\n用\n\n-----\n\n上\n\n中\n\n出\n\n册 志\n\n骨  |\n\n|\n\n- - -三\n\n中出\n\n有.\n\nWA\n\n也\n\n-| -|.  - -\n\n川\n\n-人\n\n出\n\n-[]| .|",
+      "Fields": {
+        "心率": "158 bpm"
+      }
+    },
+    {
+      "PageNumber": 6,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-006.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-006-ocr.png",
+      "MeanConfidence": 0.56,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.5412
+        },
+        {
+          "Text": ":高",
+          "X": 362,
+          "Y": 165,
+          "Width": 104,
+          "Height": 79,
+          "Confidence": 89.2047
+        },
+        {
+          "Text": "佩",
+          "X": 476,
+          "Y": 169,
+          "Width": 46,
+          "Height": 53,
+          "Confidence": 1.2558
+        },
+        {
+          "Text": "佩",
+          "X": 530,
+          "Y": 172,
+          "Width": 30,
+          "Height": 49,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1504,
+          "Y": 171,
+          "Width": 109,
+          "Height": 51,
+          "Confidence": 93.4212
+        },
+        {
+          "Text": "时",
+          "X": 1632,
+          "Y": 170,
+          "Width": 51,
+          "Height": 52,
+          "Confidence": 93.0425
+        },
+        {
+          "Text": "间",
+          "X": 1691,
+          "Y": 174,
+          "Width": 33,
+          "Height": 48,
+          "Confidence": 89.7769
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1759,
+          "Y": 171,
+          "Width": 280,
+          "Height": 50,
+          "Confidence": 78.3554
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 77.5001
+        },
+        {
+          "Text": "片段",
+          "X": 1715,
+          "Y": 320,
+          "Width": 239,
+          "Height": 77,
+          "Confidence": 95.445
+        },
+        {
+          "Text": "图",
+          "X": 1910,
+          "Y": 316,
+          "Width": 49,
+          "Height": 110,
+          "Confidence": 96.3953
+        },
+        {
+          "Text": "HR:",
+          "X": 1736,
+          "Y": 442,
+          "Width": 72,
+          "Height": 41,
+          "Confidence": 76.5257
+        },
+        {
+          "Text": "4",
+          "X": 1850,
+          "Y": 442,
+          "Width": 55,
+          "Height": 77,
+          "Confidence": 52.5719
+        },
+        {
+          "Text": "bpnm",
+          "X": 1935,
+          "Y": 438,
+          "Width": 76,
+          "Height": 85,
+          "Confidence": 37.6061
+        },
+        {
+          "Text": "10",
+          "X": 2718,
+          "Y": 442,
+          "Width": 89,
+          "Height": 77,
+          "Confidence": 42.9345
+        },
+        {
+          "Text": "mm/mVY",
+          "X": 2836,
+          "Y": 433,
+          "Width": 153,
+          "Height": 90,
+          "Confidence": 3.7932
+        },
+        {
+          "Text": "25.",
+          "X": 3006,
+          "Y": 442,
+          "Width": 67,
+          "Height": 77,
+          "Confidence": 87.3476
+        },
+        {
+          "Text": "0",
+          "X": 3091,
+          "Y": 442,
+          "Width": 23,
+          "Height": 77,
+          "Confidence": 49.5828
+        },
+        {
+          "Text": "1",
+          "X": 3133,
+          "Y": 516,
+          "Width": 23,
+          "Height": 3,
+          "Confidence": 49.5828
+        },
+        {
+          "Text": "由",
+          "X": 3152,
+          "Y": 437,
+          "Width": 100,
+          "Height": 98,
+          "Confidence": 41.8679
+        },
+        {
+          "Text": "四",
+          "X": 267,
+          "Y": 516,
+          "Width": 520,
+          "Height": 3,
+          "Confidence": 18.4231
+        },
+        {
+          "Text": "04/15",
+          "X": 337,
+          "Y": 437,
+          "Width": 137,
+          "Height": 50,
+          "Confidence": 87.3749
+        },
+        {
+          "Text": "01:59:19",
+          "X": 507,
+          "Y": 442,
+          "Width": 222,
+          "Height": 41,
+          "Confidence": 83.23
+        },
+        {
+          "Text": "二",
+          "X": 717,
+          "Y": 566,
+          "Width": 70,
+          "Height": 2,
+          "Confidence": 44.2572
+        },
+        {
+          "Text": "最",
+          "X": 800,
+          "Y": 436,
+          "Width": 107,
+          "Height": 132,
+          "Confidence": 80.9408
+        },
+        {
+          "Text": "长",
+          "X": 936,
+          "Y": 446,
+          "Width": 20,
+          "Height": 122,
+          "Confidence": 39.4878
+        },
+        {
+          "Text": "RR",
+          "X": 967,
+          "Y": 444,
+          "Width": 56,
+          "Height": 124,
+          "Confidence": 79.6297
+        },
+        {
+          "Text": "间",
+          "X": 1023,
+          "Y": 436,
+          "Width": 81,
+          "Height": 132,
+          "Confidence": 35.5458
+        },
+        {
+          "Text": "期",
+          "X": 1110,
+          "Y": 436,
+          "Width": 94,
+          "Height": 132,
+          "Confidence": 32.3299
+        },
+        {
+          "Text": "--",
+          "X": 800,
+          "Y": 516,
+          "Width": 21,
+          "Height": 3,
+          "Confidence": 9.4695
+        },
+        {
+          "Text": "121",
+          "X": 854,
+          "Y": 525,
+          "Width": 46,
+          "Height": 24,
+          "Confidence": 91.3783
+        },
+        {
+          "Text": "9",
+          "X": 907,
+          "Y": 525,
+          "Width": 14,
+          "Height": 24,
+          "Confidence": 92.5845
+        },
+        {
+          "Text": ":",
+          "X": 934,
+          "Y": 566,
+          "Width": 4,
+          "Height": 2,
+          "Confidence": 88.7872
+        },
+        {
+          "Text": "-NI",
+          "X": 933,
+          "Y": 516,
+          "Width": 250,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": "828",
+          "X": 1289,
+          "Y": 525,
+          "Width": 53,
+          "Height": 24,
+          "Confidence": 35.9013
+        },
+        {
+          "Text": "-|",
+          "X": 1351,
+          "Y": 532,
+          "Width": 137,
+          "Height": 3,
+          "Confidence": 32.6156
+        },
+        {
+          "Text": "本",
+          "X": 1518,
+          "Y": 532,
+          "Width": 53,
+          "Height": 3,
+          "Confidence": 15.9516
+        },
+        {
+          "Text": "国电",
+          "X": 1601,
+          "Y": 532,
+          "Width": 103,
+          "Height": 3,
+          "Confidence": 8.9738
+        },
+        {
+          "Text": "于",
+          "X": 1718,
+          "Y": 532,
+          "Width": 20,
+          "Height": 3,
+          "Confidence": 6.7122
+        },
+        {
+          "Text": "1457",
+          "X": 1758,
+          "Y": 525,
+          "Width": 69,
+          "Height": 24,
+          "Confidence": 92.7595
+        },
+        {
+          "Text": "-|",
+          "X": 1852,
+          "Y": 532,
+          "Width": 220,
+          "Height": 3,
+          "Confidence": 45.2922
+        },
+        {
+          "Text": "N",
+          "X": 2098,
+          "Y": 525,
+          "Width": 20,
+          "Height": 24,
+          "Confidence": 65.9969
+        },
+        {
+          "Text": "|",
+          "X": 2135,
+          "Y": 532,
+          "Width": 170,
+          "Height": 3,
+          "Confidence": 45.2426
+        },
+        {
+          "Text": "1242",
+          "X": 2320,
+          "Y": 525,
+          "Width": 70,
+          "Height": 24,
+          "Confidence": 92.7021
+        },
+        {
+          "Text": ":1219",
+          "X": 2819,
+          "Y": 502,
+          "Width": 83,
+          "Height": 47,
+          "Confidence": 84.895
+        },
+        {
+          "Text": "-49",
+          "X": 851,
+          "Y": 566,
+          "Width": 54,
+          "Height": 26,
+          "Confidence": 87.7904
+        },
+        {
+          "Text": "72",
+          "X": 1298,
+          "Y": 567,
+          "Width": 35,
+          "Height": 25,
+          "Confidence": 78.4032
+        },
+        {
+          "Text": "41",
+          "X": 1774,
+          "Y": 567,
+          "Width": 30,
+          "Height": 25,
+          "Confidence": 92.4661
+        },
+        {
+          "Text": "49",
+          "X": 2850,
+          "Y": 567,
+          "Width": 34,
+          "Height": 25,
+          "Confidence": 93.0628
+        },
+        {
+          "Text": "由",
+          "X": 395,
+          "Y": 998,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 21.1964
+        },
+        {
+          "Text": "小",
+          "X": 1063,
+          "Y": 1001,
+          "Width": 78,
+          "Height": 78,
+          "Confidence": 56.3137
+        },
+        {
+          "Text": "|",
+          "X": 1115,
+          "Y": 997,
+          "Width": 28,
+          "Height": 112,
+          "Confidence": 82.1653
+        },
+        {
+          "Text": "川",
+          "X": 390,
+          "Y": 1323,
+          "Width": 24,
+          "Height": 30,
+          "Confidence": 37.8069
+        },
+        {
+          "Text": "一",
+          "X": 310,
+          "Y": 1393,
+          "Width": 17,
+          "Height": 4,
+          "Confidence": 73.1171
+        },
+        {
+          "Text": "一",
+          "X": 400,
+          "Y": 1394,
+          "Width": 83,
+          "Height": 8,
+          "Confidence": 59.0513
+        },
+        {
+          "Text": "一",
+          "X": 482,
+          "Y": 1383,
+          "Width": 22,
+          "Height": 28,
+          "Confidence": 81.6143
+        },
+        {
+          "Text": "-|",
+          "X": 266,
+          "Y": 1449,
+          "Width": 2973,
+          "Height": 2,
+          "Confidence": 41.2975
+        },
+        {
+          "Text": "-[]",
+          "X": 267,
+          "Y": 1553,
+          "Width": 40,
+          "Height": 32,
+          "Confidence": 36.5961
+        },
+        {
+          "Text": "|",
+          "X": 317,
+          "Y": 1566,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 15.1234
+        },
+        {
+          "Text": "|",
+          "X": 388,
+          "Y": 1566,
+          "Width": 2851,
+          "Height": 3,
+          "Confidence": 15.1234
+        }
+      ],
+      "Lines": [
+        "姓名:高佩佩",
+        "记录时间:2026/04/14 09:56:23",
+        "片段图",
+        "HR:   4  bpnm",
+        "10 mm/mVY 25. 0 1",
+        "由",
+        "四",
+        "04/15 01:59:19  二最长RR间期",
+        "--",
+        "121 9 :-NI828 -|",
+        "本国电于 1457",
+        "-|",
+        "N |1242",
+        ":1219",
+        "-49",
+        "72",
+        "41",
+        "49",
+        "由",
+        "小|",
+        "川",
+        "一一一",
+        "-|",
+        "-[]| |"
+      ],
+      "Text": "姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\nHR:   4  bpnm\n\n10 mm/mVY 25. 0 1\n\n由\n\n四\n\n04/15 01:59:19  二最长RR间期\n\n--\n\n121 9 :-NI828 -|\n\n本国电于 1457\n\n-|\n\nN |1242\n\n:1219\n\n-49\n\n72\n\n41\n\n49\n\n由\n\n小|\n\n川\n\n一一一\n\n-|\n\n-[]| |",
+      "Fields": {}
+    },
+    {
+      "PageNumber": 7,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-007.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-007-ocr.png",
+      "MeanConfidence": 0.37,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.581
+        },
+        {
+          "Text": ":高",
+          "X": 374,
+          "Y": 169,
+          "Width": 186,
+          "Height": 54,
+          "Confidence": 85.4038
+        },
+        {
+          "Text": "佩",
+          "X": 483,
+          "Y": 165,
+          "Width": 49,
+          "Height": 78,
+          "Confidence": 0
+        },
+        {
+          "Text": "侯",
+          "X": 531,
+          "Y": 165,
+          "Width": 30,
+          "Height": 78,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1504,
+          "Y": 171,
+          "Width": 109,
+          "Height": 51,
+          "Confidence": 93.1315
+        },
+        {
+          "Text": "时",
+          "X": 1629,
+          "Y": 169,
+          "Width": 60,
+          "Height": 53,
+          "Confidence": 93.0823
+        },
+        {
+          "Text": "间",
+          "X": 1691,
+          "Y": 174,
+          "Width": 33,
+          "Height": 48,
+          "Confidence": 92.0841
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1739,
+          "Y": 171,
+          "Width": 300,
+          "Height": 50,
+          "Confidence": 70.5756
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 81.2715
+        },
+        {
+          "Text": "片段",
+          "X": 1715,
+          "Y": 320,
+          "Width": 239,
+          "Height": 77,
+          "Confidence": 95.445
+        },
+        {
+          "Text": "图",
+          "X": 1910,
+          "Y": 316,
+          "Width": 49,
+          "Height": 110,
+          "Confidence": 96.3953
+        },
+        {
+          "Text": "04/15",
+          "X": 337,
+          "Y": 437,
+          "Width": 137,
+          "Height": 50,
+          "Confidence": 85.769
+        },
+        {
+          "Text": "01:59:19",
+          "X": 507,
+          "Y": 442,
+          "Width": 222,
+          "Height": 41,
+          "Confidence": 69.3757
+        },
+        {
+          "Text": "/S",
+          "X": 3203,
+          "Y": 437,
+          "Width": 49,
+          "Height": 50,
+          "Confidence": 20.2403
+        },
+        {
+          "Text": "-1",
+          "X": 266,
+          "Y": 532,
+          "Width": 555,
+          "Height": 3,
+          "Confidence": 41.2369
+        },
+        {
+          "Text": "N-",
+          "X": 844,
+          "Y": 525,
+          "Width": 60,
+          "Height": 24,
+          "Confidence": 43.2802
+        },
+        {
+          "Text": "-|",
+          "X": 883,
+          "Y": 516,
+          "Width": 45,
+          "Height": 37,
+          "Confidence": 25.7794
+        },
+        {
+          "Text": "-",
+          "X": 934,
+          "Y": 532,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 6.8281
+        },
+        {
+          "Text": "最",
+          "X": 788,
+          "Y": 436,
+          "Width": 164,
+          "Height": 69,
+          "Confidence": 93.0723
+        },
+        {
+          "Text": "慢",
+          "X": 891,
+          "Y": 432,
+          "Width": 39,
+          "Height": 101,
+          "Confidence": 89.4123
+        },
+        {
+          "Text": "，",
+          "X": 929,
+          "Y": 432,
+          "Width": 26,
+          "Height": 101,
+          "Confidence": 28.9268
+        },
+        {
+          "Text": "[人",
+          "X": 954,
+          "Y": 448,
+          "Width": 51,
+          "Height": 58,
+          "Confidence": 76.4043
+        },
+        {
+          "Text": "2",
+          "X": 1017,
+          "Y": 452,
+          "Width": 58,
+          "Height": 29,
+          "Confidence": 52.8029
+        },
+        {
+          "Text": "828",
+          "X": 987,
+          "Y": 525,
+          "Width": 53,
+          "Height": 24,
+          "Confidence": 87.8085
+        },
+        {
+          "Text": "1457",
+          "X": 1456,
+          "Y": 525,
+          "Width": 69,
+          "Height": 24,
+          "Confidence": 91.0131
+        },
+        {
+          "Text": "0",
+          "X": 1701,
+          "Y": 442,
+          "Width": 302,
+          "Height": 77,
+          "Confidence": 0
+        },
+        {
+          "Text": "1242",
+          "X": 2018,
+          "Y": 525,
+          "Width": 70,
+          "Height": 24,
+          "Confidence": 91.6275
+        },
+        {
+          "Text": "1219.",
+          "X": 2532,
+          "Y": 525,
+          "Width": 69,
+          "Height": 24,
+          "Confidence": 48.7885
+        },
+        {
+          "Text": "|",
+          "X": 2643,
+          "Y": 532,
+          "Width": 12,
+          "Height": 3,
+          "Confidence": 50.3526
+        },
+        {
+          "Text": "|",
+          "X": 2715,
+          "Y": 532,
+          "Width": 24,
+          "Height": 3,
+          "Confidence": 61.8976
+        },
+        {
+          "Text": "N-",
+          "X": 2824,
+          "Y": 525,
+          "Width": 19,
+          "Height": 24,
+          "Confidence": 0
+        },
+        {
+          "Text": "|",
+          "X": 2852,
+          "Y": 532,
+          "Width": 387,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": "机",
+          "X": 2718,
+          "Y": 437,
+          "Width": 534,
+          "Height": 82,
+          "Confidence": 0
+        },
+        {
+          "Text": "72",
+          "X": 996,
+          "Y": 567,
+          "Width": 35,
+          "Height": 25,
+          "Confidence": 85.538
+        },
+        {
+          "Text": "48",
+          "X": 2035,
+          "Y": 567,
+          "Width": 35,
+          "Height": 25,
+          "Confidence": 90.787
+        },
+        {
+          "Text": "站",
+          "X": 2102,
+          "Y": 566,
+          "Width": 436,
+          "Height": 2,
+          "Confidence": 0.8169
+        },
+        {
+          "Text": "49[",
+          "X": 2549,
+          "Y": 566,
+          "Width": 107,
+          "Height": 26,
+          "Confidence": 0
+        },
+        {
+          "Text": "|",
+          "X": 2685,
+          "Y": 566,
+          "Width": 554,
+          "Height": 2,
+          "Confidence": 43.2549
+        },
+        {
+          "Text": "-|-",
+          "X": 267,
+          "Y": 669,
+          "Width": 20,
+          "Height": 24,
+          "Confidence": 54.5645
+        },
+        {
+          "Text": "-|",
+          "X": 300,
+          "Y": 669,
+          "Width": 14,
+          "Height": 24,
+          "Confidence": 1.2548
+        },
+        {
+          "Text": ".|1---",
+          "X": 318,
+          "Y": 669,
+          "Width": 69,
+          "Height": 24,
+          "Confidence": 0
+        },
+        {
+          "Text": "上",
+          "X": 399,
+          "Y": 673,
+          "Width": 171,
+          "Height": 30,
+          "Confidence": 42.7067
+        },
+        {
+          "Text": "----|---.|..-.-.-|----|--.-.|.-..-.",
+          "X": 601,
+          "Y": 683,
+          "Width": 553,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "1.--.--",
+          "X": 1083,
+          "Y": 669,
+          "Width": 75,
+          "Height": 24,
+          "Confidence": 9.5605
+        },
+        {
+          "Text": "--",
+          "X": 1200,
+          "Y": 683,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": ".|-...|----|---.|.-..|----.|--.--|..-.|1---.-|1-.-.-.|...-|:----.-|--.-.|-..",
+          "X": 1234,
+          "Y": 683,
+          "Width": 1071,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": ".|----|---.|.:...|1----|---.|.-.-.",
+          "X": 2319,
+          "Y": 683,
+          "Width": 419,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": ",|----|----|..--|1----|-.-..",
+          "X": 2769,
+          "Y": 683,
+          "Width": 470,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "并",
+          "X": 310,
+          "Y": 742,
+          "Width": 61,
+          "Height": 61,
+          "Confidence": 33.6626
+        },
+        {
+          "Text": "-|",
+          "X": 266,
+          "Y": 916,
+          "Width": 17,
+          "Height": 28,
+          "Confidence": 37.1307
+        },
+        {
+          "Text": "|-",
+          "X": 300,
+          "Y": 932,
+          "Width": 53,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": ".1",
+          "X": 382,
+          "Y": 932,
+          "Width": 54,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": ".1",
+          "X": 451,
+          "Y": 932,
+          "Width": 370,
+          "Height": 3,
+          "Confidence": 0
+        },
+        {
+          "Text": "-|",
+          "X": 851,
+          "Y": 932,
+          "Width": 2388,
+          "Height": 3,
+          "Confidence": 40.321
+        },
+        {
+          "Text": "-1",
+          "X": 349,
+          "Y": 949,
+          "Width": 471,
+          "Height": 3,
+          "Confidence": 53.1108
+        },
+        {
+          "Text": "由",
+          "X": 395,
+          "Y": 998,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 21.1964
+        },
+        {
+          "Text": "小",
+          "X": 2221,
+          "Y": 1001,
+          "Width": 88,
+          "Height": 80,
+          "Confidence": 90.3312
+        },
+        {
+          "Text": "j",
+          "X": 2288,
+          "Y": 997,
+          "Width": 23,
+          "Height": 115,
+          "Confidence": 57.0759
+        },
+        {
+          "Text": "--",
+          "X": 2852,
+          "Y": 1266,
+          "Width": 21,
+          "Height": 2,
+          "Confidence": 9.2084
+        },
+        {
+          "Text": "-|-.",
+          "X": 2886,
+          "Y": 1249,
+          "Width": 69,
+          "Height": 28,
+          "Confidence": 0
+        },
+        {
+          "Text": ".|",
+          "X": 2970,
+          "Y": 1266,
+          "Width": 52,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": ".|",
+          "X": 3036,
+          "Y": 1266,
+          "Width": 37,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "-|1-...",
+          "X": 3103,
+          "Y": 1266,
+          "Width": 136,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "川",
+          "X": 390,
+          "Y": 1323,
+          "Width": 24,
+          "Height": 30,
+          "Confidence": 37.8069
+        },
+        {
+          "Text": "-|",
+          "X": 266,
+          "Y": 1449,
+          "Width": 2973,
+          "Height": 2,
+          "Confidence": 41.2975
+        },
+        {
+          "Text": "2",
+          "X": 502,
+          "Y": 1360,
+          "Width": 337,
+          "Height": 43,
+          "Confidence": 12.8581
+        },
+        {
+          "Text": "和",
+          "X": 798,
+          "Y": 1356,
+          "Width": 20,
+          "Height": 64,
+          "Confidence": 8.8303
+        },
+        {
+          "Text": "fr",
+          "X": 1919,
+          "Y": 1379,
+          "Width": 249,
+          "Height": 24,
+          "Confidence": 0
+        },
+        {
+          "Text": "-[]",
+          "X": 267,
+          "Y": 1553,
+          "Width": 40,
+          "Height": 32,
+          "Confidence": 36.5961
+        },
+        {
+          "Text": "|",
+          "X": 317,
+          "Y": 1566,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 15.1234
+        },
+        {
+          "Text": "|",
+          "X": 388,
+          "Y": 1566,
+          "Width": 2851,
+          "Height": 3,
+          "Confidence": 15.1234
+        }
+      ],
+      "Lines": [
+        "姓名:高佩侯",
+        "记录时间:2026/04/14 09:56:23",
+        "片段图",
+        "04/15 01:59:19",
+        "/S",
+        "-1N- -| -",
+        "最慢，",
+        "[人2",
+        "828",
+        "1457",
+        "0",
+        "1242",
+        "1219. | |N- |",
+        "机",
+        "72",
+        "48",
+        "站49[ |",
+        "-|- -| .|1---上 ----|---.|..-.-.-|----|--.-.|.-..-. 1.--.-- -- .|-...|----|---.|.-..|----.|--.--|..-.|1---.-|1-.-.-.|...-|:----.-|--.-.|-.. .|----|---.|.:...|1----|---.|.-.-. ,|----|----|..--|1----|-.-..",
+        "并",
+        "-| |- .1 .1",
+        "-|",
+        "-1",
+        "由",
+        "小j",
+        "-- -|-. .| .| -|1-...",
+        "川",
+        "-|",
+        "2和",
+        "fr",
+        "-[]| |"
+      ],
+      "Text": "姓名:高佩侯\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\n04/15 01:59:19\n\n/S\n\n-1N- -| -\n\n最慢，\n\n[人2\n\n828\n\n1457\n\n0\n\n1242\n\n1219. | |N- |\n\n机\n\n72\n\n48\n\n站49[ |\n\n-|- -| .|1---上 ----|---.|..-.-.-|----|--.-.|.-..-. 1.--.-- -- .|-...|----|---.|.-..|----.|--.--|..-.|1---.-|1-.-.-.|...-|:----.-|--.-.|-.. .|----|---.|.:...|1----|---.|.-.-. ,|----|----|..--|1----|-.-..\n\n并\n\n-| |- .1 .1\n\n-|\n\n-1\n\n由\n\n小j\n\n-- -|-. .| .| -|1-...\n\n川\n\n-|\n\n2和\n\nfr\n\n-[]| |",
+      "Fields": {}
+    },
+    {
+      "PageNumber": 8,
+      "Width": 3502,
+      "Height": 4953,
+      "RenderedImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-008.png",
+      "OcrImagePath": "D:\\Github\\DataSync\\Tools\\DataSync.PdfOcrTest\\bin\\Debug\\net9.0-windows\\ocr-work\\page-008-ocr.png",
+      "MeanConfidence": 0.6,
+      "TextItems": [
+        {
+          "Text": "姓名",
+          "X": 253,
+          "Y": 169,
+          "Width": 105,
+          "Height": 54,
+          "Confidence": 96.5412
+        },
+        {
+          "Text": ":高",
+          "X": 362,
+          "Y": 165,
+          "Width": 104,
+          "Height": 79,
+          "Confidence": 89.2047
+        },
+        {
+          "Text": "佩",
+          "X": 476,
+          "Y": 169,
+          "Width": 46,
+          "Height": 53,
+          "Confidence": 1.2558
+        },
+        {
+          "Text": "佩",
+          "X": 530,
+          "Y": 172,
+          "Width": 30,
+          "Height": 49,
+          "Confidence": 0
+        },
+        {
+          "Text": "记录",
+          "X": 1504,
+          "Y": 171,
+          "Width": 109,
+          "Height": 51,
+          "Confidence": 93.4212
+        },
+        {
+          "Text": "时",
+          "X": 1632,
+          "Y": 170,
+          "Width": 51,
+          "Height": 52,
+          "Confidence": 93.0425
+        },
+        {
+          "Text": "间",
+          "X": 1691,
+          "Y": 174,
+          "Width": 33,
+          "Height": 48,
+          "Confidence": 89.7769
+        },
+        {
+          "Text": ":2026/04/14",
+          "X": 1759,
+          "Y": 171,
+          "Width": 280,
+          "Height": 50,
+          "Confidence": 78.3554
+        },
+        {
+          "Text": "09:56:23",
+          "X": 2072,
+          "Y": 177,
+          "Width": 221,
+          "Height": 40,
+          "Confidence": 77.5001
+        },
+        {
+          "Text": "片段",
+          "X": 1715,
+          "Y": 320,
+          "Width": 239,
+          "Height": 77,
+          "Confidence": 95.445
+        },
+        {
+          "Text": "图",
+          "X": 1910,
+          "Y": 316,
+          "Width": 49,
+          "Height": 110,
+          "Confidence": 96.3953
+        },
+        {
+          "Text": "_04/15",
+          "X": 300,
+          "Y": 437,
+          "Width": 187,
+          "Height": 98,
+          "Confidence": 59.5897
+        },
+        {
+          "Text": "00:20:07",
+          "X": 507,
+          "Y": 442,
+          "Width": 230,
+          "Height": 77,
+          "Confidence": 81.5348
+        },
+        {
+          "Text": "心动",
+          "X": 767,
+          "Y": 436,
+          "Width": 316,
+          "Height": 83,
+          "Confidence": 88.6977
+        },
+        {
+          "Text": "过",
+          "X": 967,
+          "Y": 417,
+          "Width": 61,
+          "Height": 122,
+          "Confidence": 94.7133
+        },
+        {
+          "Text": "组",
+          "X": 1028,
+          "Y": 417,
+          "Width": 54,
+          "Height": 122,
+          "Confidence": 87.492
+        },
+        {
+          "Text": "寸",
+          "X": 958,
+          "Y": 436,
+          "Width": 83,
+          "Height": 59,
+          "Confidence": 86.3588
+        },
+        {
+          "Text": "经",
+          "X": 1026,
+          "Y": 432,
+          "Width": 18,
+          "Height": 72,
+          "Confidence": 0
+        },
+        {
+          "Text": "HR:",
+          "X": 1736,
+          "Y": 442,
+          "Width": 56,
+          "Height": 41,
+          "Confidence": 90.7807
+        },
+        {
+          "Text": "56",
+          "X": 1852,
+          "Y": 442,
+          "Width": 52,
+          "Height": 41,
+          "Confidence": 92.7295
+        },
+        {
+          "Text": "bpn",
+          "X": 1936,
+          "Y": 442,
+          "Width": 67,
+          "Height": 48,
+          "Confidence": 86.2278
+        },
+        {
+          "Text": "10",
+          "X": 2735,
+          "Y": 442,
+          "Width": 72,
+          "Height": 77,
+          "Confidence": 81.1892
+        },
+        {
+          "Text": "mAIY",
+          "X": 2838,
+          "Y": 437,
+          "Width": 140,
+          "Height": 98,
+          "Confidence": 0
+        },
+        {
+          "Text": "25.",
+          "X": 3006,
+          "Y": 442,
+          "Width": 67,
+          "Height": 77,
+          "Confidence": 87.3476
+        },
+        {
+          "Text": "0",
+          "X": 3091,
+          "Y": 442,
+          "Width": 23,
+          "Height": 41,
+          "Confidence": 93.84
+        },
+        {
+          "Text": "人",
+          "X": 3185,
+          "Y": 437,
+          "Width": 67,
+          "Height": 98,
+          "Confidence": 13.2492
+        },
+        {
+          "Text": ":1145",
+          "X": 617,
+          "Y": 502,
+          "Width": 82,
+          "Height": 47,
+          "Confidence": 85.1985
+        },
+        {
+          "Text": ":",
+          "X": 717,
+          "Y": 516,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 90.753
+        },
+        {
+          "Text": "|.",
+          "X": 717,
+          "Y": 532,
+          "Width": 187,
+          "Height": 3,
+          "Confidence": 36.4929
+        },
+        {
+          "Text": "N--",
+          "X": 909,
+          "Y": 525,
+          "Width": 19,
+          "Height": 24,
+          "Confidence": 31.0729
+        },
+        {
+          "Text": "|-",
+          "X": 933,
+          "Y": 532,
+          "Width": 138,
+          "Height": 3,
+          "Confidence": 38.8927
+        },
+        {
+          "Text": "52",
+          "X": 652,
+          "Y": 567,
+          "Width": 33,
+          "Height": 25,
+          "Confidence": 90.6401
+        },
+        {
+          "Text": "1102",
+          "X": 1103,
+          "Y": 525,
+          "Width": 70,
+          "Height": 24,
+          "Confidence": 90.9553
+        },
+        {
+          "Text": "-1145",
+          "X": 1551,
+          "Y": 502,
+          "Width": 89,
+          "Height": 66,
+          "Confidence": 49.294
+        },
+        {
+          "Text": "-|52-",
+          "X": 1568,
+          "Y": 566,
+          "Width": 70,
+          "Height": 26,
+          "Confidence": 71.8574
+        },
+        {
+          "Text": "N",
+          "X": 1846,
+          "Y": 525,
+          "Width": 19,
+          "Height": 24,
+          "Confidence": 93.2137
+        },
+        {
+          "Text": "-1074",
+          "X": 2018,
+          "Y": 502,
+          "Width": 85,
+          "Height": 66,
+          "Confidence": 46.9654
+        },
+        {
+          "Text": "-56",
+          "X": 2035,
+          "Y": 566,
+          "Width": 70,
+          "Height": 26,
+          "Confidence": 88.7736
+        },
+        {
+          "Text": "一",
+          "X": 2090,
+          "Y": 562,
+          "Width": 19,
+          "Height": 43,
+          "Confidence": 88.5948
+        },
+        {
+          "Text": "N",
+          "X": 2293,
+          "Y": 525,
+          "Width": 19,
+          "Height": 24,
+          "Confidence": 93.2087
+        },
+        {
+          "Text": ":918:",
+          "X": 2435,
+          "Y": 502,
+          "Width": 87,
+          "Height": 66,
+          "Confidence": 60.7707
+        },
+        {
+          "Text": "-65",
+          "X": 2452,
+          "Y": 566,
+          "Width": 70,
+          "Height": 26,
+          "Confidence": 91.6329
+        },
+        {
+          "Text": "上",
+          "X": 2499,
+          "Y": 562,
+          "Width": 27,
+          "Height": 43,
+          "Confidence": 0
+        },
+        {
+          "Text": "N:",
+          "X": 2677,
+          "Y": 516,
+          "Width": 45,
+          "Height": 33,
+          "Confidence": 65.6549
+        },
+        {
+          "Text": ":",
+          "X": 2716,
+          "Y": 512,
+          "Width": 11,
+          "Height": 50,
+          "Confidence": 81.4592
+        },
+        {
+          "Text": "1043:",
+          "X": 2852,
+          "Y": 502,
+          "Width": 87,
+          "Height": 66,
+          "Confidence": 71.5751
+        },
+        {
+          "Text": "一",
+          "X": 2853,
+          "Y": 566,
+          "Width": 19,
+          "Height": 2,
+          "Confidence": 88.3571
+        },
+        {
+          "Text": "58",
+          "X": 2881,
+          "Y": 567,
+          "Width": 28,
+          "Height": 25,
+          "Confidence": 92.9136
+        },
+        {
+          "Text": ":N:",
+          "X": 3103,
+          "Y": 516,
+          "Width": 53,
+          "Height": 33,
+          "Confidence": 53.6179
+        },
+        {
+          "Text": ":",
+          "X": 3149,
+          "Y": 512,
+          "Width": 10,
+          "Height": 50,
+          "Confidence": 62.5423
+        },
+        {
+          "Text": "由",
+          "X": 395,
+          "Y": 998,
+          "Width": 14,
+          "Height": 30,
+          "Confidence": 21.1964
+        },
+        {
+          "Text": "一",
+          "X": 998,
+          "Y": 1050,
+          "Width": 47,
+          "Height": 39,
+          "Confidence": 34.4411
+        },
+        {
+          "Text": "、-",
+          "X": 1044,
+          "Y": 1050,
+          "Width": 40,
+          "Height": 39,
+          "Confidence": 47.8301
+        },
+        {
+          "Text": "川",
+          "X": 390,
+          "Y": 1323,
+          "Width": 24,
+          "Height": 30,
+          "Confidence": 37.8069
+        },
+        {
+          "Text": "-|",
+          "X": 266,
+          "Y": 1449,
+          "Width": 2973,
+          "Height": 2,
+          "Confidence": 41.2975
+        },
+        {
+          "Text": "况",
+          "X": 933,
+          "Y": 1399,
+          "Width": 54,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "四",
+          "X": 1034,
+          "Y": 1399,
+          "Width": 20,
+          "Height": 2,
+          "Confidence": 0
+        },
+        {
+          "Text": "畏",
+          "X": 1257,
+          "Y": 1335,
+          "Width": 107,
+          "Height": 68,
+          "Confidence": 0
+        },
+        {
+          "Text": "SA",
+          "X": 1511,
+          "Y": 1370,
+          "Width": 329,
+          "Height": 36,
+          "Confidence": 43.8638
+        },
+        {
+          "Text": "BDI",
+          "X": 2754,
+          "Y": 1335,
+          "Width": 354,
+          "Height": 69,
+          "Confidence": 0
+        },
+        {
+          "Text": "-[]",
+          "X": 267,
+          "Y": 1553,
+          "Width": 40,
+          "Height": 32,
+          "Confidence": 36.5961
+        },
+        {
+          "Text": "|",
+          "X": 317,
+          "Y": 1566,
+          "Width": 3,
+          "Height": 3,
+          "Confidence": 15.1234
+        },
+        {
+          "Text": "|",
+          "X": 388,
+          "Y": 1566,
+          "Width": 2851,
+          "Height": 3,
+          "Confidence": 15.1234
+        }
+      ],
+      "Lines": [
+        "姓名:高佩佩",
+        "记录时间:2026/04/14 09:56:23",
+        "片段图",
+        "_04/15 00:20:07 心动过组",
+        "寸经",
+        "HR: 56 bpn",
+        "10 mAIY 25. 0",
+        "人",
+        ":1145 :|.N-- |-",
+        "52",
+        "1102",
+        "-1145",
+        "-|52-",
+        "N",
+        "-1074",
+        "-56一",
+        "N",
+        ":918:",
+        "-65上",
+        "N: :",
+        "1043:",
+        "一58",
+        ":N: :",
+        "由",
+        "一、-",
+        "川",
+        "-|",
+        "况 四",
+        "畏",
+        "SA",
+        "BDI",
+        "-[]| |"
+      ],
+      "Text": "姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\n_04/15 00:20:07 心动过组\n\n寸经\n\nHR: 56 bpn\n\n10 mAIY 25. 0\n\n人\n\n:1145 :|.N-- |-\n\n52\n\n1102\n\n-1145\n\n-|52-\n\nN\n\n-1074\n\n-56一\n\nN\n\n:918:\n\n-65上\n\nN: :\n\n1043:\n\n一58\n\n:N: :\n\n由\n\n一、-\n\n川\n\n-|\n\n况 四\n\n畏\n\nSA\n\nBDI\n\n-[]| |",
+      "Fields": {}
+    }
+  ],
+  "FullText": "首都医科大学附属北泵世纪荆医院\n\n动态心电图报告\n\n地址:北京市海诈区羊坊店铁医路10号\n\n患\n\n上  怕\n\n姓名:高修佩\n\n记录时间:2026/04/14 09:56:23\n\n隆别 :女\n\n病人ID:0010268478\n\n年上 龄 :  :33终\n\n病案号\n\n儿人 率\n\n心搏数:119943\n\n心动过速 (>130 bpnm )\n\n20 阵(《1%)\n\n记录时长:24:00:00\n\n心动过组 〈《55 bpnm )\n\n阵(《工%)\n\n均心率:83 bpm\n\n停搏(> 2000 ms) :0 次\n\n最快心鞭:158 bpm @ 04/15 08:43:46\n\n最长如间期:1457 ms @ 04/15 01:59:19\n\n时人恒下7冯.4了 rn mmD和nn/ NT.FO.1O\n\nTA、 FRRO\n\nTTC\r\n\r\n姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n4小时数据图\n\n170\n\n了LL\n\n|\n\n]\n\n上\n\n儿人\n\n140\n\nV9\n\n过人县心\n\n47 (bpm)\n\n(bpm)\n\n110\n\n80\n\nFL\n\n50\n\nV9\n\n最快心率 158(bpm)\n\n2800\n\n儿人\n\n1250\n\n2100\n\n上\n\n变\n\n工 100\n\n1400\n\n700\n\n下\n\nSDNN (ms)\n\n50\n\n全CC\n\n400 0 89\n\nRR团其\n\n80\n\n一\n\n60\n\n1600\n\n〈个数)\n\n40\n\n1200\n\n20\n\n800\n\n上\n\n80\n\n机\n\n400\r\n\r\n姓名:高侯佩\n\n记录时间:2026/04/14 09:56:23\n\nHRV 时域报告\n\n天一一一\n\n天一一一一一\n\n1600\n\n1600\n\n1200\n\n1200\n\n800\n\n800\n\n400\n\n400\n\n400\n\n800\n\n1200\n\n1600 2000\n\n400\n\n800\n\n1200\n\n1600 2000\n\nRR散点攻\n\nNN散点图\n\n2800\n\n和\n\n28400\r\n\r\n姓名:高佩侯\n\n记录时间:2026/04/14 09:56:23\n\n心率变异功率谱报告\n\n功率谱密度 (ms2/Hz)\n\n50\n\nTP:3378. 28 ms2)\n\n40\n\nULF:22885. 03 (ms2)\n\n30\n\nVLF:2021. 19 (ms2)\n\n20\n\nLF:610. 80 (ms2)\n\n10\n\nHF:746. 29 (ms2)\n\n0.0\n\n0.1\n\n0.2\n\n0.3\n\n0.4\n\n0.5\n\n924小时功变谤区\n\n呆变HA\r\n\r\n姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\nHR:\n\n10 TIY 25. 0\n\n0/S\n\n04/15 08:43:46  -最快. 心率\n\n158 bpm\n\n2N :383: 2 N: :379:   IN :383 | :   : NN  :379|::N |383. |::N:|383:|:N  : 387 :    :N:  :387::    IN:  387::    N :  387 :    :|N:  :387 :|N: 383:    :N :  :387 2 :N: :387 2 N : :387:   :N :  :379   :N| :387| :    :N\n\n157\n\n--- -|--\n\n--\n\n158一…\n\n-157上\n\n-158\n\n157-\n\n一-|157-\n\n155-\n\n一一155\n\n155\n\n- -| -..\n\n155\n\n- -|..-\n\n155\n\n。\n\n157\n\n-- -| .-\n\n155\n\n--\n\n155\n\n。\n\n155-……-\n\n-1158\n\n-155二\n\n-\n\n-\n\n-\n\n| [用 和册和\n\n由\n\n用\n\n-----\n\n上\n\n中\n\n出\n\n册 志\n\n骨  |\n\n|\n\n- - -三\n\n中出\n\n有.\n\nWA\n\n也\n\n-| -|.  - -\n\n川\n\n-人\n\n出\n\n-[]| .|\r\n\r\n姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\nHR:   4  bpnm\n\n10 mm/mVY 25. 0 1\n\n由\n\n四\n\n04/15 01:59:19  二最长RR间期\n\n--\n\n121 9 :-NI828 -|\n\n本国电于 1457\n\n-|\n\nN |1242\n\n:1219\n\n-49\n\n72\n\n41\n\n49\n\n由\n\n小|\n\n川\n\n一一一\n\n-|\n\n-[]| |\r\n\r\n姓名:高佩侯\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\n04/15 01:59:19\n\n/S\n\n-1N- -| -\n\n最慢，\n\n[人2\n\n828\n\n1457\n\n0\n\n1242\n\n1219. | |N- |\n\n机\n\n72\n\n48\n\n站49[ |\n\n-|- -| .|1---上 ----|---.|..-.-.-|----|--.-.|.-..-. 1.--.-- -- .|-...|----|---.|.-..|----.|--.--|..-.|1---.-|1-.-.-.|...-|:----.-|--.-.|-.. .|----|---.|.:...|1----|---.|.-.-. ,|----|----|..--|1----|-.-..\n\n并\n\n-| |- .1 .1\n\n-|\n\n-1\n\n由\n\n小j\n\n-- -|-. .| .| -|1-...\n\n川\n\n-|\n\n2和\n\nfr\n\n-[]| |\r\n\r\n姓名:高佩佩\n\n记录时间:2026/04/14 09:56:23\n\n片段图\n\n_04/15 00:20:07 心动过组\n\n寸经\n\nHR: 56 bpn\n\n10 mAIY 25. 0\n\n人\n\n:1145 :|.N-- |-\n\n52\n\n1102\n\n-1145\n\n-|52-\n\nN\n\n-1074\n\n-56一\n\nN\n\n:918:\n\n-65上\n\nN: :\n\n1043:\n\n一58\n\n:N: :\n\n由\n\n一、-\n\n川\n\n-|\n\n况 四\n\n畏\n\nSA\n\nBDI\n\n-[]| |",
+  "CombinedFields": {
+    "病案号": "儿人 率 心搏数:119943 心动过速 (>130 bpnm ) 20 阵(《1%) 记录时长:24:00:00 心动过组 〈《55 bpnm ) 阵(《工%) 均",
+    "心率": "83 bpm"
+  }
+}
