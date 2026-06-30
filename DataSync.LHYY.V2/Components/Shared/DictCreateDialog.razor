@@ -27,9 +27,9 @@
                 <MudText Typo="Typo.subtitle2">字典条目</MudText>
                 <div class="dict-create-entry-actions">
                     <MudButton Variant="Variant.Text" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.Article"
-                               OnClick="@(() => _templateVisible = !_templateVisible)">
-                        吸烟情况模板
+                               StartIcon="@Icons.Material.Filled.AutoFixHigh"
+                               OnClick="OpenTemplateDialog">
+                        套用模板
                     </MudButton>
                     <MudButton Variant="Variant.Text" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.Add"
@@ -38,51 +38,6 @@
                     </MudButton>
                 </div>
             </div>
-
-            @if (_templateVisible)
-            {
-                <div class="dict-template-panel">
-                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
-                        字段详细设置中配置：字典代码 smoking_status；字典匹配选择“按排序优先命中”。按下面顺序录入字典条目。
-                    </MudAlert>
-
-                    <div class="dict-template-summary">
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">1. 戒烟&lt;=3月</MudChip>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">2. 戒烟&gt;=3月</MudChip>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">3. 从不吸烟</MudChip>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">4. 偶尔吸烟</MudChip>
-                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">5. 仍在吸烟</MudChip>
-                    </div>
-
-                    @foreach (var group in SmokingTemplateGroups)
-                    {
-                        <div class="dict-template-group">
-                            <MudText Typo="Typo.subtitle1" Class="dict-template-target">@group.TargetValue</MudText>
-                            <MudSimpleTable Dense="true" Hover="true" Class="dict-template-table">
-                                <thead>
-                                    <tr>
-                                        <th>命中条件</th>
-                                        <th>大概覆盖范围</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var condition in group.Conditions)
-                                    {
-                                        <tr>
-                                            <td><code>@condition.Text</code></td>
-                                            <td>@condition.Scope</td>
-                                        </tr>
-                                    }
-                                </tbody>
-                            </MudSimpleTable>
-                        </div>
-                    }
-
-                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
-                        只写“已戒烟”或“戒烟”但没有时间时，无法判断“戒烟&lt;=3月”还是“戒烟&gt;=3月”。建议先不自动归类，除非业务明确默认规则。
-                    </MudAlert>
-                </div>
-            }
 
             <div class="dict-create-table-wrap">
                 <MudSimpleTable Hover="true" Class="dict-create-table">
@@ -201,74 +156,11 @@
     private string _createScope = ProjectScopeKey;
     private List<DictEntryItem> _entries = [];
     private bool _editExisting;
-    private bool _templateVisible;
+    private string? _recommendedMatchMode;
 
     private string DialogHeading => _editExisting ? "编辑字典" : "新建字典";
 
     private string SaveButtonText => _editExisting ? "保存修改并选中" : "保存并选中";
-
-    private static readonly List<DictTemplateGroup> SmokingTemplateGroups =
-    [
-        new("戒烟<=3月",
-        [
-            new(@"regex:戒烟.{0,8}(?:[1-9]|[1-8]\d|90)\s*(?:天|日)", "戒烟 1 到 90 天，例如“戒烟30天”“已戒烟 60 日”。"),
-            new(@"regex:戒烟.{0,8}(?:1|2|3|一|二|两|三)\s*个?月", "戒烟 1 到 3 个月，例如“戒烟2个月”“已戒烟三月”。"),
-            new("戒烟不足3月", "明确写“戒烟不足3月”。"),
-            new("戒烟不到3月", "明确写“戒烟不到3月”。"),
-            new("戒烟未满3月", "明确写“戒烟未满3月”。"),
-            new("戒烟小于3月", "明确写“戒烟小于3月”。"),
-            new("戒烟小于等于3月", "明确写“戒烟小于等于3月”。")
-        ]),
-        new("戒烟>=3月",
-        [
-            new(@"regex:戒烟.{0,8}(?:[4-9]|1[0-2]|四|五|六|七|八|九|十|十一|十二)\s*个?月", "戒烟 4 到 12 个月，例如“戒烟4个月”“戒烟十月”。"),
-            new(@"regex:戒烟.{0,8}(?:半年|[1-9]\d*\s*年|[一二三四五六七八九十]+年|多年)", "戒烟半年、一年、多年等，例如“戒烟半年”“已戒烟2年”。"),
-            new("戒烟超过3月", "明确写“戒烟超过3月”。"),
-            new("戒烟大于3月", "明确写“戒烟大于3月”。"),
-            new("戒烟大于等于3月", "明确写“戒烟大于等于3月”。"),
-            new("戒烟≥3月", "明确写“戒烟≥3月”。"),
-            new("戒烟>=3月", "明确写“戒烟>=3月”。"),
-            new("长期戒烟", "明确写“长期戒烟”。")
-        ]),
-        new("从不吸烟",
-        [
-            new("从不吸烟", "明确写“从不吸烟”。"),
-            new("否认吸烟", "否认当前或既往吸烟。"),
-            new("否认烟草", "否认烟草接触。"),
-            new("无吸烟史", "明确写无吸烟史。"),
-            new("无烟史", "明确写无烟史。"),
-            new("未吸烟", "明确写未吸烟。"),
-            new("平素不吸烟", "平素不吸烟。"),
-            new("不吸烟", "普通“不吸烟”描述。若院内常用“目前不吸烟”表示已戒烟，建议不要配置这一条。")
-        ]),
-        new("偶尔吸烟",
-        [
-            new("偶尔吸烟", "明确写偶尔吸烟。"),
-            new("偶吸", "简写“偶吸”。"),
-            new("偶有吸烟", "明确写偶有吸烟。"),
-            new("间断吸烟", "间断吸烟。"),
-            new("少量吸烟", "少量吸烟。"),
-            new("社交性吸烟", "社交性吸烟。")
-        ]),
-        new("仍在吸烟",
-        [
-            new("仍在吸烟", "明确写仍在吸烟。"),
-            new("现吸烟", "明确写现吸烟。"),
-            new("目前吸烟", "明确写目前吸烟。"),
-            new("仍吸烟", "明确写仍吸烟。"),
-            new("继续吸烟", "明确写继续吸烟。"),
-            new("长期吸烟", "长期吸烟，且未提戒烟。"),
-            new(@"regex:^(?!.*(?:戒烟|已戒)).*(?:每日|每天|日均).{0,8}\d+\s*支", "未出现戒烟/已戒时，描述每日多少支，例如“每日10支”。"),
-            new(@"regex:^(?!.*(?:戒烟|已戒)).*\d+\s*支\s*/?\s*(?:日|天|每天|每日)", "未出现戒烟/已戒时，描述“10支/日”“10支每天”。"),
-            new(@"regex:^(?!.*(?:戒烟|已戒)).*(?:吸烟|抽烟).{0,12}\d+\s*(?:年|月|支|包)", "未出现戒烟/已戒时，描述吸烟年限、月数、支数、包数。"),
-            new("吸烟 && 包", "同一文本同时包含“吸烟”和“包”。"),
-            new("抽烟 && 支", "同一文本同时包含“抽烟”和“支”。")
-        ])
-    ];
-
-    private sealed record DictTemplateGroup(string TargetValue, List<DictTemplateCondition> Conditions);
-
-    private sealed record DictTemplateCondition(string Text, string Scope);
 
     private sealed class DictEntryItem
     {
@@ -371,6 +263,33 @@
         MudDialog.Cancel();
     }
 
+    private async Task OpenTemplateDialog()
+    {
+        var options = new DialogOptions
+        {
+            MaxWidth = MaxWidth.Large,
+            FullWidth = true,
+            CloseOnEscapeKey = true
+        };
+
+        var dialog = await inj_dialogService.ShowAsync<DictTemplateSelectDialog>("套用字典模板", new DialogParameters(), options);
+        var result = await dialog.Result;
+        if (result is not { Canceled: false, Data: DictTemplateApplyResult template })
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_newDictCode) && !string.IsNullOrWhiteSpace(template.DefaultDictCode))
+        {
+            _newDictCode = template.DefaultDictCode.Trim();
+        }
+
+        _recommendedMatchMode = EsbFieldMapping.NormalizeDictMatchMode(template.DefaultMatchMode);
+        var templateEntries = BuildEntriesFromTemplate(template.Items);
+        ApplyTemplateEntries(templateEntries, template.ApplyMode);
+        inj_snackbar.Add($"已套用模板“{template.TemplateName}”。", Severity.Success);
+    }
+
     private void AddEntry()
     {
         _entries.Add(new DictEntryItem());
@@ -432,6 +351,143 @@
         _entries.RemoveAt(index);
     }
 
+    private void ApplyTemplateEntries(List<DictEntryItem> templateEntries, string applyMode)
+    {
+        if (templateEntries.Count == 0)
+        {
+            return;
+        }
+
+        if (applyMode == DictTemplateApplyModes.Replace || IsOnlyEmptyEntry())
+        {
+            _entries = templateEntries;
+            return;
+        }
+
+        if (applyMode == DictTemplateApplyModes.MergeOverwrite)
+        {
+            RemoveTemplateConflicts(templateEntries);
+        }
+
+        AppendMissingTemplateEntries(templateEntries);
+        if (_entries.Count == 0)
+        {
+            _entries = [new DictEntryItem()];
+        }
+    }
+
+    private bool IsOnlyEmptyEntry() =>
+        _entries.Count == 1
+        && string.IsNullOrWhiteSpace(_entries[0].TargetValue)
+        && _entries[0].Conditions.All(c => string.IsNullOrWhiteSpace(DictExpressionHelper.BuildSourceValue(c.Keywords, c.MatchMode)));
+
+    private void RemoveTemplateConflicts(List<DictEntryItem> templateEntries)
+    {
+        var templateSourceValues = FlattenEntries(templateEntries)
+            .Select(e => e.SourceValue)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in _entries)
+        {
+            entry.Conditions = entry.Conditions
+                .Where(c =>
+                {
+                    var sourceValue = DictExpressionHelper.BuildSourceValue(c.Keywords, c.MatchMode);
+                    return string.IsNullOrWhiteSpace(sourceValue) || !templateSourceValues.Contains(sourceValue);
+                })
+                .ToList();
+        }
+
+        _entries = _entries
+            .Where(e => !string.IsNullOrWhiteSpace(e.TargetValue) && e.Conditions.Count > 0)
+            .ToList();
+    }
+
+    private void AppendMissingTemplateEntries(List<DictEntryItem> templateEntries)
+    {
+        var existingSourceValues = FlattenEntries(_entries)
+            .Select(e => e.SourceValue)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var templateEntry in templateEntries)
+        {
+            foreach (var condition in templateEntry.Conditions)
+            {
+                var sourceValue = DictExpressionHelper.BuildSourceValue(condition.Keywords, condition.MatchMode);
+                if (string.IsNullOrWhiteSpace(sourceValue) || existingSourceValues.Contains(sourceValue))
+                {
+                    continue;
+                }
+
+                var targetEntry = _entries.FirstOrDefault(e => string.Equals(e.TargetValue, templateEntry.TargetValue, StringComparison.OrdinalIgnoreCase));
+                if (targetEntry == null)
+                {
+                    targetEntry = new DictEntryItem { TargetValue = templateEntry.TargetValue };
+                    targetEntry.Conditions.Clear();
+                    _entries.Add(targetEntry);
+                }
+
+                targetEntry.Conditions.Add(CloneCondition(condition));
+                existingSourceValues.Add(sourceValue);
+            }
+        }
+    }
+
+    private static List<DictEntryItem> BuildEntriesFromTemplate(IEnumerable<DictTemplateItemDto> items)
+    {
+        return items
+            .Where(i => !string.IsNullOrWhiteSpace(i.SourceValue) && !string.IsNullOrWhiteSpace(i.TargetValue))
+            .GroupBy(i => i.TargetValue.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new DictEntryItem
+            {
+                TargetValue = group.First().TargetValue.Trim(),
+                Conditions = group.Select(i => BuildConditionFromSourceValue(i.SourceValue)).ToList()
+            })
+            .Where(e => e.Conditions.Count > 0)
+            .ToList();
+    }
+
+    private static DictConditionItem BuildConditionFromSourceValue(string sourceValue)
+    {
+        var (matchMode, _) = DictExpressionHelper.ParseSourceValue(sourceValue);
+        return new DictConditionItem
+        {
+            MatchMode = matchMode,
+            Keywords = DictExpressionHelper.ParseSourceValueKeywords(sourceValue)
+        };
+    }
+
+    private static DictConditionItem CloneCondition(DictConditionItem condition) =>
+        new()
+        {
+            MatchMode = condition.MatchMode,
+            Keywords = condition.Keywords.ToList()
+        };
+
+    private static List<DictEntryItem> FlattenEntries(IEnumerable<DictEntryItem> entries)
+    {
+        var result = new List<DictEntryItem>();
+        foreach (var entry in entries)
+        {
+            foreach (var condition in entry.Conditions)
+            {
+                var sourceValue = DictExpressionHelper.BuildSourceValue(condition.Keywords, condition.MatchMode);
+                if (string.IsNullOrWhiteSpace(sourceValue))
+                {
+                    continue;
+                }
+
+                result.Add(new DictEntryItem
+                {
+                    SourceValue = sourceValue,
+                    TargetValue = entry.TargetValue
+                });
+            }
+        }
+
+        return result;
+    }
+
     private async Task SaveDictAsync()
     {
         if (string.IsNullOrWhiteSpace(_newDictCode))
@@ -476,7 +532,11 @@
             await db.SaveChangesAsync();
             inj_dictService.ClearCache(dictCode, CurrentIntegrationProjectCode);
             inj_snackbar.Add($"字典“{dictCode}”已保存，共 {entries.Count} 条", Severity.Success);
-            MudDialog.Close(dictCode);
+            MudDialog.Close(new DictCreateDialogResult
+            {
+                DictCode = dictCode,
+                RecommendedMatchMode = _recommendedMatchMode
+            });
             return;
         }
 
@@ -539,7 +599,11 @@
         }
 
         inj_snackbar.Add(message, Severity.Success);
-        MudDialog.Close(dictCode);
+        MudDialog.Close(new DictCreateDialogResult
+        {
+            DictCode = dictCode,
+            RecommendedMatchMode = _recommendedMatchMode
+        });
     }
 
     private List<DictEntryItem> BuildEntriesForSave()

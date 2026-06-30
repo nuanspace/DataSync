@@ -764,10 +764,27 @@ public partial class InterfaceWizardPage
         inj_snackbar.Add("已使用当前消息 RawJson 作为工作台样例，点击“保存到数据库”才会覆盖接口模板。", Severity.Info);
     }
 
-    private async Task OnInterfaceSelected(int? configId)
+    private Task<IEnumerable<EsbInterfaceConfig>> SearchInterfaces(string? search, CancellationToken _)
     {
-        _selectedConfigId = configId;
-        if (configId == null)
+        IEnumerable<EsbInterfaceConfig> items = _allInterfaces;
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var keyword = search.Trim();
+            items = items.Where(c =>
+                c.TranCode.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                || (c.TranName?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false));
+        }
+
+        return Task.FromResult(items.Take(80));
+    }
+
+    private static string FormatInterfaceOption(EsbInterfaceConfig? cfg) =>
+        cfg == null ? "" : $"{cfg.TranCode} - {cfg.TranName}";
+
+    private async Task OnInterfaceSelected(EsbInterfaceConfig? cfg)
+    {
+        _selectedConfigId = cfg?.Id;
+        if (cfg == null)
         {
             _selectedConfig = null;
             _editableJson = "";
@@ -783,11 +800,7 @@ public partial class InterfaceWizardPage
             return;
         }
 
-        var cfg = _allInterfaces.FirstOrDefault(c => c.Id == configId.Value);
-        if (cfg != null)
-        {
-            await LoadInterfaceData(cfg);
-        }
+        await LoadInterfaceData(cfg);
     }
 
     private async Task LoadInterfaceData(EsbInterfaceConfig cfg)

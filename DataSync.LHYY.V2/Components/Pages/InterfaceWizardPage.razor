@@ -12,12 +12,11 @@
 
         <div class="workbench-toolbar-stage">
             <div class="workbench-toolbar-select">
-                <MudSelect T="int?" Value="_selectedConfigId" ValueChanged="OnInterfaceSelected" Label="选择接口" Placeholder="请选择..." Clearable="true" HelperText="@($"共 {_allInterfaces.Count} 个接口")">
-                    @foreach (var cfg in _allInterfaces)
-                    {
-                        <MudSelectItem T="int?" Value="@((int?)cfg.Id)">@cfg.TranCode - @cfg.TranName</MudSelectItem>
-                    }
-                </MudSelect>
+                <MudAutocomplete T="EsbInterfaceConfig" Value="_selectedConfig" ValueChanged="OnInterfaceSelected"
+                                 SearchFunc="SearchInterfaces" ToStringFunc="FormatInterfaceOption"
+                                 Label="选择接口" Placeholder="输入代码或名称检索"
+                                 Clearable="true" CoerceText="false" CoerceValue="false" Strict="true"
+                                 MaxItems="80" HelperText="@($"共 {_allInterfaces.Count} 个接口")" />
             </div>
 
             @if (_selectedConfig != null)
@@ -700,7 +699,9 @@ else
                                 <MudText Typo="Typo.body2" Style="font-weight:600;" Class="mb-2">详细设置</MudText>
                                 <MudGrid Spacing="2">
                                     <MudItem xs="12" sm="6">
-                                        <DictCodeEditor Value="@GetQuestionFieldDictCode(field)" ValueChanged="v => OnQuestionFieldDictCodeChanged(field, v)" SuggestedSourceValues="@GetQuestionFieldDictSuggestedSourceValues(field)" />
+                                        <DictCodeEditor Value="@GetQuestionFieldDictCode(field)" ValueChanged="v => OnQuestionFieldDictCodeChanged(field, v)"
+                                                        SuggestedSourceValues="@GetQuestionFieldDictSuggestedSourceValues(field)"
+                                                        SuggestedDictMatchModeChanged="v => OnQuestionFieldDictMatchModeChanged(field, v)" />
                                     </MudItem>
                                     <MudItem xs="12" sm="6">
                                         <MudSelect T="string" Value="@GetQuestionFieldDictMatchMode(field)" ValueChanged="v => OnQuestionFieldDictMatchModeChanged(field, v)" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">
@@ -777,7 +778,8 @@ else
                             }
                             <MudGrid Spacing="2">
                                 <MudItem xs="12" sm="6">
-                                    <DictCodeEditor Value="@GetActiveStandaloneDictCode()" ValueChanged="OnActiveRowDictCodeChanged" />
+                                    <DictCodeEditor Value="@GetActiveStandaloneDictCode()" ValueChanged="OnActiveRowDictCodeChanged"
+                                                    SuggestedDictMatchModeChanged="OnActiveRowDictMatchModeChanged" />
                                 </MudItem>
                                 <MudItem xs="12" sm="6">
                                     <MudSelect T="string" Value="@GetActiveStandaloneDictMatchMode()" ValueChanged="OnActiveRowDictMatchModeChanged" Label="字典匹配" Margin="Margin.Dense" Variant="Variant.Outlined">

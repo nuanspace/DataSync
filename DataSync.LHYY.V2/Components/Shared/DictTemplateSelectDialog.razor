@@ -1,0 +1,230 @@
+@inherits BasePage
+
+<MudDialog>
+    <TitleContent>
+        <div class="dict-template-title">
+            <div>
+                <MudText Typo="Typo.caption" Class="dict-template-kicker">字典模板</MudText>
+                <MudText Typo="Typo.h6" Class="dict-template-heading">套用字典模板</MudText>
+            </div>
+            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="Cancel" />
+        </div>
+    </TitleContent>
+    <DialogContent>
+        @if (_loading)
+        {
+            <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+        }
+        else if (_templates.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true">暂无可用字典模板。</MudAlert>
+        }
+        else
+        {
+            <div class="dict-template-body">
+                <div class="dict-template-sidebar">
+                    <div class="dict-template-filters">
+                        <MudTextField @bind-Value="_search" Label="搜索模板" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" />
+                        <MudSelect T="string" Value="_category" ValueChanged="OnCategoryChanged"
+                                   Label="分类" Margin="Margin.Dense" Variant="Variant.Outlined">
+                            <MudSelectItem Value="@AllCategoryKey">全部</MudSelectItem>
+                            @foreach (var category in Categories)
+                            {
+                                <MudSelectItem Value="@category">@category</MudSelectItem>
+                            }
+                        </MudSelect>
+                    </div>
+
+                    <div class="dict-template-list">
+                        @foreach (var template in FilteredTemplates)
+                        {
+                            <button type="button" class="@GetTemplateClass(template)" @onclick="() => SelectTemplateAsync(template.Id)">
+                                <span class="dict-template-list-name">@template.TemplateName</span>
+                                <span class="dict-template-list-code">@template.TemplateCode</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="dict-template-preview">
+                    @if (_selected == null)
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">请选择一个模板。</MudAlert>
+                    }
+                    else
+                    {
+                        <div class="dict-template-preview-header">
+                            <div>
+                                <MudText Typo="Typo.h6">@_selected.TemplateName</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@_selected.Description</MudText>
+                            </div>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@_selected.Category</MudChip>
+                        </div>
+
+                        <div class="dict-template-meta">
+                            <span>推荐 DictCode：@(_selected.DefaultDictCode ?? "-")</span>
+                            <span>推荐匹配：@GetMatchModeText(_selected.DefaultMatchMode)</span>
+                            <span>条目：@_selected.Items.Count</span>
+                        </div>
+
+                        <MudSelect T="string" Value="_applyMode" ValueChanged="OnApplyModeChanged"
+                                   Label="套用方式" Margin="Margin.Dense" Variant="Variant.Outlined"
+                                   Class="dict-template-apply-mode">
+                            <MudSelectItem Value="@DictTemplateApplyModes.Replace">替换当前条目</MudSelectItem>
+                            <MudSelectItem Value="@DictTemplateApplyModes.AppendMissing">只追加缺失条目</MudSelectItem>
+                            <MudSelectItem Value="@DictTemplateApplyModes.MergeOverwrite">合并并覆盖冲突条目</MudSelectItem>
+                        </MudSelect>
+
+                        <div class="dict-template-group-list">
+                            @foreach (var group in _selected.Items.GroupBy(i => i.TargetValue))
+                            {
+                                <section class="dict-template-group">
+                                    <MudText Typo="Typo.subtitle1" Class="dict-template-target">@group.Key</MudText>
+                                    <MudSimpleTable Dense="true" Hover="true" Class="dict-template-table">
+                                        <thead>
+                                            <tr>
+                                                <th>命中条件</th>
+                                                <th>说明</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var item in group)
+                                            {
+                                                <tr>
+                                                    <td><code>@item.SourceValue</code></td>
+                                                    <td>@item.Description</td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </MudSimpleTable>
+                                </section>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled"
+                   StartIcon="@Icons.Material.Filled.Check"
+                   Disabled="@(_selected == null || _selected.Items.Count == 0)"
+                   OnClick="Apply">
+            套用模板
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private const string AllCategoryKey = "__all";
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    private bool _loading;
+    private string? _search;
+    private string _category = AllCategoryKey;
+    private string _applyMode = DictTemplateApplyModes.Replace;
+    private List<DictTemplateSummary> _templates = [];
+    private DictTemplateDetail? _selected;
+
+    private IEnumerable<string> Categories => _templates
+        .Select(t => t.Category)
+        .Where(c => !string.IsNullOrWhiteSpace(c))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(c => c);
+
+    private IEnumerable<DictTemplateSummary> FilteredTemplates
+    {
+        get
+        {
+            var items = _templates.AsEnumerable();
+            if (_category != AllCategoryKey)
+            {
+                items = items.Where(t => string.Equals(t.Category, _category, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_search))
+            {
+                var keyword = _search.Trim();
+                items = items.Where(t =>
+                    t.TemplateName.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                    || t.TemplateCode.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                    || (t.Description?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            return items;
+        }
+    }
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        _loading = true;
+        try
+        {
+            _templates = await inj_dictTemplateService.GetEnabledTemplatesAsync();
+            if (_templates.Count > 0)
+            {
+                await SelectTemplateAsync(_templates[0].Id);
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task OnCategoryChanged(string value)
+    {
+        _category = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnApplyModeChanged(string value)
+    {
+        _applyMode = value;
+        return Task.CompletedTask;
+    }
+
+    private async Task SelectTemplateAsync(int id)
+    {
+        _selected = await inj_dictTemplateService.GetTemplateAsync(id);
+    }
+
+    private string GetTemplateClass(DictTemplateSummary template) =>
+        _selected?.Id == template.Id
+            ? "dict-template-list-item dict-template-list-item-active"
+            : "dict-template-list-item";
+
+    private static string GetMatchModeText(string? mode) =>
+        EsbFieldMapping.NormalizeDictMatchMode(mode) switch
+        {
+            EsbFieldMapping.DictMatchModeContainsExcludeNegation => "包含并排除否定",
+            EsbFieldMapping.DictMatchModePriorityFirst => "按排序优先命中",
+            _ => "普通包含"
+        };
+
+    private void Apply()
+    {
+        if (_selected == null)
+        {
+            return;
+        }
+
+        MudDialog.Close(new DictTemplateApplyResult
+        {
+            TemplateCode = _selected.TemplateCode,
+            TemplateName = _selected.TemplateName,
+            DefaultDictCode = _selected.DefaultDictCode,
+            DefaultMatchMode = EsbFieldMapping.NormalizeDictMatchMode(_selected.DefaultMatchMode),
+            ApplyMode = _applyMode,
+            Items = _selected.Items.ToList()
+        });
+    }
+
+    private void Cancel()
+    {
+        MudDialog.Cancel();
+    }
+}

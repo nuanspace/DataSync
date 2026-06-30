@@ -111,6 +111,7 @@ public class Program
             builder.Services.AddScoped<MessageQueryService>();
             builder.Services.AddScoped<BioCoreIntegrationService>();
             builder.Services.AddScoped<DictService>();
+            builder.Services.AddScoped<DictTemplateService>();
             builder.Services.AddScoped<FieldMappingExecutor>();
             builder.Services.AddScoped<DirectTargetWriteService>();
             builder.Services.AddScoped<GenericMessageProcessor>();
@@ -343,6 +344,49 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             CREATE INDEX IF NOT EXISTS ix_active_medical_records_project_inpatient
                 ON lhyy.active_medical_records (integration_project_code, inpatient_no);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS lhyy.esb_dict_template (
+                id                 SERIAL PRIMARY KEY,
+                template_code      VARCHAR(100) NOT NULL,
+                template_name      VARCHAR(100) NOT NULL,
+                category           VARCHAR(50) NOT NULL DEFAULT '',
+                default_dict_code  VARCHAR(100),
+                default_match_mode VARCHAR(50) NOT NULL DEFAULT 'contains',
+                description        VARCHAR(500),
+                is_enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+                sort_order         INTEGER NOT NULL DEFAULT 0,
+                created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at         TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_dict_template_code
+                ON lhyy.esb_dict_template (template_code);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_esb_dict_template_category
+                ON lhyy.esb_dict_template (category);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS lhyy.esb_dict_template_item (
+                id           SERIAL PRIMARY KEY,
+                template_id  INTEGER NOT NULL REFERENCES lhyy.esb_dict_template(id) ON DELETE CASCADE,
+                source_value VARCHAR(200) NOT NULL,
+                target_value VARCHAR(200) NOT NULL,
+                sort_order   INTEGER NOT NULL DEFAULT 0,
+                description  VARCHAR(500),
+                is_enabled   BOOLEAN NOT NULL DEFAULT TRUE
+            );
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_esb_dict_template_item_template_sort
+                ON lhyy.esb_dict_template_item (template_id, sort_order);
             """);
     }
 

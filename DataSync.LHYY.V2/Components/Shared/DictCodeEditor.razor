@@ -18,6 +18,7 @@
 @code {
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public EventCallback<string> SuggestedDictMatchModeChanged { get; set; }
     [Parameter] public IEnumerable<string>? SuggestedSourceValues { get; set; }
     [Parameter] public string Label { get; set; } = "字典代码";
     [Parameter] public string HelperText { get; set; } = "搜索并选择当前项目或全局字典代码；如无可选项，可直接新建。";
@@ -86,7 +87,21 @@
 
         var dialog = await inj_dialogService.ShowAsync<DictCreateDialog>(DictActionText, parameters, options);
         var result = await dialog.Result;
-        if (result is { Canceled: false, Data: string dictCode })
+        if (result is not { Canceled: false })
+        {
+            return;
+        }
+
+        if (result.Data is DictCreateDialogResult createResult)
+        {
+            await LoadDictCodesAsync();
+            await OnValueChanged(createResult.DictCode);
+            if (!string.IsNullOrWhiteSpace(createResult.RecommendedMatchMode) && SuggestedDictMatchModeChanged.HasDelegate)
+            {
+                await SuggestedDictMatchModeChanged.InvokeAsync(createResult.RecommendedMatchMode);
+            }
+        }
+        else if (result.Data is string dictCode)
         {
             await LoadDictCodesAsync();
             await OnValueChanged(dictCode);

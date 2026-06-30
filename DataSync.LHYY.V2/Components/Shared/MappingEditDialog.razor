@@ -187,6 +187,16 @@
         return Task.CompletedTask;
     }
 
+    private Task OnDictMatchModeSuggested(string value)
+    {
+        if (EditItem != null)
+        {
+            EditItem.DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(value);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private IEnumerable<string> GetSuggestedDictSourceValues()
     {
         if (EditItem?.MappingTarget is not (MappingTarget.Question or MappingTarget.SubCard))
@@ -369,7 +379,9 @@
 
             @* 通用字段 *@
             <MudItem xs="12" sm="6">
-                <DictCodeEditor Value="@EditItem!.DictCode" ValueChanged="OnDictCodeChanged" SuggestedSourceValues="@GetSuggestedDictSourceValues()" />
+                <DictCodeEditor Value="@EditItem!.DictCode" ValueChanged="OnDictCodeChanged"
+                                SuggestedSourceValues="@GetSuggestedDictSourceValues()"
+                                SuggestedDictMatchModeChanged="OnDictMatchModeSuggested" />
             </MudItem>
             <MudItem xs="12" sm="6">
                 <MudSelect T="string" @bind-Value="EditItem!.DictMatchMode" Label="字典匹配"

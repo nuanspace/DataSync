@@ -13,6 +13,8 @@ public class DataSyncDbContext : DbContext
     public DbSet<EsbGlobalConfig> EsbGlobalConfigs => Set<EsbGlobalConfig>();
     public DbSet<EsbFieldMapping> EsbFieldMappings => Set<EsbFieldMapping>();
     public DbSet<EsbDict> EsbDicts => Set<EsbDict>();
+    public DbSet<EsbDictTemplate> EsbDictTemplates => Set<EsbDictTemplate>();
+    public DbSet<EsbDictTemplateItem> EsbDictTemplateItems => Set<EsbDictTemplateItem>();
     public DbSet<EsbProcessLog> EsbProcessLogs => Set<EsbProcessLog>();
     public DbSet<EsbFilterRule> EsbFilterRules => Set<EsbFilterRule>();
     public DbSet<EsbInterfaceMatchRule> EsbInterfaceMatchRules => Set<EsbInterfaceMatchRule>();
@@ -88,6 +90,21 @@ public class DataSyncDbContext : DbContext
             e.HasIndex(d => new { d.IntegrationProjectCode, d.DictCode, d.SourceValue })
                 .IsUnique()
                 .HasFilter("integration_project_code IS NOT NULL");
+        });
+
+        modelBuilder.Entity<EsbDictTemplate>(e =>
+        {
+            e.HasIndex(t => t.TemplateCode).IsUnique();
+            e.HasIndex(t => t.Category);
+            e.HasMany(t => t.Items)
+                .WithOne(i => i.Template)
+                .HasForeignKey(i => i.TemplateId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EsbDictTemplateItem>(e =>
+        {
+            e.HasIndex(i => new { i.TemplateId, i.SortOrder });
         });
 
         // esb_process_log 索引
