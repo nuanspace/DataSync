@@ -118,6 +118,8 @@ public class Program
             builder.Services.AddScoped<MessageExecutionService>();
             builder.Services.AddScoped<FilterRuleService>();
             builder.Services.AddScoped<MappingPreviewService>();
+            builder.Services.AddScoped<MessageMappingPreviewService>();
+            builder.Services.AddScoped<ConfigSyncService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
             builder.Services.AddSingleton<DatabaseCompareService>();
             builder.Services.AddSingleton<MessageProcessingNotifier>();
@@ -291,6 +293,21 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             ALTER TABLE IF EXISTS lhyy.esb_interface_config
                 ADD COLUMN IF NOT EXISTS medical_record_sync_role INTEGER NOT NULL DEFAULT 0;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_field_mapping
+                ADD COLUMN IF NOT EXISTS sync_key VARCHAR(64);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_field_mapping
+                ADD COLUMN IF NOT EXISTS last_sync_hash VARCHAR(64);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE INDEX IF NOT EXISTS ix_esb_field_mapping_sync_key
+                ON lhyy.esb_field_mapping (sync_key);
             """);
 
         db.Database.ExecuteSqlRaw("""

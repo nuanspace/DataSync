@@ -22,3 +22,31 @@ public class MappingPreviewResult
     public bool IsMissing { get; set; }
     public string? Description { get; set; }
 }
+
+/// <summary>
+/// 手工样本值试算结果
+/// </summary>
+public class MappingSamplePreviewResult
+{
+    public bool PassedFilter { get; set; } = true;
+    public string? RawValue { get; set; }
+    public string? DictTranslatedValue { get; set; }
+    public string? FinalValue { get; set; }
+    public bool IsDictMatched { get; set; }
+    public bool IsMissing { get; set; }
+    public string? ErrorMessage { get; set; }
+    public List<string> Warnings { get; set; } = [];
+    public List<MappingPreviewStep> Steps { get; set; } = [];
+}
+
+/// <summary>
+/// 映射试算步骤
+/// </summary>
+public class MappingPreviewStep
+{
+    public string Name { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? InputValue { get; set; }
+    public string? OutputValue { get; set; }
+    public string? Message { get; set; }
+}

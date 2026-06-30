@@ -202,6 +202,17 @@
         return _questionOptions.TryGetValue(EditItem.TargetField, out var options) ? options : [];
     }
 
+    private List<string> GetSelectedQuestionOptions()
+    {
+        if (EditItem?.MappingTarget is not (MappingTarget.Question or MappingTarget.SubCard)
+            || string.IsNullOrWhiteSpace(EditItem.TargetField))
+        {
+            return [];
+        }
+
+        return _questionOptions.GetValueOrDefault(EditItem.TargetField) ?? [];
+    }
+
     private void HandleFilterRulePathPick(int idx)
     {
         SetPathPickTarget(PathPickTarget.FilterRuleSourcePath, idx);
@@ -322,6 +333,18 @@
                                   Variant="Variant.Outlined" Margin="Margin.Dense" />
                 }
             </MudItem>
+            @if (GetSelectedQuestionOptions().Count > 0)
+            {
+                <MudItem xs="12">
+                    <div class="mapping-question-options">
+                        <span class="mapping-question-option-label">选项</span>
+                        @foreach (var option in GetSelectedQuestionOptions())
+                        {
+                            <span class="mapping-question-option-chip">@option</span>
+                        }
+                    </div>
+                </MudItem>
+            }
 
             @* SubCard 附加字段 *@
             @if (EditItem!.MappingTarget == MappingTarget.SubCard)
@@ -361,9 +384,7 @@
                               Variant="Variant.Outlined" Margin="Margin.Dense" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudTextField @bind-Value="EditItem!.ValueExpression" Label="值表达式"
-                              HelperText="如: format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)"
-                              Variant="Variant.Outlined" Margin="Margin.Dense" />
+                <ValueExpressionEditor @bind-Value="EditItem!.ValueExpression" />
             </MudItem>
 
             @* IsRequired *@
@@ -403,6 +424,11 @@
                                       ActivePickIndex="@(_pathPickTarget == PathPickTarget.FilterRuleSourcePath ? _pickFilterRuleIndex : -1)" />
                 </MudItem>
             }
+
+            <MudItem xs="12">
+                <MudDivider Class="my-2" />
+                <MappingSamplePreviewPanel Mapping="EditItem" FilterRules="FilterRules" />
+            </MudItem>
         </MudGrid>
     };
 

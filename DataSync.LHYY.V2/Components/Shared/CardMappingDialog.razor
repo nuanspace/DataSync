@@ -110,8 +110,7 @@
                                                   Variant="Variant.Outlined" />
                                 </td>
                                 <td>
-                                    <MudTextField @bind-Value="row.ValueExpression" Margin="Margin.Dense"
-                                                  Variant="Variant.Outlined" />
+                                    <ValueExpressionEditor @bind-Value="row.ValueExpression" HelperText="" />
                                 </td>
                                 <td>
                                     <MudCheckBox @bind-Value="row.IsRequired" Dense="true" />

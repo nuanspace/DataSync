@@ -1,0 +1,201 @@
+﻿@inherits BasePage
+
+<div class="value-expression-editor">
+    <div class="value-expression-input-row">
+        <MudTextField T="string" Value="@Value" ValueChanged="OnValueChanged" Label="@Label"
+                      HelperText="@HelperText" Variant="@Variant" Margin="@Margin" />
+        <MudTooltip Text="表达式模板">
+            <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Primary"
+                           Variant="Variant.Outlined" Class="value-expression-template-button"
+                           OnClick="OpenTemplateDialog" />
+        </MudTooltip>
+    </div>
+
+    <MudDialog @bind-Visible="_templateOpen" Options="_dialogOptions">
+        <TitleContent>
+            <div class="value-expression-dialog-title">
+                <MudIcon Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Medium" Color="Color.Primary" />
+                <div>
+                    <MudText Typo="Typo.h6">值表达式模板</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">选择模板后会覆盖当前值表达式</MudText>
+                </div>
+            </div>
+        </TitleContent>
+        <DialogContent>
+            <div class="value-expression-dialog-body">
+                <MudSelect T="ExpressionTemplateKind" Value="_templateKind" ValueChanged="OnTemplateKindChanged"
+                           Label="模板类型" Margin="Margin.Dense" Variant="Variant.Outlined"
+                           Class="value-expression-template-type">
+                    <MudSelectItem Value="ExpressionTemplateKind.DateFormat">日期格式</MudSelectItem>
+                    <MudSelectItem Value="ExpressionTemplateKind.SubstringRange">截取范围</MudSelectItem>
+                    <MudSelectItem Value="ExpressionTemplateKind.NumberRegex">提取数字</MudSelectItem>
+                    <MudSelectItem Value="ExpressionTemplateKind.BetweenKeywords">关键词之间</MudSelectItem>
+                </MudSelect>
+
+                <section class="value-expression-template-section">
+                @if (_templateKind == ExpressionTemplateKind.DateFormat)
+                {
+                    <MudSelect T="string" Value="_dateFormat" ValueChanged="OnDateFormatChanged"
+                               Label="日期格式" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        @foreach (var item in DateFormats)
+                        {
+                            <MudSelectItem Value="@item.Expression">@item.Name</MudSelectItem>
+                        }
+                    </MudSelect>
+                }
+                else if (_templateKind == ExpressionTemplateKind.SubstringRange)
+                {
+                    <div class="value-expression-template-grid">
+                        <MudNumericField T="int" @bind-Value="_substringStart" Label="开始位置" Min="0"
+                                         Margin="Margin.Dense" Variant="Variant.Outlined" />
+                        <MudNumericField T="int" @bind-Value="_substringEnd" Label="结束位置" Min="1"
+                                         Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </div>
+                }
+                else if (_templateKind == ExpressionTemplateKind.NumberRegex)
+                {
+                    <MudSelect T="string" @bind-Value="_numberRegex" Label="数字类型"
+                               Margin="Margin.Dense" Variant="Variant.Outlined">
+                        <MudSelectItem Value="@NumberRegexDecimal">数字（含小数）</MudSelectItem>
+                        <MudSelectItem Value="@NumberRegexInteger">整数</MudSelectItem>
+                    </MudSelect>
+                }
+                else if (_templateKind == ExpressionTemplateKind.BetweenKeywords)
+                {
+                    <div class="value-expression-template-grid">
+                        <MudTextField @bind-Value="_betweenStart" Label="开始关键词"
+                                      Margin="Margin.Dense" Variant="Variant.Outlined" />
+                        <MudTextField @bind-Value="_betweenEnd" Label="结束关键词"
+                                      Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </div>
+                }
+                </section>
+
+                <section class="value-expression-preview">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">生成表达式</MudText>
+                    <div class="value-expression-preview-code">@GetPreviewExpression()</div>
+                </section>
+            </div>
+        </DialogContent>
+        <DialogActions>
+            <MudButton Variant="Variant.Text" OnClick="CloseTemplateDialog">取消</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Check" Disabled="@(!CanApplyTemplate())"
+                       OnClick="ApplyTemplate">
+                套用模板
+            </MudButton>
+        </DialogActions>
+    </MudDialog>
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "值表达式";
+    [Parameter] public string HelperText { get; set; } = "例如 format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀。";
+    [Parameter] public Margin Margin { get; set; } = Margin.Dense;
+    [Parameter] public Variant Variant { get; set; } = Variant.Outlined;
+
+    private const string NumberRegexDecimal = @"regex:([0-9]+(?:\.[0-9]+)?)";
+    private const string NumberRegexInteger = @"regex:([0-9]+)";
+
+    private bool _templateOpen;
+    private ExpressionTemplateKind _templateKind = ExpressionTemplateKind.DateFormat;
+    private string _dateFormat = "yyyy-MM-dd";
+    private int _substringStart;
+    private int _substringEnd = 10;
+    private string _numberRegex = NumberRegexDecimal;
+    private string? _betweenStart;
+    private string? _betweenEnd;
+    private readonly DialogOptions _dialogOptions = new()
+    {
+        MaxWidth = MaxWidth.Small,
+        FullWidth = true,
+        CloseOnEscapeKey = true
+    };
+
+    private static readonly List<DateFormatItem> DateFormats =
+    [
+        new("年月日（横线）", "yyyy-MM-dd"),
+        new("年月日（紧凑）", "yyyyMMdd"),
+        new("年月日时分秒", "yyyy-MM-dd HH:mm:ss"),
+        new("时分秒", "HH:mm:ss"),
+        new("中文年月日", "yyyy年MM月dd日")
+    ];
+
+    private Task OnValueChanged(string? value)
+    {
+        Value = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+
+    private Task OnTemplateKindChanged(ExpressionTemplateKind value)
+    {
+        _templateKind = value;
+        return Task.CompletedTask;
+    }
+
+    private Task OnDateFormatChanged(string value)
+    {
+        _dateFormat = value;
+        return Task.CompletedTask;
+    }
+
+    private void OpenTemplateDialog() => _templateOpen = true;
+
+    private void CloseTemplateDialog() => _templateOpen = false;
+
+    private async Task ApplyTemplate()
+    {
+        var expression = BuildExpression();
+        if (string.IsNullOrWhiteSpace(expression))
+            return;
+
+        _templateOpen = false;
+        await OnValueChanged(expression);
+    }
+
+    private bool CanApplyTemplate() => !string.IsNullOrWhiteSpace(BuildExpression());
+
+    private string GetPreviewExpression() => BuildExpression() ?? "请填写完整参数";
+
+    private string? BuildExpression()
+    {
+        return _templateKind switch
+        {
+            ExpressionTemplateKind.DateFormat => $"format:{_dateFormat}",
+            ExpressionTemplateKind.SubstringRange => BuildSubstringExpression(),
+            ExpressionTemplateKind.NumberRegex => _numberRegex,
+            ExpressionTemplateKind.BetweenKeywords => BuildBetweenExpression(),
+            _ => null
+        };
+    }
+
+    private string? BuildSubstringExpression()
+    {
+        if (_substringStart < 0 || _substringEnd <= _substringStart)
+            return null;
+
+        return $"substring:{_substringStart},{_substringEnd - _substringStart}";
+    }
+
+    private string? BuildBetweenExpression()
+    {
+        if (string.IsNullOrWhiteSpace(_betweenStart) || string.IsNullOrWhiteSpace(_betweenEnd))
+            return null;
+
+        var start = System.Text.RegularExpressions.Regex.Escape(_betweenStart.Trim());
+        var end = System.Text.RegularExpressions.Regex.Escape(_betweenEnd.Trim());
+        return $"regex:{start}(.*?){end}";
+    }
+
+    private enum ExpressionTemplateKind
+    {
+        DateFormat,
+        SubstringRange,
+        NumberRegex,
+        BetweenKeywords
+    }
+
+    private sealed record DateFormatItem(string Name, string Expression);
+}

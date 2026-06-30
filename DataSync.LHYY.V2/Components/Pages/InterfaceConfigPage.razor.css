@@ -7,6 +7,10 @@
     max-width: 36rem;
 }
 
+.interface-config-row-actions {
+    white-space: nowrap;
+}
+
 .interface-config-panels {
     margin-top: 0.5rem;
 }

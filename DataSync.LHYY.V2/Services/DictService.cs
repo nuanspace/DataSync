@@ -36,23 +36,39 @@ public class DictService
     public async Task<string?> TranslateAsync(string dictCode, string sourceValue, string? dictMatchMode = null)
     {
         var dict = await GetDictAsync(dictCode);
+        return TranslateEntries(sourceValue, dict.Select(item => (item.SourceValue, item.TargetValue)), dictMatchMode);
+    }
+
+    internal static string? TranslateEntries(
+        string sourceValue,
+        IEnumerable<(string SourceValue, string TargetValue)> dictEntries,
+        string? dictMatchMode = null)
+    {
         var source = sourceValue.Trim();
         if (source.Length == 0)
             return null;
 
+        var dict = dictEntries
+            .Select(item => new DictEntry(item.SourceValue, item.TargetValue))
+            .ToList();
         var matchMode = EsbFieldMapping.NormalizeDictMatchMode(dictMatchMode);
-        if (matchMode == EsbFieldMapping.DictMatchModePriorityFirst)
-        {
-            return dict.FirstOrDefault(item => IsMatch(source, item.SourceValue, matchMode)).TargetValue;
-        }
-
         var matches = dict
             .Where(item => IsMatch(source, item.SourceValue, matchMode))
+            .ToList();
+
+        matches = RemoveCoveredShortMatches(source, matches);
+
+        if (matchMode == EsbFieldMapping.DictMatchModePriorityFirst)
+        {
+            return matches.FirstOrDefault().TargetValue;
+        }
+
+        var targetValues = matches
             .Select(item => item.TargetValue)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        return matches.Count == 0 ? null : string.Join(",", matches);
+        return targetValues.Count == 0 ? null : string.Join(",", targetValues);
     }
 
     public async Task<string> TranslateOrKeepAsync(string dictCode, string sourceValue, string? dictMatchMode = null)
@@ -148,6 +164,66 @@ public class DictService
         return false;
     }
 
+    private static List<DictEntry> RemoveCoveredShortMatches(string source, List<DictEntry> matches)
+    {
+        if (matches.Count < 2)
+            return matches;
+
+        var plainMatches = matches
+            .Select((item, index) => new PlainMatch(index, GetPlainOption(source, item.SourceValue)))
+            .Where(item => item.Option.Length > 0)
+            .Select(item => item with { Spans = FindSpans(source, item.Option) })
+            .Where(item => item.Spans.Count > 0)
+            .ToList();
+
+        if (plainMatches.Count < 2)
+            return matches;
+
+        var coveredIndexes = new HashSet<int>();
+        foreach (var current in plainMatches)
+        {
+            var longerSpans = plainMatches
+                .Where(item => item.Index != current.Index && item.Option.Length > current.Option.Length)
+                .SelectMany(item => item.Spans)
+                .ToList();
+
+            if (longerSpans.Count > 0 && current.Spans.All(span => longerSpans.Any(span.IsCoveredBy)))
+            {
+                coveredIndexes.Add(current.Index);
+            }
+        }
+
+        return coveredIndexes.Count == 0
+            ? matches
+            : matches.Where((_, index) => !coveredIndexes.Contains(index)).ToList();
+    }
+
+    private static string GetPlainOption(string source, string sourceValue)
+    {
+        var option = sourceValue.Trim();
+        if (option.Length == 0)
+            return "";
+
+        return DictExpressionHelper.TryMatch(source, option, out _) ? "" : option;
+    }
+
+    private static List<TextSpan> FindSpans(string source, string option)
+    {
+        var spans = new List<TextSpan>();
+        var start = 0;
+        while (start < source.Length)
+        {
+            var index = source.IndexOf(option, start, StringComparison.OrdinalIgnoreCase);
+            if (index < 0)
+                break;
+
+            spans.Add(new TextSpan(index, index + option.Length));
+            start = index + option.Length;
+        }
+
+        return spans;
+    }
+
     private static bool IsNegated(string source, int matchIndex)
     {
         var searchStart = matchIndex == 0 ? 0 : matchIndex - 1;
@@ -197,6 +273,15 @@ public class DictService
     }
 
     private readonly record struct DictEntry(string SourceValue, string TargetValue);
+    private readonly record struct PlainMatch(int Index, string Option)
+    {
+        public List<TextSpan> Spans { get; init; } = [];
+    }
+
+    private readonly record struct TextSpan(int Start, int End)
+    {
+        public bool IsCoveredBy(TextSpan other) => other.Start <= Start && End <= other.End;
+    }
 }
 
 public readonly record struct DictTranslationResult(bool IsMatched, string Value);

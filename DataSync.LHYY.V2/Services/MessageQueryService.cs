@@ -210,6 +210,8 @@ public class MessageQueryService
         DateTime? startTime = null,
         DateTime? endTime = null,
         string? mrn = null,
+        string? inpatientNo = null,
+        string? visitNo = null,
         DateTime? eventStartTime = null,
         DateTime? eventEndTime = null)
     {
@@ -226,6 +228,8 @@ public class MessageQueryService
                 effectiveStartTime,
                 endTime,
                 mrn,
+                inpatientNo,
+                visitNo,
                 eventStartTime,
                 eventEndTime);
 
@@ -264,6 +268,8 @@ public class MessageQueryService
             effectiveStartTime,
             endTime,
             mrn,
+            inpatientNo,
+            visitNo,
             eventStartTime,
             eventEndTime);
 
@@ -363,6 +369,8 @@ public class MessageQueryService
         DateTime? startTime = null,
         DateTime? endTime = null,
         string? mrn = null,
+        string? inpatientNo = null,
+        string? visitNo = null,
         DateTime? eventStartTime = null,
         DateTime? eventEndTime = null)
     {
@@ -376,6 +384,8 @@ public class MessageQueryService
                 effectiveStartTime,
                 endTime,
                 mrn,
+                inpatientNo,
+                visitNo,
                 eventStartTime,
                 eventEndTime)
             .Where(m => m.Status == MessageStatus.Failed);
@@ -501,6 +511,8 @@ public class MessageQueryService
         DateTime? startTime = null,
         DateTime? endTime = null,
         string? mrn = null,
+        string? inpatientNo = null,
+        string? visitNo = null,
         DateTime? eventStartTime = null,
         DateTime? eventEndTime = null)
     {
@@ -518,6 +530,12 @@ public class MessageQueryService
 
         if (!string.IsNullOrWhiteSpace(mrn))
             query = query.Where(m => m.Mrn == mrn.Trim());
+
+        if (!string.IsNullOrWhiteSpace(inpatientNo))
+            query = query.Where(m => m.InpatientNo == inpatientNo.Trim());
+
+        if (!string.IsNullOrWhiteSpace(visitNo))
+            query = query.Where(m => m.VisitNo == visitNo.Trim());
 
         if (eventStartTime.HasValue)
             query = query.Where(m => m.ResolvedEventTime >= eventStartTime.Value);
@@ -535,6 +553,8 @@ public class MessageQueryService
         DateTime? startTime = null,
         DateTime? endTime = null,
         string? mrn = null,
+        string? inpatientNo = null,
+        string? visitNo = null,
         DateTime? eventStartTime = null,
         DateTime? eventEndTime = null)
     {
@@ -552,6 +572,12 @@ public class MessageQueryService
 
         if (!string.IsNullOrWhiteSpace(mrn))
             query = query.Where(m => m.Mrn == mrn.Trim());
+
+        if (!string.IsNullOrWhiteSpace(inpatientNo))
+            query = query.Where(m => m.InpatientNo == inpatientNo.Trim());
+
+        if (!string.IsNullOrWhiteSpace(visitNo))
+            query = query.Where(m => m.VisitNo == visitNo.Trim());
 
         if (eventStartTime.HasValue)
             query = query.Where(m => m.ResolvedEventTime >= eventStartTime.Value);

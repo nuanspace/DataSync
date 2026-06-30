@@ -150,6 +150,8 @@ public partial class InterfaceWizardPage
         public string DisplayName { get; set; } = "";
         public string? DataType { get; set; }
         public string? SemanticHint { get; set; }
+        public string? SelectInfo { get; set; }
+        public List<string> Options { get; set; } = [];
         public MappingTarget MappingTarget { get; set; }
         public Guid? CardId { get; set; }
         public string? CardName { get; set; }
@@ -1596,6 +1598,8 @@ public partial class InterfaceWizardPage
             DisplayName = question.Title ?? question.Id,
             DataType = question.DataType,
             SemanticHint = BuildQuestionSemanticHint(question),
+            SelectInfo = question.SelectInfo,
+            Options = question.Options,
             MappingTarget = mappingTarget,
             CardId = mappingTarget == MappingTarget.SubCard ? subCardContext?.CardId : null,
             CardName = mappingTarget == MappingTarget.SubCard ? subCardContext?.Name : null,

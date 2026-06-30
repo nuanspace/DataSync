@@ -569,6 +569,7 @@ public class GenericMessageProcessor
 
     internal static object? ConvertQuestionValue(form_question question, string? value, ILogger? logger = null)
     {
+        value = value?.Trim();
         if (string.IsNullOrEmpty(value))
             return null;
 
@@ -622,11 +623,11 @@ public class GenericMessageProcessor
                 if (!string.IsNullOrEmpty(question.date_format) &&
                     DateTime.TryParseExact(value, question.date_format, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dtExact))
                 {
-                    return dtExact;
+                    return NormalizeDateValue(dtExact, question.date_format);
                 }
 
                 if (DateTime.TryParse(value, out var dt))
-                    return dt;
+                    return NormalizeDateValue(dt, question.date_format);
 
                 logger?.LogWarning("Question {Id} 日期解析失败: '{Value}'", question.id, value);
                 return null;
@@ -634,5 +635,29 @@ public class GenericMessageProcessor
             default:
                 return value;
         }
+    }
+
+    private static DateTime NormalizeDateValue(DateTime value, string? dateFormat)
+    {
+        if (string.IsNullOrWhiteSpace(dateFormat))
+            return value;
+
+        var hasHour = dateFormat.Any(c => c is 'H' or 'h');
+        var hasMinute = dateFormat.Contains('m');
+        var hasSecond = dateFormat.Contains('s');
+        var hasFraction = dateFormat.Any(c => c is 'f' or 'F');
+
+        if (!hasHour)
+            return value.Date;
+
+        return new DateTime(
+            value.Year,
+            value.Month,
+            value.Day,
+            value.Hour,
+            hasMinute ? value.Minute : 0,
+            hasSecond ? value.Second : 0,
+            hasFraction ? value.Millisecond : 0,
+            value.Kind);
     }
 }

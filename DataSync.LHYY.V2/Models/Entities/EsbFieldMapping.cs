@@ -28,6 +28,14 @@ public class EsbFieldMapping
     [MaxLength(50)]
     public string? IntegrationProjectCode { get; set; }
 
+    [Column("sync_key")]
+    [MaxLength(64)]
+    public string? SyncKey { get; set; }
+
+    [Column("last_sync_hash")]
+    [MaxLength(64)]
+    public string? LastSyncHash { get; set; }
+
     [Column("mapping_target")]
     public MappingTarget MappingTarget { get; set; }
 

@@ -1664,6 +1664,16 @@ else
                                      Style="height:18px;font-size:10px;">SubCard</MudChip>
                         }
                     </div>
+                    @if (q.Options.Count > 0)
+                    {
+                        <div class="question-options">
+                            <span class="question-option-label">选项</span>
+                            @foreach (var option in q.Options)
+                            {
+                                <span class="question-option-chip">@option</span>
+                            }
+                        </div>
+                    }
                     @* 映射条目 *@
                     @if (subCardContext != null)
                     {

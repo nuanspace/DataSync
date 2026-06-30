@@ -1,0 +1,137 @@
+﻿.message-log-page {
+    display: grid;
+    gap: 10px;
+}
+
+.message-log-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.message-log-title {
+    font-weight: 700;
+    color: #102033;
+}
+
+.message-log-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.message-log-hot-alert {
+    font-weight: 600;
+}
+
+::deep .message-log-hot-alert .mud-alert-message {
+    font-weight: 600;
+}
+
+.message-log-filter-panel,
+.message-log-table-panel {
+    border: 1px solid rgba(15, 107, 125, 0.12);
+    border-radius: 8px;
+    background: #ffffff;
+    box-shadow: 0 10px 24px rgba(12, 44, 70, 0.05);
+}
+
+.message-log-filter-panel {
+    padding: 8px 10px;
+}
+
+.message-log-compact-filter {
+    display: grid;
+    gap: 8px;
+}
+
+.message-log-filter-row {
+    display: grid;
+    align-items: start;
+    gap: 8px;
+}
+
+.message-log-filter-row-basic {
+    grid-template-columns:
+        minmax(180px, 1.1fr)
+        minmax(140px, 0.8fr)
+        minmax(160px, 0.9fr)
+        minmax(220px, 1.2fr)
+        minmax(120px, 0.7fr);
+}
+
+.message-log-filter-row-time {
+    grid-template-columns: minmax(430px, 1fr) minmax(430px, 1fr) auto;
+}
+
+.message-log-time-compact {
+    display: grid;
+    grid-template-columns: minmax(112px, 1fr) 86px auto minmax(112px, 1fr) 86px;
+    align-items: start;
+    gap: 6px;
+}
+
+.message-log-time-separator {
+    color: #5a7085;
+    font-size: 13px;
+    line-height: 40px;
+    white-space: nowrap;
+}
+
+.message-log-search-button {
+    min-width: 84px;
+    margin-top: 4px;
+}
+
+.message-log-table-panel {
+    overflow: hidden;
+}
+
+::deep .message-log-table {
+    background: transparent;
+}
+
+::deep .message-log-table .mud-table-head {
+    background: #f3f7fa;
+}
+
+@media (max-width: 1500px) {
+    .message-log-filter-row-basic {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .message-log-filter-row-time {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1100px) {
+    .message-log-filter-row-basic {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 700px) {
+    .message-log-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .message-log-header-actions,
+    .message-log-search-button {
+        width: 100%;
+    }
+
+    .message-log-filter-row-basic,
+    .message-log-filter-row-time,
+    .message-log-time-compact {
+        grid-template-columns: 1fr;
+    }
+
+    .message-log-time-separator {
+        display: none;
+    }
+}

@@ -1,0 +1,324 @@
+@page "/config/sync"
+@inherits BasePage
+@using System.Text
+@inject ConfigSyncService ConfigSyncSvc
+
+<PageTitle>配置同步 - LHYY V2</PageTitle>
+
+<div class="config-sync-page">
+    <header class="config-sync-header">
+        <div>
+            <MudText Typo="Typo.h4" Class="config-sync-title">配置同步</MudText>
+            <MudText Typo="Typo.body2" Class="config-sync-subtitle">
+                当前项目：@CurrentIntegrationProjectName（@CurrentIntegrationProjectCode）
+            </MudText>
+        </div>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary">
+            导出全量，导入精确
+        </MudChip>
+    </header>
+
+    <section class="config-sync-section">
+        <div class="config-sync-section-head">
+            <div>
+                <MudText Typo="Typo.h6">导出配置包</MudText>
+                <MudText Typo="Typo.body2" Class="config-sync-muted">一次性导出当前项目配置，避免遗漏单条映射。</MudText>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Download"
+                       OnClick="ExportPackageAsync" Disabled="_busy">
+                @(_busy ? "处理中..." : "导出完整配置包")
+            </MudButton>
+        </div>
+        <div class="config-sync-options">
+            <MudCheckBox T="bool" @bind-Value="_exportOptions.IncludeInterfaces" Label="接口配置" Color="Color.Primary" Disabled="_busy" />
+            <MudCheckBox T="bool" @bind-Value="_exportOptions.IncludeMappings" Label="字段映射" Color="Color.Primary" Disabled="_busy" />
+            <MudCheckBox T="bool" @bind-Value="_exportOptions.IncludeDictionaries" Label="数据字典" Color="Color.Primary" Disabled="_busy" />
+            <MudCheckBox T="bool" @bind-Value="_exportOptions.IncludeProjectConfigs" Label="项目参数" Color="Color.Warning" Disabled="_busy" />
+        </div>
+    </section>
+
+    <section class="config-sync-section">
+        <div class="config-sync-section-head">
+            <div>
+                <MudText Typo="Typo.h6">导入配置包</MudText>
+                <MudText Typo="Typo.body2" Class="config-sync-muted">上传后先预览差异，新增和安全更新默认勾选，冲突默认跳过。</MudText>
+            </div>
+            <label class="config-sync-upload">
+                <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
+                <span>上传同步包</span>
+                <InputFile OnChange="OnPackageFileChanged" accept=".json" />
+            </label>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_uploadedFileName))
+        {
+            <MudText Typo="Typo.body2" Class="config-sync-file-name">已选择：@_uploadedFileName</MudText>
+        }
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(_message))
+    {
+        <MudAlert Severity="_messageSeverity" Variant="Variant.Outlined" Dense="true">@_message</MudAlert>
+    }
+
+    @if (_preview != null)
+    {
+        <section class="config-sync-section config-sync-preview">
+            <div class="config-sync-section-head">
+                <div>
+                    <MudText Typo="Typo.h6">差异预览</MudText>
+                    <MudText Typo="Typo.body2" Class="config-sync-muted">
+                        来源项目：@_preview.SourceProjectCode；导出时间：@_preview.ExportedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                    </MudText>
+                </div>
+                <div class="config-sync-actions">
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="SelectDefaultItems" Disabled="_busy">
+                        恢复默认勾选
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="ClearSelection" Disabled="_busy">
+                        清空勾选
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.DoneAll"
+                               OnClick="ApplySelectedAsync" Disabled="@(_busy || SelectedCount == 0)">
+                        导入已勾选 @SelectedCount 项
+                    </MudButton>
+                </div>
+            </div>
+
+            <div class="config-sync-summary">
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">新增 @CountByChange(ConfigSyncChangeType.New)</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">安全更新 @CountByChange(ConfigSyncChangeType.SafeUpdate)</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">冲突 @CountByChange(ConfigSyncChangeType.Conflict)</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">一致 @CountByChange(ConfigSyncChangeType.Identical)</MudChip>
+            </div>
+
+            <MudTable Items="@PreviewItems" Dense="true" Hover="true" Bordered="false" Striped="true" Elevation="0"
+                      Class="config-sync-table">
+                <HeaderContent>
+                    <MudTh>选择</MudTh>
+                    <MudTh>类型</MudTh>
+                    <MudTh>状态</MudTh>
+                    <MudTh>名称</MudTh>
+                    <MudTh>内容</MudTh>
+                    <MudTh>本地</MudTh>
+                    <MudTh>同步包</MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd DataLabel="选择">
+                        <MudCheckBox T="bool" Value="@context.IsSelected"
+                                     ValueChanged="@((bool value) => context.IsSelected = value)"
+                                     Color="Color.Primary" Disabled="@(!context.CanApply || _busy)" />
+                    </MudTd>
+                    <MudTd DataLabel="类型">@GetItemTypeText(context.ItemType)</MudTd>
+                    <MudTd DataLabel="状态">
+                        <MudChip T="string" Size="Size.Small" Color="@GetChangeColor(context.ChangeType)" Variant="Variant.Outlined">
+                            @GetChangeText(context.ChangeType)
+                        </MudChip>
+                    </MudTd>
+                    <MudTd DataLabel="名称" Class="config-sync-name-cell">@context.Name</MudTd>
+                    <MudTd DataLabel="内容">@context.Detail</MudTd>
+                    <MudTd DataLabel="本地" Class="config-sync-summary-cell">@context.LocalSummary</MudTd>
+                    <MudTd DataLabel="同步包" Class="config-sync-summary-cell">@context.PackageSummary</MudTd>
+                </RowTemplate>
+                <NoRecordsContent>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">同步包内没有可预览的配置项。</MudText>
+                </NoRecordsContent>
+            </MudTable>
+        </section>
+    }
+
+    @if (_lastApplyResult != null)
+    {
+        <section class="config-sync-section">
+            <MudText Typo="Typo.h6">导入结果</MudText>
+            <div class="config-sync-summary">
+                <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">新增 @_lastApplyResult.Inserted</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">更新 @_lastApplyResult.Updated</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">跳过 @_lastApplyResult.Skipped</MudChip>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private const long MaxPackageBytes = 30L * 1024 * 1024;
+
+    private readonly ConfigSyncExportOptions _exportOptions = new()
+    {
+        IncludeInterfaces = true,
+        IncludeMappings = true,
+        IncludeDictionaries = true,
+        IncludeProjectConfigs = false
+    };
+
+    private bool _busy;
+    private string? _uploadedFileName;
+    private string? _message;
+    private Severity _messageSeverity = Severity.Info;
+    private ConfigSyncPackage? _package;
+    private ConfigSyncPreviewResult? _preview;
+    private ConfigSyncApplyResult? _lastApplyResult;
+
+    private IReadOnlyList<ConfigSyncPreviewItem> PreviewItems => _preview?.Items ?? [];
+    private int SelectedCount => PreviewItems.Count(i => i.IsSelected);
+
+    private async Task ExportPackageAsync()
+    {
+        if (!_exportOptions.IncludeInterfaces
+            && !_exportOptions.IncludeMappings
+            && !_exportOptions.IncludeDictionaries
+            && !_exportOptions.IncludeProjectConfigs)
+        {
+            ShowMessage("请至少选择一种导出内容。", Severity.Warning);
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var package = await ConfigSyncSvc.ExportAsync(CurrentIntegrationProjectCode, _exportOptions, CancellationToken);
+            var json = ConfigSyncSvc.SerializePackage(package);
+            var fileName = $"配置同步包_{BuildSafeFilePart(CurrentIntegrationProjectCode)}_{DateTime.Now:yyyyMMddHHmmss}.json";
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.downloadFile", fileName, "\uFEFF" + json, "application/json;charset=utf-8");
+            ShowMessage($"已导出配置包：接口 {package.Interfaces.Count}，映射 {package.FieldMappings.Count}，字典 {package.DictEntries.Count}。", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"导出失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnPackageFileChanged(InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        _uploadedFileName = file.Name;
+        _lastApplyResult = null;
+        _preview = null;
+        _package = null;
+
+        _busy = true;
+        try
+        {
+            await using var stream = file.OpenReadStream(MaxPackageBytes, CancellationToken);
+            using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+            var json = await reader.ReadToEndAsync(CancellationToken);
+            _package = ConfigSyncSvc.DeserializePackage(json);
+            _preview = await ConfigSyncSvc.PreviewAsync(_package, CurrentIntegrationProjectCode, CancellationToken);
+            SelectDefaultItems();
+            ShowMessage($"已读取同步包，共 {_preview.Items.Count} 个配置项。", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"读取同步包失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ApplySelectedAsync()
+    {
+        if (_package == null || _preview == null)
+            return;
+
+        var selectedItems = PreviewItems.Where(i => i.IsSelected).ToList();
+        if (selectedItems.Count == 0)
+        {
+            ShowMessage("请先勾选要导入的配置项。", Severity.Warning);
+            return;
+        }
+
+        var conflictCount = selectedItems.Count(i => i.ChangeType == ConfigSyncChangeType.Conflict);
+        if (conflictCount > 0)
+        {
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "覆盖冲突确认",
+                $"已勾选 {conflictCount} 个冲突项。继续导入会用同步包内容覆盖医院本地配置，是否继续？",
+                yesText: "覆盖冲突项",
+                cancelText: "取消");
+            if (confirmed != true)
+                return;
+        }
+
+        _busy = true;
+        try
+        {
+            var selectedKeys = selectedItems.Select(i => i.ItemKey).ToList();
+            _lastApplyResult = await ConfigSyncSvc.ApplyAsync(_package, CurrentIntegrationProjectCode, selectedKeys, CancellationToken);
+            _preview = await ConfigSyncSvc.PreviewAsync(_package, CurrentIntegrationProjectCode, CancellationToken);
+            SelectDefaultItems();
+            ShowMessage($"导入完成：新增 {_lastApplyResult.Inserted}，更新 {_lastApplyResult.Updated}。", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"导入失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void SelectDefaultItems()
+    {
+        foreach (var item in PreviewItems)
+        {
+            item.IsSelected = item.ChangeType is ConfigSyncChangeType.New or ConfigSyncChangeType.SafeUpdate;
+        }
+    }
+
+    private void ClearSelection()
+    {
+        foreach (var item in PreviewItems)
+            item.IsSelected = false;
+    }
+
+    private int CountByChange(ConfigSyncChangeType changeType) =>
+        PreviewItems.Count(i => i.ChangeType == changeType);
+
+    private static string GetItemTypeText(ConfigSyncItemType itemType) => itemType switch
+    {
+        ConfigSyncItemType.Interface => "接口",
+        ConfigSyncItemType.FieldMapping => "映射",
+        ConfigSyncItemType.Dictionary => "字典",
+        ConfigSyncItemType.ProjectConfig => "项目参数",
+        _ => itemType.ToString()
+    };
+
+    private static string GetChangeText(ConfigSyncChangeType changeType) => changeType switch
+    {
+        ConfigSyncChangeType.New => "新增",
+        ConfigSyncChangeType.SafeUpdate => "安全更新",
+        ConfigSyncChangeType.Conflict => "冲突",
+        ConfigSyncChangeType.Identical => "一致",
+        _ => changeType.ToString()
+    };
+
+    private static Color GetChangeColor(ConfigSyncChangeType changeType) => changeType switch
+    {
+        ConfigSyncChangeType.New => Color.Success,
+        ConfigSyncChangeType.SafeUpdate => Color.Info,
+        ConfigSyncChangeType.Conflict => Color.Error,
+        _ => Color.Default
+    };
+
+    private void ShowMessage(string message, Severity severity)
+    {
+        _message = message;
+        _messageSeverity = severity;
+        inj_snackbar.Add(message, severity);
+    }
+
+    private static string BuildSafeFilePart(string? value)
+    {
+        var result = string.IsNullOrWhiteSpace(value) ? "DEFAULT" : value.Trim();
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+            result = result.Replace(invalidChar, '_');
+        return result;
+    }
+}

@@ -25,12 +25,64 @@
 
             <div class="dict-create-entry-header">
                 <MudText Typo="Typo.subtitle2">字典条目</MudText>
-                <MudButton Variant="Variant.Text" Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Add"
-                           OnClick="AddEntry">
-                    新增一行
-                </MudButton>
+                <div class="dict-create-entry-actions">
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Article"
+                               OnClick="@(() => _templateVisible = !_templateVisible)">
+                        吸烟情况模板
+                    </MudButton>
+                    <MudButton Variant="Variant.Text" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.Add"
+                               OnClick="AddEntry">
+                        新增一行
+                    </MudButton>
+                </div>
             </div>
+
+            @if (_templateVisible)
+            {
+                <div class="dict-template-panel">
+                    <MudAlert Severity="Severity.Info" Dense="true" Class="mb-3">
+                        字段详细设置中配置：字典代码 smoking_status；字典匹配选择“按排序优先命中”。按下面顺序录入字典条目。
+                    </MudAlert>
+
+                    <div class="dict-template-summary">
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">1. 戒烟&lt;=3月</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">2. 戒烟&gt;=3月</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">3. 从不吸烟</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">4. 偶尔吸烟</MudChip>
+                        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">5. 仍在吸烟</MudChip>
+                    </div>
+
+                    @foreach (var group in SmokingTemplateGroups)
+                    {
+                        <div class="dict-template-group">
+                            <MudText Typo="Typo.subtitle1" Class="dict-template-target">@group.TargetValue</MudText>
+                            <MudSimpleTable Dense="true" Hover="true" Class="dict-template-table">
+                                <thead>
+                                    <tr>
+                                        <th>命中条件</th>
+                                        <th>大概覆盖范围</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var condition in group.Conditions)
+                                    {
+                                        <tr>
+                                            <td><code>@condition.Text</code></td>
+                                            <td>@condition.Scope</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        </div>
+                    }
+
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                        只写“已戒烟”或“戒烟”但没有时间时，无法判断“戒烟&lt;=3月”还是“戒烟&gt;=3月”。建议先不自动归类，除非业务明确默认规则。
+                    </MudAlert>
+                </div>
+            }
 
             <div class="dict-create-table-wrap">
                 <MudSimpleTable Hover="true" Class="dict-create-table">
@@ -149,10 +201,74 @@
     private string _createScope = ProjectScopeKey;
     private List<DictEntryItem> _entries = [];
     private bool _editExisting;
+    private bool _templateVisible;
 
     private string DialogHeading => _editExisting ? "编辑字典" : "新建字典";
 
     private string SaveButtonText => _editExisting ? "保存修改并选中" : "保存并选中";
+
+    private static readonly List<DictTemplateGroup> SmokingTemplateGroups =
+    [
+        new("戒烟<=3月",
+        [
+            new(@"regex:戒烟.{0,8}(?:[1-9]|[1-8]\d|90)\s*(?:天|日)", "戒烟 1 到 90 天，例如“戒烟30天”“已戒烟 60 日”。"),
+            new(@"regex:戒烟.{0,8}(?:1|2|3|一|二|两|三)\s*个?月", "戒烟 1 到 3 个月，例如“戒烟2个月”“已戒烟三月”。"),
+            new("戒烟不足3月", "明确写“戒烟不足3月”。"),
+            new("戒烟不到3月", "明确写“戒烟不到3月”。"),
+            new("戒烟未满3月", "明确写“戒烟未满3月”。"),
+            new("戒烟小于3月", "明确写“戒烟小于3月”。"),
+            new("戒烟小于等于3月", "明确写“戒烟小于等于3月”。")
+        ]),
+        new("戒烟>=3月",
+        [
+            new(@"regex:戒烟.{0,8}(?:[4-9]|1[0-2]|四|五|六|七|八|九|十|十一|十二)\s*个?月", "戒烟 4 到 12 个月，例如“戒烟4个月”“戒烟十月”。"),
+            new(@"regex:戒烟.{0,8}(?:半年|[1-9]\d*\s*年|[一二三四五六七八九十]+年|多年)", "戒烟半年、一年、多年等，例如“戒烟半年”“已戒烟2年”。"),
+            new("戒烟超过3月", "明确写“戒烟超过3月”。"),
+            new("戒烟大于3月", "明确写“戒烟大于3月”。"),
+            new("戒烟大于等于3月", "明确写“戒烟大于等于3月”。"),
+            new("戒烟≥3月", "明确写“戒烟≥3月”。"),
+            new("戒烟>=3月", "明确写“戒烟>=3月”。"),
+            new("长期戒烟", "明确写“长期戒烟”。")
+        ]),
+        new("从不吸烟",
+        [
+            new("从不吸烟", "明确写“从不吸烟”。"),
+            new("否认吸烟", "否认当前或既往吸烟。"),
+            new("否认烟草", "否认烟草接触。"),
+            new("无吸烟史", "明确写无吸烟史。"),
+            new("无烟史", "明确写无烟史。"),
+            new("未吸烟", "明确写未吸烟。"),
+            new("平素不吸烟", "平素不吸烟。"),
+            new("不吸烟", "普通“不吸烟”描述。若院内常用“目前不吸烟”表示已戒烟，建议不要配置这一条。")
+        ]),
+        new("偶尔吸烟",
+        [
+            new("偶尔吸烟", "明确写偶尔吸烟。"),
+            new("偶吸", "简写“偶吸”。"),
+            new("偶有吸烟", "明确写偶有吸烟。"),
+            new("间断吸烟", "间断吸烟。"),
+            new("少量吸烟", "少量吸烟。"),
+            new("社交性吸烟", "社交性吸烟。")
+        ]),
+        new("仍在吸烟",
+        [
+            new("仍在吸烟", "明确写仍在吸烟。"),
+            new("现吸烟", "明确写现吸烟。"),
+            new("目前吸烟", "明确写目前吸烟。"),
+            new("仍吸烟", "明确写仍吸烟。"),
+            new("继续吸烟", "明确写继续吸烟。"),
+            new("长期吸烟", "长期吸烟，且未提戒烟。"),
+            new(@"regex:^(?!.*(?:戒烟|已戒)).*(?:每日|每天|日均).{0,8}\d+\s*支", "未出现戒烟/已戒时，描述每日多少支，例如“每日10支”。"),
+            new(@"regex:^(?!.*(?:戒烟|已戒)).*\d+\s*支\s*/?\s*(?:日|天|每天|每日)", "未出现戒烟/已戒时，描述“10支/日”“10支每天”。"),
+            new(@"regex:^(?!.*(?:戒烟|已戒)).*(?:吸烟|抽烟).{0,12}\d+\s*(?:年|月|支|包)", "未出现戒烟/已戒时，描述吸烟年限、月数、支数、包数。"),
+            new("吸烟 && 包", "同一文本同时包含“吸烟”和“包”。"),
+            new("抽烟 && 支", "同一文本同时包含“抽烟”和“支”。")
+        ])
+    ];
+
+    private sealed record DictTemplateGroup(string TargetValue, List<DictTemplateCondition> Conditions);
+
+    private sealed record DictTemplateCondition(string Text, string Scope);
 
     private sealed class DictEntryItem
     {

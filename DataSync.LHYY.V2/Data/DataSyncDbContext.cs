@@ -75,6 +75,7 @@ public class DataSyncDbContext : DbContext
         {
             e.HasIndex(m => m.TranCode);
             e.HasIndex(m => m.IntegrationProjectCode);
+            e.HasIndex(m => m.SyncKey);
             e.HasIndex(m => new { m.TranCode, m.MappingTarget });
         });
 

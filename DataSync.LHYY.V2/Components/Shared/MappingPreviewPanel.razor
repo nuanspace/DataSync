@@ -1,7 +1,5 @@
 ﻿@using Newtonsoft.Json.Linq
 
-@inject MappingPreviewService PreviewService
-
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" />
@@ -120,7 +118,7 @@
         try
         {
             var body = JToken.Parse(JsonText);
-            _results = await PreviewService.PreviewAllAsync(body, Mappings, MainRecordArrayPath);
+            _results = await inj_mappingPreviewService.PreviewAllAsync(body, Mappings, MainRecordArrayPath);
         }
         catch (Exception ex)
         {

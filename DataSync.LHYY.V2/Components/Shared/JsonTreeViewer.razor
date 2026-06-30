@@ -4,6 +4,13 @@
     @if (ShowSearch && string.IsNullOrWhiteSpace(_errorMessage) && _rootNodes.Count > 0)
     {
         <div class="json-tree-search-shell">
+            <div class="json-tree-summary">
+                <span>@GetTreeSummaryText()</span>
+                @if (HasActiveSearch)
+                {
+                    <span>匹配 @GetSearchMatchCount() 个节点</span>
+                }
+            </div>
             <MudTextField T="string"
                           Value="@_searchText"
                           ValueChanged="OnSearchTextChanged"
@@ -64,6 +71,10 @@
     [Parameter] public bool ShowSearch { get; set; }
 
     [Parameter] public string SearchPlaceholder { get; set; } = "按节点名、路径或值检索";
+
+    [Parameter] public bool ShowPathInRow { get; set; }
+
+    [Parameter] public bool AllowValueWrap { get; set; }
 
     private List<JsonTreeNode> _rootNodes = [];
     private string? _errorMessage;
@@ -284,6 +295,42 @@
         !string.IsNullOrWhiteSpace(source)
         && source.Contains(keyword, StringComparison.OrdinalIgnoreCase);
 
+    private string GetTreeSummaryText()
+    {
+        var total = CountNodes(_rootNodes);
+        return total == 0 ? "无节点" : $"{total} 个节点";
+    }
+
+    private int GetSearchMatchCount() => CountSearchMatches(_rootNodes);
+
+    private int CountSearchMatches(IEnumerable<JsonTreeNode> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            if (NodeMatchesSearch(node))
+            {
+                count++;
+            }
+
+            count += CountSearchMatches(node.Children);
+        }
+
+        return count;
+    }
+
+    private static int CountNodes(IEnumerable<JsonTreeNode> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            count++;
+            count += CountNodes(node.Children);
+        }
+
+        return count;
+    }
+
     private List<JsonTreeNode> GetNodesToRender() =>
         HasActiveSearch
             ? _rootNodes.Where(IsNodeVisible).ToList()
@@ -361,8 +408,8 @@
                     }
                     else
                     {
-                        var rawValue = firstItem.ToString();
-                        node.Value = $"[{arr.Count} 项] 示例: {(rawValue.Length > 40 ? rawValue[..40] + "..." : rawValue)}";
+                        var rawValue = GetScalarValueText(firstItem);
+                        node.Value = $"[{arr.Count} 项] 示例: {rawValue}";
                     }
                 }
             }
@@ -450,8 +497,8 @@
         }
         else
         {
-            var rawValue = value.ToString();
-            node.Value = rawValue.Length > 80 ? rawValue[..80] + "..." : rawValue;
+            var rawValue = GetScalarValueText(value);
+            node.Value = rawValue;
         }
 
         return node;
@@ -495,9 +542,9 @@
         var isBranchNode = node.Children.Count > 0;
         var canExpand = childrenToRender.Count > 0;
         var isExpanded = canExpand && IsNodeExpanded(node);
-        var rowClass = node.IsSelected ? "json-tree-node-row is-selected" : "json-tree-node-row";
+        var rowClass = BuildNodeRowClass(node);
         <div class="json-tree-node" role="treeitem" aria-expanded="@(canExpand ? isExpanded : (bool?)null)" aria-selected="@node.IsSelected">
-            <div id="@node.DomId" class="@rowClass" @onclick="@(async () => await OnNodeClicked(node))">
+            <div id="@node.DomId" class="@rowClass" title="@node.Path" @onclick="@(async () => await OnNodeClicked(node))">
                 @if (canExpand)
                 {
                     <button type="button" class="json-tree-toggle" title="@(isExpanded ? "收起" : "展开")" @onclick="() => ToggleNode(node)" @onclick:stopPropagation="true">
@@ -508,20 +555,28 @@
                 {
                     <span class="json-tree-toggle-placeholder"></span>
                 }
-                <MudIcon Icon="@GetNodeIcon(node.NodeType)" Size="Size.Small" Class="json-tree-node-icon" />
-                <span class="json-tree-node-key">@node.Key</span>
-                @if (isBranchNode)
-                {
-                    @if (!string.IsNullOrEmpty(node.Value))
+                <div class="json-tree-node-main">
+                    <div class="json-tree-node-line">
+                        <MudIcon Icon="@GetNodeIcon(node.NodeType)" Size="Size.Small" Class="json-tree-node-icon" />
+                        <span class="json-tree-node-key">@node.Key</span>
+                        <span class="@GetNodeTypeClass(node.NodeType)">@GetNodeTypeText(node.NodeType)</span>
+                        @if (isBranchNode)
+                        {
+                            @if (!string.IsNullOrEmpty(node.Value))
+                            {
+                                <span class="json-tree-node-meta">@node.Value</span>
+                            }
+                        }
+                        else if (!string.IsNullOrEmpty(node.Value))
+                        {
+                            <span class="json-tree-node-value">@FormatNodeValue(node)</span>
+                        }
+                    </div>
+                    @if (ShowPathInRow)
                     {
-                        <span class="json-tree-node-meta">@node.Value</span>
+                        <div class="json-tree-node-path">@node.Path</div>
                     }
-                }
-                else if (!string.IsNullOrEmpty(node.Value))
-                {
-                    <span class="json-tree-node-value">@node.Value</span>
-                }
-                <span class="json-tree-node-type">@node.NodeType</span>
+                </div>
             </div>
             @if (canExpand && isExpanded)
             {
@@ -541,6 +596,54 @@
         {
             await OnPathSelected.InvokeAsync(node.Path);
         }
+    }
+
+    private string BuildNodeRowClass(JsonTreeNode node)
+    {
+        var classes = new List<string> { "json-tree-node-row", $"type-{node.NodeType.ToLowerInvariant()}" };
+        if (node.IsSelected)
+        {
+            classes.Add("is-selected");
+        }
+
+        if (AllowValueWrap)
+        {
+            classes.Add("allow-value-wrap");
+        }
+
+        return string.Join(" ", classes);
+    }
+
+    private static string GetNodeTypeClass(string nodeType) =>
+        $"json-tree-node-type type-{nodeType.ToLowerInvariant()}";
+
+    private static string GetNodeTypeText(string nodeType) => nodeType switch
+    {
+        "Object" => "对象",
+        "Array" => "数组",
+        "String" => "文本",
+        "Number" => "数值",
+        "Boolean" => "布尔",
+        "Null" => "空值",
+        _ => nodeType
+    };
+
+    private static string FormatNodeValue(JsonTreeNode node) =>
+        node.NodeType == "String" ? $"\"{node.Value}\"" : node.Value ?? "";
+
+    private static string GetScalarValueText(JToken value)
+    {
+        if (value.Type == JTokenType.Null)
+        {
+            return "null";
+        }
+
+        if (value.Type == JTokenType.String)
+        {
+            return value.Value<string>() ?? "";
+        }
+
+        return value.ToString(Newtonsoft.Json.Formatting.None);
     }
 
     private class JsonTreeNode

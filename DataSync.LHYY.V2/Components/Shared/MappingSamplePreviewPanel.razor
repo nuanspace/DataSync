@@ -1,0 +1,313 @@
+@inherits BasePage
+
+<div class="mapping-sample-preview">
+    <div class="mapping-sample-preview-title">
+        <div class="mapping-sample-preview-title-main">
+            <MudIcon Icon="@Icons.Material.Filled.PlayCircleOutline" Size="Size.Small" Color="Color.Primary" />
+            <MudText Typo="Typo.subtitle2">映射试算</MudText>
+        </div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">只预览当前配置，不保存数据</MudText>
+    </div>
+
+    <MudGrid Spacing="2">
+        <MudItem xs="12">
+            <MudTextField T="string" Value="@_sampleValue" ValueChanged="OnSampleValueChanged"
+                          Label="样本值" Lines="2" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          HelperText="填入映射源路径取到的原始值，试算会继续执行过滤、字典、默认值和值表达式。" />
+        </MudItem>
+
+        @if (FilterSampleItems.Count > 0)
+        {
+            <MudItem xs="12">
+                <div class="mapping-sample-preview-filter-title">
+                    <MudIcon Icon="@Icons.Material.Filled.FilterAlt" Size="Size.Small" />
+                    <MudText Typo="Typo.body2">过滤条件样本值</MudText>
+                </div>
+            </MudItem>
+
+            @foreach (var item in FilterSampleItems)
+            {
+                <MudItem xs="12" sm="6">
+                    @if (item.UseMappingSample)
+                    {
+                        <MudTextField T="string" Value="@_sampleValue" Label="@item.Path"
+                                      ReadOnly="true" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      HelperText="与映射源路径一致，使用上方样本值。" />
+                    }
+                    else
+                    {
+                        var path = item.Path;
+                        <MudTextField T="string" Value="@GetFilterValue(path)"
+                                      ValueChanged="@(value => SetFilterValue(path, value))"
+                                      Label="@path" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                      HelperText="@item.RuleText" />
+                    }
+                </MudItem>
+            }
+        }
+
+        <MudItem xs="12">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                       Disabled="@(_loading || Mapping == null)"
+                       OnClick="ExecutePreviewAsync">
+                执行试算
+            </MudButton>
+        </MudItem>
+    </MudGrid>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mt-2" />
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_errorMessage))
+    {
+        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_errorMessage</MudAlert>
+    }
+
+    @if (_result != null)
+    {
+        <MudAlert Severity="GetResultSeverity()" Dense="true" Class="mt-2">
+            @GetResultSummary()
+        </MudAlert>
+
+        @foreach (var warning in _result.Warnings)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@warning</MudAlert>
+        }
+
+        <div class="mapping-sample-preview-final">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">最终值</MudText>
+            <div class="mapping-sample-preview-value">@FormatResultValue(_result.FinalValue)</div>
+        </div>
+
+        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Class="mapping-sample-preview-table">
+            <thead>
+                <tr>
+                    <th>步骤</th>
+                    <th>状态</th>
+                    <th>输入</th>
+                    <th>输出</th>
+                    <th>说明</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var step in _result.Steps)
+                {
+                    <tr>
+                        <td>@step.Name</td>
+                        <td>
+                            <MudChip T="string" Size="Size.Small" Color="GetStepColor(step.Status)">
+                                @step.Status
+                            </MudChip>
+                        </td>
+                        <td>@FormatStepValue(step.InputValue)</td>
+                        <td>@FormatStepValue(step.OutputValue)</td>
+                        <td>@step.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</div>
+
+@code {
+    [Parameter] public EsbFieldMapping? Mapping { get; set; }
+    [Parameter] public List<EsbFilterRule> FilterRules { get; set; } = [];
+
+    private readonly Dictionary<string, string?> _filterValues = new(StringComparer.Ordinal);
+    private string? _sampleValue;
+    private MappingSamplePreviewResult? _result;
+    private string? _errorMessage;
+    private bool _loading;
+    private int _lastInputHash;
+
+    private List<FilterSampleItem> FilterSampleItems => BuildFilterSampleItems();
+
+    protected override void OnParametersSet()
+    {
+        var hash = ComputeInputHash();
+        if (_lastInputHash != 0 && _lastInputHash != hash)
+        {
+            _result = null;
+            _errorMessage = null;
+        }
+
+        _lastInputHash = hash;
+    }
+
+    private Task OnSampleValueChanged(string? value)
+    {
+        _sampleValue = value;
+        _result = null;
+        return Task.CompletedTask;
+    }
+
+    private string? GetFilterValue(string path) =>
+        _filterValues.TryGetValue(path, out var value) ? value : null;
+
+    private Task SetFilterValue(string path, string? value)
+    {
+        _filterValues[path] = value;
+        _result = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task ExecutePreviewAsync()
+    {
+        if (Mapping == null)
+        {
+            return;
+        }
+
+        _loading = true;
+        _errorMessage = null;
+        try
+        {
+            var filterValues = _filterValues.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+            _result = await inj_mappingPreviewService.PreviewSampleAsync(Mapping, FilterRules, _sampleValue, filterValues);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"试算失败：{ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private List<FilterSampleItem> BuildFilterSampleItems()
+    {
+        if (Mapping == null)
+        {
+            return [];
+        }
+
+        var mappingPath = Mapping.SourcePath?.Trim() ?? "";
+        return FilterRules
+            .Where(r => r.IsEnabled && !string.IsNullOrWhiteSpace(r.SourcePath))
+            .GroupBy(r => r.SourcePath.Trim(), StringComparer.Ordinal)
+            .OrderBy(g => g.Key)
+            .Select(g => new FilterSampleItem(
+                g.Key,
+                string.Equals(g.Key, mappingPath, StringComparison.Ordinal),
+                string.Join("；", g.OrderBy(r => r.RuleGroup).ThenBy(r => r.SortOrder).Select(BuildRuleText))))
+            .ToList();
+    }
+
+    private int ComputeInputHash()
+    {
+        var hash = new HashCode();
+        if (Mapping != null)
+        {
+            hash.Add(Mapping.SourcePath);
+            hash.Add(Mapping.DictCode);
+            hash.Add(Mapping.DictMatchMode);
+            hash.Add(Mapping.DefaultValue);
+            hash.Add(Mapping.ValueExpression);
+        }
+
+        foreach (var rule in FilterRules)
+        {
+            hash.Add(rule.SourcePath);
+            hash.Add(rule.Operator);
+            hash.Add(rule.CompareValue);
+            hash.Add(rule.RuleGroup);
+            hash.Add(rule.SortOrder);
+            hash.Add(rule.IsEnabled);
+        }
+
+        return hash.ToHashCode();
+    }
+
+    private string GetResultSummary()
+    {
+        if (_result == null)
+        {
+            return "";
+        }
+
+        if (!_result.PassedFilter)
+        {
+            return "过滤条件未通过，正式执行时不会写入该映射。";
+        }
+
+        return _result.IsMissing
+            ? "试算完成，最终值为空。"
+            : "试算完成，最终值如下。";
+    }
+
+    private Severity GetResultSeverity()
+    {
+        if (_result == null)
+        {
+            return Severity.Info;
+        }
+
+        return _result.PassedFilter && !_result.IsMissing
+            ? Severity.Success
+            : Severity.Warning;
+    }
+
+    private static string FormatResultValue(string? value)
+    {
+        if (value == null)
+        {
+            return "（null）";
+        }
+
+        return value.Length == 0 ? "（空字符串）" : value;
+    }
+
+    private static string FormatStepValue(string? value)
+    {
+        if (value == null)
+        {
+            return "-";
+        }
+
+        return value.Length == 0 ? "（空字符串）" : value;
+    }
+
+    private static Color GetStepColor(string status) => status switch
+    {
+        "通过" or "命中" or "已应用" or "已处理" or "完成" => Color.Success,
+        "未通过" or "未命中" or "为空" or "结果为空" => Color.Warning,
+        "跳过" => Color.Default,
+        _ => Color.Info
+    };
+
+    private static string BuildRuleText(EsbFilterRule rule)
+    {
+        var compareValue = IsCompareValueDisabled(rule.Operator) ? "" : $" {rule.CompareValue}";
+        return $"{GetOperatorText(rule.Operator)}{compareValue}";
+    }
+
+    private static string GetOperatorText(string? op) => op?.ToLowerInvariant() switch
+    {
+        "eq" => "等于",
+        "neq" => "不等于",
+        "contains" => "包含",
+        "not_contains" => "不包含",
+        "starts_with" => "开头为",
+        "ends_with" => "结尾为",
+        "in" => "在列表中",
+        "not_in" => "不在列表中",
+        "gt" => "大于",
+        "lt" => "小于",
+        "gte" => "大于等于",
+        "lte" => "小于等于",
+        "is_empty" => "为空",
+        "is_not_empty" => "不为空",
+        "regex" => "正则匹配",
+        _ => op ?? ""
+    };
+
+    private static bool IsCompareValueDisabled(string? op) =>
+        string.Equals(op, "is_empty", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(op, "is_not_empty", StringComparison.OrdinalIgnoreCase);
+
+    private sealed record FilterSampleItem(string Path, bool UseMappingSample, string RuleText);
+}

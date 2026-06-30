@@ -3,16 +3,13 @@
 
 <PageTitle>消息详情 - LHYY V2</PageTitle>
 
-<MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
-           OnClick="@(() => inj_navigationManager.NavigateTo(GetBackToListUrl()))">
-    返回列表
-</MudButton>
-
 @if (_message == null)
 {
     @if (_loading)
     {
-        <MudProgressCircular Indeterminate="true" Class="mt-4" />
+        <div class="message-detail-loading">
+            <MudProgressCircular Indeterminate="true" />
+        </div>
     }
     else
     {
@@ -24,248 +21,409 @@ else
     var bodyJson = FormatJson(_message.BodyJson);
     var rawJson = FormatJson(_message.RawJson);
 
-    <MudText Typo="Typo.h5" Class="mt-2 mb-4">消息详情 #@_message.Id</MudText>
-
-    @* 基本信息卡片 *@
-    <MudCard Class="mb-4">
-        <MudCardContent>
-            <MudGrid>
-                <MudItem xs="12" sm="4">
-                    <MudText Typo="Typo.caption">事件代码</MudText>
-                    <MudText>@_message.TranCode - @_message.TranName</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="4">
-                    <MudText Typo="Typo.caption">MessageId</MudText>
-                    <MudText Class="message-detail-break-all">@_message.MessageId</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="4">
-                    <MudText Typo="Typo.caption">状态</MudText>
-                    <MudText>
-                        @switch (_message.Status)
-                        {
-                            case MessageStatus.Pending:
-                                <MudChip T="string" Color="Color.Warning">待处理</MudChip>
-                                break;
-                            case MessageStatus.Processing:
-                                <MudChip T="string" Color="Color.Info">处理中</MudChip>
-                                break;
-                            case MessageStatus.Success:
-                                <MudChip T="string" Color="Color.Success">成功</MudChip>
-                                break;
-                            case MessageStatus.Failed:
-                                <MudChip T="string" Color="Color.Error">失败</MudChip>
-                                break;
-                            case MessageStatus.Filtered:
-                                <MudChip T="string" Color="Color.Secondary">已过滤</MudChip>
-                                break;
-                            case MessageStatus.Unmatched:
-                                <MudChip T="string" Color="Color.Default">未匹配</MudChip>
-                                break;
-                            case MessageStatus.PartialSuccess:
-                                <MudChip T="string" Color="Color.Info">部分成功</MudChip>
-                                break;
-                        }
-                    </MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">来源系统</MudText>
-                    <MudText>@(_message.AppId ?? "-")</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">来源机构</MudText>
-                    <MudText>@(_message.OrgId ?? "-")</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">重试次数</MudText>
-                    <MudText>@_message.RetryCount</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">接收时间</MudText>
-                    <MudText>@_message.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">病案号</MudText>
-                    <MudText>@(string.IsNullOrWhiteSpace(_message.Mrn) ? "-" : _message.Mrn)</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">就诊号/住院号</MudText>
-                    <MudText>@(string.IsNullOrWhiteSpace(_message.InpatientNo) ? "-" : _message.InpatientNo)</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">住院次数</MudText>
-                    <MudText>@(string.IsNullOrWhiteSpace(_message.VisitNo) ? "-" : _message.VisitNo)</MudText>
-                </MudItem>
-                <MudItem xs="12" sm="3">
-                    <MudText Typo="Typo.caption">事件开始时间</MudText>
-                    <MudText>@(_message.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</MudText>
-                </MudItem>
-            </MudGrid>
-
-            @if (_message.PatientId.HasValue)
-            {
-                <MudGrid Class="mt-2">
-                    <MudItem xs="12" sm="6">
-                        <MudText Typo="Typo.caption">患者 ID</MudText>
-                        <MudText>@_message.PatientId</MudText>
-                    </MudItem>
-                    <MudItem xs="12" sm="6">
-                        <MudText Typo="Typo.caption">事件 ID</MudText>
-                        <MudText>@(_message.EventId?.ToString() ?? "-")</MudText>
-                    </MudItem>
-                </MudGrid>
-            }
-
-            @if (!string.IsNullOrEmpty(_message.ErrorMessage))
-            {
-                <MudAlert Severity="Severity.Error" Class="mt-4">@_message.ErrorMessage</MudAlert>
-            }
-        </MudCardContent>
-        <MudCardActions>
-            <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Tune"
-                       OnClick="UseMessageForInterfaceConfig">
-                用于接口配置
+    <div class="message-detail-page">
+        <div class="message-detail-commandbar">
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack"
+                       OnClick="@(() => inj_navigationManager.NavigateTo(GetBackToListUrl()))">
+                返回列表
             </MudButton>
-            @if (_message.Status == MessageStatus.Failed)
-            {
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Refresh"
-                            OnClick="RetryMessage" Disabled="_retrying">
-                    重试
-                </MudButton>
-            }
-            @if (CanProcessNow)
-            {
-                <MudButton Variant="Variant.Filled" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.PlayArrow"
-                           OnClick="ProcessMessageNow" Disabled="_processingNow">
-                    直接处理
-                </MudButton>
-            }
-        </MudCardActions>
-    </MudCard>
 
-    @* Body JSON *@
-    <MudExpansionPanels Class="mb-4">
-        <MudExpansionPanel Text="Body JSON">
-            <div class="message-detail-json-actions">
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
-                           OnClick='@(() => OpenJsonDialog("Body JSON", bodyJson))'>
-                    树形查看
+            <div class="message-detail-actions">
+                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Tune"
+                           OnClick="UseMessageForInterfaceConfig">
+                    用于接口配置
                 </MudButton>
-            </div>
-            <MudTextField T="string" Value="@bodyJson" Lines="15"
-                          ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
-        </MudExpansionPanel>
-        <MudExpansionPanel Text="原始 JSON">
-            <div class="message-detail-json-actions">
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
-                           OnClick='@(() => OpenJsonDialog("原始 JSON", rawJson))'>
-                    树形查看
+                <MudButton Variant="Variant.Filled" Color="Color.Info" Size="Size.Small" StartIcon="@Icons.Material.Filled.FactCheck"
+                           OnClick="PreviewMappingEffect" Disabled="_mappingPreviewLoading">
+                    预览映射效果
                 </MudButton>
+                @if (_message.Status == MessageStatus.Failed)
+                {
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small" StartIcon="@Icons.Material.Filled.Refresh"
+                               OnClick="RetryMessage" Disabled="_retrying">
+                        重试
+                    </MudButton>
+                }
+                @if (CanProcessNow)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary" Size="Size.Small" StartIcon="@Icons.Material.Filled.PlayArrow"
+                               OnClick="ProcessMessageNow" Disabled="_processingNow">
+                        直接处理
+                    </MudButton>
+                }
             </div>
-            <MudTextField T="string" Value="@rawJson" Lines="15"
-                          ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
-        </MudExpansionPanel>
-    </MudExpansionPanels>
+        </div>
+
+        <section class="message-detail-identity">
+            <div class="message-detail-title-block">
+                <div class="message-detail-eyebrow">@FormatEmpty(_message.TranCode)</div>
+                <MudText Typo="Typo.h4" Class="message-detail-title">消息 #@_message.Id</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Class="message-detail-subtitle">
+                    @FormatEmpty(_message.TranName) · @_message.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                </MudText>
+            </div>
+            <div class="message-detail-status-block">
+                <MudChip T="string" Size="Size.Medium" Color="@GetMessageStatusColor(_message.Status)">
+                    @GetMessageStatusText(_message.Status)
+                </MudChip>
+                <span class="message-detail-retry">重试 @_message.RetryCount 次</span>
+            </div>
+        </section>
+
+        <section class="message-detail-facts">
+            <div class="message-detail-fact">
+                <span>病案号</span>
+                <strong>@FormatEmpty(_message.Mrn)</strong>
+            </div>
+            <div class="message-detail-fact">
+                <span>就诊号/住院号</span>
+                <strong>@FormatEmpty(_message.InpatientNo)</strong>
+            </div>
+            <div class="message-detail-fact">
+                <span>住院次数</span>
+                <strong>@FormatEmpty(_message.VisitNo)</strong>
+            </div>
+            <div class="message-detail-fact">
+                <span>事件开始时间</span>
+                <strong>@(_message.ResolvedEventTime?.ToString("yyyy-MM-dd HH:mm:ss") ?? "-")</strong>
+            </div>
+        </section>
+
+        @if (!string.IsNullOrEmpty(_message.ErrorMessage))
+        {
+            <MudAlert Severity="Severity.Error" Class="message-detail-alert">@_message.ErrorMessage</MudAlert>
+        }
+
+        <div class="@GetWorkspaceClass()">
+            <aside class="message-detail-inspector">
+                <div class="message-detail-context-header">
+                    @if (!_contextPanelCollapsed)
+                    {
+                        <div class="message-detail-context-title">
+                            <MudIcon Icon="@Icons.Material.Filled.ViewSidebar" Size="Size.Small" />
+                            <span>消息上下文</span>
+                        </div>
+                    }
+                    <MudIconButton Icon="@(_contextPanelCollapsed ? Icons.Material.Filled.ChevronRight : Icons.Material.Filled.ChevronLeft)"
+                                   Size="Size.Small"
+                                   Color="Color.Primary"
+                                   title="@(_contextPanelCollapsed ? "展开左侧信息" : "收起左侧信息")"
+                                   OnClick="ToggleContextPanel" />
+                </div>
+
+                @if (!_contextPanelCollapsed)
+                {
+                    <div class="message-detail-context-sections">
+                        <section class="message-detail-context-section">
+                            <div class="message-detail-context-section-title">
+                                <MudIcon Icon="@Icons.Material.Filled.Hub" Size="Size.Small" />
+                                <span>接口与来源</span>
+                            </div>
+                            <dl class="message-detail-meta-list">
+                                <dt>事件代码</dt>
+                                <dd>@FormatEmpty(_message.TranCode)</dd>
+                                <dt>事件名称</dt>
+                                <dd>@FormatEmpty(_message.TranName)</dd>
+                                <dt>来源系统</dt>
+                                <dd>@FormatEmpty(_message.AppId)</dd>
+                                <dt>来源机构</dt>
+                                <dd>@FormatEmpty(_message.OrgId)</dd>
+                            </dl>
+                        </section>
+
+                        <section class="message-detail-context-section">
+                            <div class="message-detail-context-section-title">
+                                <MudIcon Icon="@Icons.Material.Filled.Badge" Size="Size.Small" />
+                                <span>业务标识</span>
+                            </div>
+                            <dl class="message-detail-meta-list">
+                                <dt>MessageId</dt>
+                                <dd class="message-detail-break-all">@_message.MessageId</dd>
+                                <dt>患者 ID</dt>
+                                <dd>@(_message.PatientId?.ToString() ?? "-")</dd>
+                                <dt>事件 ID</dt>
+                                <dd>@(_message.EventId?.ToString() ?? "-")</dd>
+                            </dl>
+                        </section>
+
+                        <section class="message-detail-context-section">
+                            <div class="message-detail-context-section-title">
+                                <MudIcon Icon="@Icons.Material.Filled.DataObject" Size="Size.Small" />
+                                <span>JSON 数据</span>
+                            </div>
+                            <div class="message-detail-json-block">
+                                <div class="message-detail-json-block-title">Body JSON</div>
+                                <div class="message-detail-json-actions">
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
+                                               OnClick='@(() => OpenJsonDialog("Body JSON", bodyJson))'>
+                                        树形查看
+                                    </MudButton>
+                                </div>
+                                <MudTextField T="string" Value="@bodyJson" Lines="10"
+                                              ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
+                            </div>
+                            <div class="message-detail-json-block">
+                                <div class="message-detail-json-block-title">原始 JSON</div>
+                                <div class="message-detail-json-actions">
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.OpenInFull"
+                                               OnClick='@(() => OpenJsonDialog("原始 JSON", rawJson))'>
+                                        树形查看
+                                    </MudButton>
+                                </div>
+                                <MudTextField T="string" Value="@rawJson" Lines="10"
+                                              ReadOnly="true" Variant="Variant.Outlined" Class="message-detail-json-preview" />
+                            </div>
+                        </section>
+                    </div>
+                }
+            </aside>
+
+            <main class="message-detail-main">
+                <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false"
+                         Class="message-detail-tabs" PanelClass="message-detail-tab-panel">
+                    <MudTabPanel Text="处理轨迹" Icon="@Icons.Material.Filled.Route">
+                @if (_requestLogDetail?.Items.Count > 1)
+                {
+                    <section class="message-detail-section">
+                        <div class="message-detail-section-header">
+                            <div>
+                                <MudText Typo="Typo.h6">请求内明细</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    成功 @_requestLogDetail.Processed · 过滤 @_requestLogDetail.Filtered · 重复 @_requestLogDetail.Duplicated · 失败 @_requestLogDetail.Failed · 未匹配 @_requestLogDetail.Unmatched
+                                </MudText>
+                            </div>
+                        </div>
+                        <MudTable Items="_requestLogDetail.Items" Dense="true" Hover="true" Bordered="false" Striped="true">
+                            <HeaderContent>
+                                <MudTh>索引</MudTh>
+                                <MudTh>接口代码</MudTh>
+                                <MudTh>结果</MudTh>
+                                <MudTh>说明</MudTh>
+                                <MudTh>处理明细</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@(string.IsNullOrWhiteSpace(context.RecordIndex) ? "-" : context.RecordIndex)</MudTd>
+                                <MudTd>@(string.IsNullOrWhiteSpace(context.TranCode) ? "-" : context.TranCode)</MudTd>
+                                <MudTd>@context.Status</MudTd>
+                                <MudTd Class="message-detail-process-detail">@context.Message</MudTd>
+                                <MudTd Class="message-detail-process-detail">
+                                    @if (context.Steps.Count == 0)
+                                    {
+                                        <span>-</span>
+                                    }
+                                    else
+                                    {
+                                        <div class="message-detail-item-steps">
+                                            @foreach (var step in context.Steps)
+                                            {
+                                                <div class="message-detail-item-step">
+                                                    <MudIcon Icon="@(step.IsSuccess ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
+                                                             Color="@(step.IsSuccess ? Color.Success : Color.Error)"
+                                                             Size="Size.Small" />
+                                                    <span class="message-detail-item-step-text">@FormatStepDetail(step)</span>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </section>
+                }
+
+                @if (_stepDetails.Count > 0)
+                {
+                    <section class="message-detail-section">
+                        <div class="message-detail-section-header">
+                            <div>
+                                <MudText Typo="Typo.h6">处理日志</MudText>
+                                @if (_summaryLog != null)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @_summaryLog.Step · 总耗时 @(_summaryLog.ElapsedMs)ms · @_summaryLog.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
+                                    </MudText>
+                                }
+                            </div>
+                            @if (_summaryLog != null)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="@(_summaryLog.IsSuccess ? Color.Success : Color.Error)">
+                                    @(_summaryLog.IsSuccess ? "成功" : "失败")
+                                </MudChip>
+                            }
+                        </div>
+                        <MudTable Items="_stepDetails" Dense="true" Hover="true" Bordered="false" Striped="true">
+                            <HeaderContent>
+                                <MudTh>步骤</MudTh>
+                                <MudTh>结果</MudTh>
+                                <MudTh>耗时(ms)</MudTh>
+                                <MudTh>详情</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd>@context.Step</MudTd>
+                                <MudTd>
+                                    @if (context.IsSuccess)
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
+                                    }
+                                </MudTd>
+                                <MudTd>@context.ElapsedMs</MudTd>
+                                <MudTd Class="message-detail-process-detail">@context.Detail</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    </section>
+                }
+
+                @if ((_requestLogDetail?.Items.Count ?? 0) <= 1 && _stepDetails.Count == 0)
+                {
+                    <div class="message-detail-empty-state">
+                        <MudIcon Icon="@Icons.Material.Filled.Route" Size="Size.Medium" />
+                        <span>暂无处理轨迹</span>
+                    </div>
+                }
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="映射预览" Icon="@Icons.Material.Filled.FactCheck">
+                <section class="message-detail-section message-detail-preview-section">
+                    <div class="message-detail-section-header">
+                        <div>
+                            <MudText Typo="Typo.h6">映射预览</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @GetPreviewHeading()
+                            </MudText>
+                        </div>
+                        @if (_mappingPreview != null)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="@GetPreviewStatusColor()">
+                                @GetPreviewStatusText()
+                            </MudChip>
+                        }
+                    </div>
+
+                    @if (_mappingPreviewLoading)
+                    {
+                        <MudProgressLinear Indeterminate="true" Class="mt-2" />
+                    }
+                    else if (_mappingPreview == null)
+                    {
+                        <div class="message-detail-empty-state">
+                            <MudIcon Icon="@Icons.Material.Filled.FactCheck" Size="Size.Medium" />
+                            <span>未生成预览</span>
+                        </div>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(_mappingPreview.ErrorMessage))
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_mappingPreview.ErrorMessage</MudAlert>
+                    }
+                    else
+                    {
+                        @if (_mappingPreview.IsFiltered)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">
+                                接口级过滤未通过：@_mappingPreview.FilterReason
+                            </MudAlert>
+                        }
+
+                        @foreach (var warning in _mappingPreview.Warnings)
+                        {
+                            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@warning</MudAlert>
+                        }
+
+                        <MudExpansionPanels Class="mt-3">
+                            @foreach (var section in _mappingPreview.Sections)
+                            {
+                                <MudExpansionPanel Text="@GetSectionTitle(section)" Expanded="true">
+                                    @if (HasGroupedRows(section))
+                                    {
+                                        @foreach (var group in section.Rows.GroupBy(row => row.GroupName).Where(group => !string.IsNullOrWhiteSpace(group.Key)))
+                                        {
+                                            <div class="message-detail-preview-subcard-row">
+                                                <div class="message-detail-preview-subcard-row-title">
+                                                    <MudIcon Icon="@Icons.Material.Filled.ViewList" Size="Size.Small" Color="Color.Primary" />
+                                                    <MudText Typo="Typo.subtitle2">@group.Key</MudText>
+                                                </div>
+                                                <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true" Class="message-detail-preview-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>目标</th>
+                                                            <th>名称</th>
+                                                            <th>结果值</th>
+                                                            <th>说明</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        @foreach (var row in group)
+                                                        {
+                                                            <tr class="@(row.IsWarning ? "message-detail-preview-warning-row" : "")">
+                                                                <td>@row.Target</td>
+                                                                <td>@(string.IsNullOrWhiteSpace(row.DisplayName) ? "-" : row.DisplayName)</td>
+                                                                <td class="message-detail-preview-value">@FormatPreviewValue(row.Value)</td>
+                                                                <td>@(string.IsNullOrWhiteSpace(row.Note) ? "-" : row.Note)</td>
+                                                            </tr>
+                                                        }
+                                                    </tbody>
+                                                </MudSimpleTable>
+                                            </div>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <MudSimpleTable Dense="true" Hover="true" Bordered="true" Striped="true" Class="message-detail-preview-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>目标</th>
+                                                    <th>名称</th>
+                                                    <th>结果值</th>
+                                                    <th>说明</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var row in section.Rows)
+                                                {
+                                                    <tr class="@(row.IsWarning ? "message-detail-preview-warning-row" : "")">
+                                                        <td>@row.Target</td>
+                                                        <td>@(string.IsNullOrWhiteSpace(row.DisplayName) ? "-" : row.DisplayName)</td>
+                                                        <td class="message-detail-preview-value">@FormatPreviewValue(row.Value)</td>
+                                                        <td>@(string.IsNullOrWhiteSpace(row.Note) ? "-" : row.Note)</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                    }
+                                </MudExpansionPanel>
+                            }
+                        </MudExpansionPanels>
+                    }
+                </section>
+                    </MudTabPanel>
+                </MudTabs>
+            </main>
+
+        </div>
+    </div>
 
     <MudDialog @bind-Visible="_jsonDialogVisible" Options="_jsonDialogOptions">
         <TitleContent>
             <MudText Typo="Typo.h6">@_jsonDialogTitle</MudText>
         </TitleContent>
         <DialogContent>
-            <MudText Typo="Typo.caption" Class="message-detail-json-dialog-tip">
-                点击左侧箭头可展开或收起节点
-            </MudText>
             <MudPaper Outlined="true" Class="message-detail-json-dialog">
-                <JsonTreeViewer JsonText="@_jsonDialogContent" MaxNodesToRender="0" MaxArrayItemsToRender="0" />
+                <JsonTreeViewer JsonText="@_jsonDialogContent"
+                                MaxNodesToRender="0"
+                                MaxArrayItemsToRender="0"
+                                ShowSearch="true"
+                                ShowPathInRow="true"
+                                AllowValueWrap="true"
+                                SearchPlaceholder="搜索字段、路径或值" />
             </MudPaper>
         </DialogContent>
         <DialogActions>
             <MudButton OnClick="CloseJsonDialog">关闭</MudButton>
         </DialogActions>
     </MudDialog>
-
-    @if (_requestLogDetail?.Items.Count > 1)
-    {
-        <MudText Typo="Typo.h6" Class="mb-2">请求内明细</MudText>
-        <MudText Typo="Typo.caption" Class="mb-2 d-block">
-            成功 @_requestLogDetail.Processed · 过滤 @_requestLogDetail.Filtered · 重复 @_requestLogDetail.Duplicated · 失败 @_requestLogDetail.Failed · 未匹配 @_requestLogDetail.Unmatched
-        </MudText>
-        <MudTable Items="_requestLogDetail.Items" Dense="true" Hover="true" Bordered="true" Striped="true" Class="mb-4">
-            <HeaderContent>
-                <MudTh>索引</MudTh>
-                <MudTh>接口代码</MudTh>
-                <MudTh>结果</MudTh>
-                <MudTh>说明</MudTh>
-                <MudTh>处理明细</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@(string.IsNullOrWhiteSpace(context.RecordIndex) ? "-" : context.RecordIndex)</MudTd>
-                <MudTd>@(string.IsNullOrWhiteSpace(context.TranCode) ? "-" : context.TranCode)</MudTd>
-                <MudTd>@context.Status</MudTd>
-                <MudTd Class="message-detail-process-detail">@context.Message</MudTd>
-                <MudTd Class="message-detail-process-detail">
-                    @if (context.Steps.Count == 0)
-                    {
-                        <span>-</span>
-                    }
-                    else
-                    {
-                        <div class="message-detail-item-steps">
-                            @foreach (var step in context.Steps)
-                            {
-                                <div class="message-detail-item-step">
-                                    <MudIcon Icon="@(step.IsSuccess ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
-                                             Color="@(step.IsSuccess ? Color.Success : Color.Error)"
-                                             Size="Size.Small" />
-                                    <span class="message-detail-item-step-text">@FormatStepDetail(step)</span>
-                                </div>
-                            }
-                        </div>
-                    }
-                </MudTd>
-            </RowTemplate>
-        </MudTable>
-    }
-
-    @* 处理日志 *@
-    @if (_stepDetails.Count > 0)
-    {
-        <MudText Typo="Typo.h6" Class="mb-2">
-            处理日志
-            @if (_summaryLog != null)
-            {
-                <MudChip T="string" Size="Size.Small"
-                         Color="@(_summaryLog.IsSuccess ? Color.Success : Color.Error)" Class="ml-2">
-                    @_summaryLog.Step
-                </MudChip>
-                <MudText Typo="Typo.caption" Class="ml-2" Style="display:inline;">
-                    总耗时 @(_summaryLog.ElapsedMs)ms · @_summaryLog.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")
-                </MudText>
-            }
-        </MudText>
-        <MudTable Items="_stepDetails" Dense="true" Hover="true" Bordered="true" Striped="true">
-            <HeaderContent>
-                <MudTh>步骤</MudTh>
-                <MudTh>结果</MudTh>
-                <MudTh>耗时(ms)</MudTh>
-                <MudTh>详情</MudTh>
-            </HeaderContent>
-            <RowTemplate>
-                <MudTd>@context.Step</MudTd>
-                <MudTd>
-                    @if (context.IsSuccess)
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                    }
-                    else
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Error" Size="Size.Small" />
-                    }
-                </MudTd>
-                <MudTd>@context.ElapsedMs</MudTd>
-                <MudTd Class="message-detail-process-detail">@context.Detail</MudTd>
-            </RowTemplate>
-        </MudTable>
-    }
 }
 
 @code {
@@ -283,14 +441,27 @@ else
     private EsbProcessLog? _summaryLog;
     private RequestProcessLogDetail? _requestLogDetail;
     private List<ProcessStepInfo> _stepDetails = [];
+    private MessageMappingPreviewResult? _mappingPreview;
     private bool _loading = true;
     private bool _retrying;
     private bool _processingNow;
+    private bool _mappingPreviewLoading;
+    private bool _contextPanelCollapsed;
     private bool _jsonDialogVisible;
     private string _jsonDialogTitle = "";
     private string _jsonDialogContent = "";
     private readonly DialogOptions _jsonDialogOptions = new() { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true };
     private bool CanProcessNow => _message?.Status != MessageStatus.Processing;
+
+    private string GetWorkspaceClass() =>
+        _contextPanelCollapsed
+            ? "message-detail-workspace is-context-collapsed"
+            : "message-detail-workspace";
+
+    private void ToggleContextPanel()
+    {
+        _contextPanelCollapsed = !_contextPanelCollapsed;
+    }
 
     protected override async Task OnPageInitializedAsync()
     {
@@ -358,6 +529,32 @@ else
     private void UseMessageForInterfaceConfig()
     {
         inj_navigationManager.NavigateTo($"/config/wizard?messageId={Id}");
+    }
+
+    private async Task PreviewMappingEffect()
+    {
+        if (_message == null)
+            return;
+
+        _mappingPreviewLoading = true;
+        try
+        {
+            _mappingPreview = await inj_messageMappingPreviewService.PreviewAsync(_message);
+        }
+        catch (Exception ex)
+        {
+            _mappingPreview = new MessageMappingPreviewResult
+            {
+                MessageId = _message.Id,
+                TranCode = _message.TranCode,
+                TranName = _message.TranName,
+                ErrorMessage = $"预览失败：{ex.Message}"
+            };
+        }
+        finally
+        {
+            _mappingPreviewLoading = false;
+        }
     }
 
     private async Task RetryMessage()
@@ -462,6 +659,88 @@ else
 
         return $"{step.Step}：{detail}（{step.ElapsedMs}ms）";
     }
+
+    private string GetPreviewStatusText()
+    {
+        if (_mappingPreview == null)
+            return "";
+
+        if (!string.IsNullOrWhiteSpace(_mappingPreview.ErrorMessage))
+            return "失败";
+
+        return _mappingPreview.IsFiltered ? "已过滤" : "已预览";
+    }
+
+    private Color GetPreviewStatusColor()
+    {
+        if (_mappingPreview == null)
+            return Color.Default;
+
+        if (!string.IsNullOrWhiteSpace(_mappingPreview.ErrorMessage))
+            return Color.Error;
+
+        return _mappingPreview.IsFiltered ? Color.Warning : Color.Success;
+    }
+
+    private static string FormatPreviewValue(string? value)
+    {
+        if (value == null)
+            return "（null）";
+
+        return value.Length == 0 ? "（空字符串）" : value;
+    }
+
+    private static bool HasGroupedRows(MessageMappingPreviewSection section) =>
+        section.Rows.Any(row => !string.IsNullOrWhiteSpace(row.GroupName));
+
+    private static string GetSectionTitle(MessageMappingPreviewSection section)
+    {
+        if (!HasGroupedRows(section))
+            return $"{section.Name}（{section.Rows.Count}）";
+
+        var groupCount = section.Rows
+            .Where(row => !string.IsNullOrWhiteSpace(row.GroupName))
+            .Select(row => row.GroupName)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        return $"{section.Name}（{groupCount} 行 / {section.Rows.Count} 值）";
+    }
+
+    private string GetPreviewHeading()
+    {
+        if (_mappingPreview == null)
+            return "按当前接口配置只读提取，不写库。";
+
+        var name = _mappingPreview.InterfaceName ?? _mappingPreview.TranName ?? "-";
+        return $"接口 {_mappingPreview.TranCode} - {name}，共 {_mappingPreview.TotalValueCount} 条结果。";
+    }
+
+    private static string FormatEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "-" : value;
+
+    private static string GetMessageStatusText(MessageStatus status) => status switch
+    {
+        MessageStatus.Pending => "待处理",
+        MessageStatus.Processing => "处理中",
+        MessageStatus.Success => "成功",
+        MessageStatus.Failed => "失败",
+        MessageStatus.Filtered => "已过滤",
+        MessageStatus.Unmatched => "未匹配",
+        MessageStatus.PartialSuccess => "部分成功",
+        _ => status.ToString()
+    };
+
+    private static Color GetMessageStatusColor(MessageStatus status) => status switch
+    {
+        MessageStatus.Pending => Color.Warning,
+        MessageStatus.Processing => Color.Info,
+        MessageStatus.Success => Color.Success,
+        MessageStatus.Failed => Color.Error,
+        MessageStatus.Filtered => Color.Secondary,
+        MessageStatus.Unmatched => Color.Default,
+        MessageStatus.PartialSuccess => Color.Info,
+        _ => Color.Default
+    };
 
     private string GetBackToListUrl()
     {

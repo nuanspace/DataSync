@@ -10,12 +10,16 @@
 	<ItemGroup>
 	  <Compile Remove="docker包\**" />
 	  <Compile Remove="logs\**" />
+	  <Compile Remove="DataSync.LHYY.V2.Tests\**" />
 	  <Content Remove="docker包\**" />
 	  <Content Remove="logs\**" />
+	  <Content Remove="DataSync.LHYY.V2.Tests\**" />
 	  <EmbeddedResource Remove="docker包\**" />
 	  <EmbeddedResource Remove="logs\**" />
+	  <EmbeddedResource Remove="DataSync.LHYY.V2.Tests\**" />
 	  <None Remove="docker包\**" />
 	  <None Remove="logs\**" />
+	  <None Remove="DataSync.LHYY.V2.Tests\**" />
 	</ItemGroup>
 
 	<ItemGroup>

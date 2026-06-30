@@ -1,0 +1,106 @@
+.config-sync-page {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.config-sync-header,
+.config-sync-section-head,
+.config-sync-actions,
+.config-sync-options,
+.config-sync-summary {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.config-sync-header,
+.config-sync-section-head {
+    justify-content: space-between;
+}
+
+.config-sync-title {
+    color: #102033;
+    font-weight: 650;
+}
+
+.config-sync-subtitle,
+.config-sync-muted,
+.config-sync-file-name {
+    color: #5a7085;
+}
+
+.config-sync-section {
+    padding: 16px;
+    border: 1px solid #d9e4ec;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.config-sync-options,
+.config-sync-summary {
+    flex-wrap: wrap;
+    margin-top: 12px;
+}
+
+.config-sync-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.config-sync-upload {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 14px;
+    border: 1px solid #0f6b7d;
+    border-radius: 4px;
+    color: #0f6b7d;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.config-sync-upload input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.config-sync-file-name {
+    margin-top: 10px;
+}
+
+.config-sync-preview {
+    overflow-x: auto;
+}
+
+.config-sync-table {
+    margin-top: 12px;
+    min-width: 980px;
+}
+
+.config-sync-name-cell {
+    min-width: 180px;
+    font-weight: 600;
+}
+
+.config-sync-summary-cell {
+    max-width: 280px;
+    color: #425a70;
+    word-break: break-word;
+}
+
+@media (max-width: 900px) {
+    .config-sync-header,
+    .config-sync-section-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .config-sync-actions {
+        justify-content: flex-start;
+    }
+}

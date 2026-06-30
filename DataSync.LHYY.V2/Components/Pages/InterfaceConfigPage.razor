@@ -141,6 +141,7 @@
     private bool _dialogVisible;
     private bool _isNew;
     private bool _saving;
+    private bool _statusChanging;
     private bool _projectDocumentsVisible;
 
     // 接口级过滤规则
@@ -325,7 +326,14 @@
                 <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
                 <MudTd>@context.EventTypeName</MudTd>
                 <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
-                <MudTd>
+                <MudTd Class="interface-config-row-actions">
+                    <MudTooltip Text="@(context.IsEnabled ? "停用接口" : "启用接口")">
+                        <MudIconButton Icon="@(context.IsEnabled ? Icons.Material.Filled.PauseCircle : Icons.Material.Filled.PlayCircle)"
+                                       Size="Size.Small"
+                                       Color="@(context.IsEnabled ? Color.Warning : Color.Success)"
+                                       Disabled="@_statusChanging"
+                                       OnClick="@(() => ToggleEnabled(context))" />
+                    </MudTooltip>
                     <MudTooltip Text="映射引导">
                         <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
                                        OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))" />
@@ -1407,6 +1415,50 @@
         catch (Exception ex)
         {
             inj_snackbar.Add($"删除失败: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task ToggleEnabled(EsbInterfaceConfig item)
+    {
+        if (_statusChanging)
+            return;
+
+        _statusChanging = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync();
+            var entity = await db.EsbInterfaceConfigs.FindAsync(item.Id);
+            if (entity == null)
+            {
+                inj_snackbar.Add("接口配置不存在", Severity.Warning);
+                return;
+            }
+
+            var nextEnabled = !entity.IsEnabled;
+            if (nextEnabled)
+            {
+                var errors = ConfigSvc.ValidateInterfaceConfig(entity);
+                if (errors.Count > 0)
+                {
+                    foreach (var err in errors)
+                        inj_snackbar.Add(err, Severity.Error);
+                    return;
+                }
+            }
+
+            entity.IsEnabled = nextEnabled;
+            await db.SaveChangesAsync();
+            ConfigSvc.ClearCache();
+            inj_snackbar.Add(nextEnabled ? "接口已启用" : "接口已停用", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"状态切换失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _statusChanging = false;
         }
     }
 }

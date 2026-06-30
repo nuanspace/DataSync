@@ -474,6 +474,16 @@ else
                                     {
                                         <MudText Typo="Typo.caption" Color="Color.Secondary">@subtitle</MudText>
                                     }
+                                    @if (field.Options.Count > 0)
+                                    {
+                                        <div class="question-options question-options-compact">
+                                            <span class="question-option-label">选项</span>
+                                            @foreach (var option in field.Options)
+                                            {
+                                                <span class="question-option-chip">@option</span>
+                                            }
+                                        </div>
+                                    }
                                 </MudPaper>
                             </div>
                         }
@@ -580,6 +590,16 @@ else
                                 }
                             </div>
                         </div>
+                        @if (field.Options.Count > 0)
+                        {
+                            <div class="question-options">
+                                <span class="question-option-label">选项</span>
+                                @foreach (var option in field.Options)
+                                {
+                                    <span class="question-option-chip">@option</span>
+                                }
+                            </div>
+                        }
                         <div class="path-edit-row">
                             <div class="path-edit-field">
                                 <PathPickTextField Value="@GetQuestionFieldSourcePath(field)" ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)" Label="源路径" IsActive="@IsPathPickActive(field)" OnActivated="@(() => ActivateQuestionFieldSourcePath(field))" Style="width:100%;" />
@@ -646,7 +666,22 @@ else
                                     <MudTooltip Text="@GetActivePickTargetName()">
                                         <MudChip T="string" Size="Size.Small" Color="GetTargetColor(field.MappingTarget)">@GetTargetDisplayText(field.MappingTarget)</MudChip>
                                     </MudTooltip>
+                                    <MudText Typo="Typo.body2" Style="font-weight:600;">@field.DisplayName</MudText>
+                                    @if (!string.IsNullOrWhiteSpace(field.DataType))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@field.DataType</MudText>
+                                    }
                                 </div>
+                                @if (field.Options.Count > 0)
+                                {
+                                    <div class="question-options mb-2">
+                                        <span class="question-option-label">选项</span>
+                                        @foreach (var option in field.Options)
+                                        {
+                                            <span class="question-option-chip">@option</span>
+                                        }
+                                    </div>
+                                }
                                 @if (row == null)
                                 {
                                     <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">当前字段尚未创建映射。填写源路径、默认值或过滤条件后会自动加入当前接口。</MudAlert>
@@ -678,7 +713,7 @@ else
                                         <MudTextField T="string" Value="@GetQuestionFieldDefaultValue(field)" ValueChanged="v => OnQuestionFieldDefaultValueChanged(field, v)" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
                                     </MudItem>
                                     <MudItem xs="12">
-                                        <MudTextField T="string" Value="@GetQuestionFieldValueExpression(field)" ValueChanged="v => OnQuestionFieldValueExpressionChanged(field, v)" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)" Variant="Variant.Outlined" />
+                                        <ValueExpressionEditor Value="@GetQuestionFieldValueExpression(field)" ValueChanged="v => OnQuestionFieldValueExpressionChanged(field, v)" />
                                     </MudItem>
                                     <MudItem xs="6">
                                         <MudSwitch T="bool" Value="@GetQuestionFieldIsRequired(field)" ValueChanged="v => OnQuestionFieldRequiredChanged(field, v)" Color="Color.Warning" Label="必填" />
@@ -755,7 +790,7 @@ else
                                     <MudTextField T="string" Value="@GetActiveStandaloneDefaultValue()" ValueChanged="OnActiveRowDefaultValueChanged" Label="默认值" Margin="Margin.Dense" Variant="Variant.Outlined" />
                                 </MudItem>
                                 <MudItem xs="12">
-                                    <MudTextField T="string" Value="@GetActiveStandaloneValueExpression()" ValueChanged="OnActiveRowValueExpressionChanged" Label="值表达式" Margin="Margin.Dense" HelperText="例如 format:yyyy-MM-dd, substring:0,10；正则提取必须加 regex: 前缀，如 regex:^([\d.]+)" Variant="Variant.Outlined" />
+                                    <ValueExpressionEditor Value="@GetActiveStandaloneValueExpression()" ValueChanged="OnActiveRowValueExpressionChanged" />
                                 </MudItem>
                                 <MudItem xs="6">
                                     <MudSwitch T="bool" Value="@GetActiveStandaloneIsRequired()" ValueChanged="OnActiveRowRequiredChanged" Color="Color.Warning" Label="必填" />
@@ -837,6 +872,16 @@ else
                     @if (!string.IsNullOrWhiteSpace(GetCompactQuestionFieldSubtitle(field)))
                     {
                         <MudText Typo="Typo.caption" Color="Color.Secondary">@GetCompactQuestionFieldSubtitle(field)</MudText>
+                    }
+                    @if (field.Options.Count > 0)
+                    {
+                        <div class="question-options question-options-compact">
+                            <span class="question-option-label">选项</span>
+                            @foreach (var option in field.Options)
+                            {
+                                <span class="question-option-chip">@option</span>
+                            }
+                        </div>
                     }
                 </div>
             </BodyContent>
