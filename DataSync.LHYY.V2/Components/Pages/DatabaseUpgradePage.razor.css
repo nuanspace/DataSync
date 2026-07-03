@@ -169,6 +169,117 @@
     overflow: hidden;
 }
 
+.database-upgrade-script-name {
+    font-weight: 700;
+    color: #173348;
+    overflow-wrap: anywhere;
+}
+
+.database-upgrade-script-path {
+    margin-top: 4px;
+    color: #6a7e90;
+    font-size: 0.78rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.database-upgrade-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.database-upgrade-running-state {
+    font-weight: 700;
+}
+
+.database-upgrade-progress {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid rgba(15, 107, 125, 0.12);
+    border-radius: 12px;
+    background-color: #f7fbfd;
+}
+
+.database-upgrade-progress-header,
+.database-upgrade-progress-detail {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.database-upgrade-progress-header {
+    font-weight: 700;
+    color: #173348;
+}
+
+.database-upgrade-progress-detail {
+    color: #536b7f;
+    font-size: 0.85rem;
+    line-height: 1.5;
+}
+
+.database-upgrade-task-log {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid rgba(15, 107, 125, 0.1);
+    border-radius: 12px;
+    background-color: #fbfdff;
+}
+
+.database-upgrade-task-log-title {
+    font-weight: 700;
+    color: #173348;
+}
+
+.database-upgrade-task-log-list {
+    display: grid;
+    gap: 6px;
+    max-height: 260px;
+    overflow: auto;
+}
+
+.database-upgrade-task-log-row {
+    display: grid;
+    grid-template-columns: 4.5rem minmax(6rem, 9rem) minmax(0, 1fr);
+    gap: 10px;
+    align-items: start;
+    padding: 8px 10px;
+    border-left: 3px solid #5c7c95;
+    border-radius: 8px;
+    background-color: #fff;
+    color: #29455c;
+    line-height: 1.45;
+}
+
+.database-upgrade-task-log-row.is-success {
+    border-left-color: #238b57;
+}
+
+.database-upgrade-task-log-row.is-error {
+    border-left-color: #b83b35;
+}
+
+.database-upgrade-task-log-time {
+    color: #66798a;
+    font-variant-numeric: tabular-nums;
+}
+
+.database-upgrade-task-log-step {
+    font-weight: 700;
+    color: #173348;
+    overflow-wrap: anywhere;
+}
+
+.database-upgrade-task-log-message {
+    overflow-wrap: anywhere;
+}
+
 @media (max-width: 959.98px) {
     .database-upgrade-header {
         flex-direction: column;
@@ -190,5 +301,10 @@
     .database-upgrade-panel {
         padding: 18px 16px;
         border-radius: 18px;
+    }
+
+    .database-upgrade-task-log-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
     }
 }

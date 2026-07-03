@@ -385,6 +385,10 @@ publish-*/
 *.bak*.sql
 *.backup
 **/DatabaseBackups/
+**/DatabaseUpgradeState/
+**/DatabaseSqlFiles/
+Tools/DataSync.PdfOcrTest/
+Tools/DataSync.PdfOcrTest/tessdata/*.traineddata
 **/blobs/
 /DataSync.LHYY.V2/manifest.json
 /DataSync.LHYY.V2/index.json

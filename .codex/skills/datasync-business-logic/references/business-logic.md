@@ -1,6 +1,6 @@
 # DataSync 工作空间业务逻辑记录
 
-更新时间：2026-06-26
+更新时间：2026-07-03
 
 本文件记录 `D:\Github\DataSync` 工作空间中 ntcare 产品与医院侧系统对接相关的业务逻辑。后续任何业务逻辑改动都必须同步更新本文件。
 
@@ -174,12 +174,30 @@
 - 当前没有独立的通用报文转换模块，也没有已落地的 XML 转 JSON 服务或接口适配层。
 - 代码中的 XML 处理主要用于项目文档预览、Word OpenXML 解析和配置导出，不属于医院业务报文转换链路。
 
+数据库升级机制：
+
+- 2026-06-26 调整 `DataSync.LHYY.V2` 数据库升级页的“内置脚本”模式：点击【检查升级】后分为“功能脚本处理”和“优化脚本处理”两个页签。
+- 功能脚本处理：`init_database.sql` 和 `Scripts/**.sql` 永远归为功能脚本，保留原有“一次确认后先备份、再按顺序执行多个脚本”的页面方式；该分类不依赖本地状态文件，状态文件丢失也不会把功能脚本混入优化脚本页签。
+- 优化脚本处理：`DatabaseUpgrades/**.sql` 归为优化脚本，其中原专项性能优化 SQL `DatabaseUpgrades/EsbMessagesPerformanceOptimization/upgrade_esb_messages_archive_optimization.sql` 作为专项脚本处理；页面以列表展示脚本名称、简介、创建时间、状态和操作，状态包括已执行、未执行、未知。
+- 升级脚本执行状态不写入目标 PostgreSQL 主库；页面服务使用应用本地 `DatabaseUpgradeState/database-upgrade-state.json` 记录目标连接指纹、脚本路径、脚本哈希、是否功能脚本、首次发现时间、执行状态、执行时间和错误信息。连接指纹基于目标库 host、port 和 database，不包含数据库密码、用户名或配置别名；读取状态时兼容早期包含连接名和用户名的旧指纹并迁移为新指纹。早期状态文件若已在连接配置别名变更前生成，由于旧指纹不可反推原别名，可能需要重新检查后人工确认未知脚本状态。
+- 优化脚本执行已后台任务化：页面提交任务后进入 `DatabaseUpgradeService` 托管后台队列，由同一个 singleton 服务同时承担页面状态查询和 `IHostedService` 队列消费，避免页面状态与后台执行实例分离。页面轮询任务快照，展示等待、连接、备份、执行脚本、迁移、校验、成功或失败等阶段，并在当前页面内展示最多 200 条阶段执行日志；日志只保存在内存任务快照中，不写入 `DatabaseUpgradeState/database-upgrade-state.json`，服务重启或离开当前任务上下文后不作为审计记录保留。服务内存中最多保留 50 个终态任务快照，且终态任务超过 24 小时后可被清理，避免长期运行时无限累积。应用停止时会关闭后台队列并向当前任务传递取消信号；普通 SQL 脚本、专项归档结构升级、历史终态消息迁移、校验和 pg_dump 备份都会传递该取消信号，迁移中未完成的数据库事务会回滚，advisory lock 释放不受取消信号打断；外部 `pg_dump` / `psql` 进程会并发读取输出，取消时终止整个进程树，避免输出管道阻塞或应用停止后残留进程，页面升级服务和直接运行 `message-archive` 工具的备份路径均遵循该清理规则。若任务尚未完成，会释放目标库互斥登记并尽量记录失败状态。优化脚本行内【执行】按钮也必须先在底部确认区输入“确认”才可启用；底部功能脚本批量执行按钮只在“功能脚本处理”页签显示，避免在“优化脚本处理”页签误触功能脚本批量执行。同一目标库同一时间只允许一个升级操作运行，功能脚本批量执行、SQL 文件执行、数据库比对执行和优化脚本后台任务都会使用同一目标库互斥登记。互斥登记按登记 id 精确释放，任务登记对 active 记录缺少快照的短暂并发窗口按“已有任务运行”处理，后台任务在真正备份和执行前会重新检查脚本当前状态仍为未执行，避免提交任务后被其他页面标记状态仍继续执行。页面上传的临时 SQL 文件保存到 `DatabaseSqlFiles/`，属于运行时文件并已忽略提交。
+- 2026-07-03 调整优化脚本后台任务进度展示：脚本进入后台执行后，数据库升级页固定显示“脚本正在执行中”和当前步骤，避免长耗时阶段被误认为任务停止；ESB 消息归档专项在迁移历史终态消息前统计待迁移消息总数，迁移过程中按批次回写 `DatabaseUpgradeTaskProgress`，页面显示已迁移消息数、总消息数、百分比、处理日志数、批次和阈值时间。迁移进度和完成总量按本轮实际从热表删除的消息、处理日志行数累计，避免重跑或归档表已有部分数据时因 `ON CONFLICT DO NOTHING` 低估迁移量；批次日志会同时输出新写入归档表的数据量。迁移完成后任务日志会记录“迁移完成：消息 X 条，处理日志 Y 条”，该统计只来自本轮后台任务内存快照，不写入目标库或状态文件。
+- 普通优化脚本中的未知状态可以人工标记为已执行或未执行；标记只修改本地状态文件，不执行 SQL，页面要求输入“确认”并二次弹窗确认。服务端会重新校验当前状态仍为未知，且目标库没有正在运行的优化脚本后台任务，才允许标记。专项脚本的未知状态由目标库结构和数据检测决定，不能手工标记。
+- 点击【检查升级】时会尝试写入本地状态文件以验证权限；状态文件读取或写入失败时，页面仍尽量展示脚本列表，优化脚本执行和状态标记会禁用并显示状态文件错误，功能脚本处理不依赖该状态文件。状态文件保存时先写入同目录临时文件，再覆盖替换正式 JSON，降低覆盖过程中异常中断损坏正式状态文件的风险。后台任务执行失败时先写入内存任务失败状态，再尝试记录脚本失败状态，避免状态文件异常导致页面一直显示运行中；若数据库动作已经完成，会尽量不受应用停止取消信号影响地写入“已执行”状态，若状态文件更新仍失败，任务会提示“数据库升级已执行，但状态文件更新失败”，不再把已执行脚本反向标记为失败。
+- 原专项部署包已纳入优化脚本处理中的 ESB 消息性能优化项。该项不是简单执行 SQL：页面任务会先由升级页完成备份，再复用 `MessageArchiveTool` 执行结构升级、历史终态消息迁移和校验。
+- ESB 消息性能优化项状态优先从目标库验证：归档结构未安装时显示未执行；结构不完整或待迁移数据检测失败时显示未知；结构完整但热表仍存在超过热保留天数且符合归档条件的终态消息时显示未执行；结构完整且无待迁移终态消息时显示已执行。
+- 命令行 `db-upgrade` 为避免绕过页面状态管理，保留内置脚本检查能力但不再执行脚本；实际升级应进入数据库升级页面操作。
+- 影响链路：仅影响 `DataSync.LHYY.V2` 数据库升级/运维页面和 ESB 消息归档优化执行入口，不改变医院 ESB 接收、消息识别、字段映射、Bio.Core 写入或后台消息处理语义。
+- 数据库变更脚本：本次没有新增目标业务库表结构脚本；复用既有专项 SQL `DataSync.LHYY.V2/DatabaseUpgrades/EsbMessagesPerformanceOptimization/upgrade_esb_messages_archive_optimization.sql`。
+- 验证结果：2026-07-02 使用临时输出目录执行 `dotnet build DataSync.sln --no-restore -p:UseAppHost=false` 通过，0 警告 0 错误；执行 `dotnet test DataSync.sln --no-restore -p:UseAppHost=false` 通过，5 个测试全部通过。
+
 通用 OCR 转换链路：
 
 - 2026-06-26 新增 `DataSync.Common` 通用辅助类库，当前提供 PDF OCR 转换能力，供 `DataSync.CYYY` 和 `DataSync.LHYY.V2` 引用；新增能力默认不改变现有接口处理逻辑。
 - OCR 公共服务接口为 `IOcrConversionService`，输入为 `OcrSource`，支持 `FilePath`、`Url`、`Base64` 三种 PDF 来源；输出为 `OcrDocumentResult`，包含 `FullText`、`Pages`、顶层聚合 `TextItems`、`ExtractedFields`、`Metadata` 等标准 JSON 结构，单个文本块包含页码和坐标信息。
 - OCR 运行实现采用 Linux 容器优先方案：`pdftoppm` 渲染 PDF，`tesseract` CLI 执行识别；程序运行时不联网下载 traineddata，部署镜像需要预装 `tesseract-ocr`、`tesseract-ocr-chi-sim`、`poppler-utils`。
 - `DataSync.LHYY.V2` 新增 `OcrMessageProcessor`，仅当接口配置为 `handler_type=1` 且 `handler_name='OcrMessageProcessor'` 时启用；处理器先按 OCR profile 解析 PDF，再把 OCR 结果挂到原消息 JSON 的 `Ocr` 节点，然后继续调用 `GenericMessageProcessor` 复用现有字段映射和 Bio.Core 写入。
+- `Tools/DataSync.PdfOcrTest` 仅作为本地 OCR 验证工具使用，不属于提交范围；仓库忽略该目录，避免本机测试代码、输出文件或 Tesseract 训练数据进入提交。
 - OCR 配置表为 `lhyy.esb_ocr_profile`，实体为 `EsbOcrProfile`，读取服务为 `OcrProfileService`。关键字段包括 `tran_code`、`integration_project_code`、`source_kind`、`source_path`、`language`、`dpi`、`page_seg_mode`、`max_pages`、`max_input_bytes`、`timeout_seconds`、`allowed_file_roots`、`output_json_path`。
 - OCR 文件路径来源必须配置 `allowed_file_roots` 白名单；会先按配置目录做字面路径初筛，避免探测白名单外路径是否存在；读取前还会解析已存在路径中的 symlink/junction 最终目标，再按 `Path.GetRelativePath` 判断路径归属，避免目录名前缀误匹配和链接逃逸。
 - OCR URL 来源必须配置全局 `Ocr:AllowedUrlHosts` 白名单；未配置时拒绝 URL 来源。URL 下载仍限制为 `http/https`、超时和大小，且不使用系统代理。每次请求和重定向都会在 HTTP 连接回调中解析 Host 对应 IP、校验并连接已校验 IP：配置 `Ocr:AllowedUrlCidrs` 时所有解析 IP 必须落入允许网段，未配置时拒绝 loopback、link-local、private、保留、文档、转换用途和多播地址。

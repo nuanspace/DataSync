@@ -44,7 +44,7 @@ public static class DatabaseUpgradeTool
             await connection.OpenAsync();
 
             Console.WriteLine($"已连接：{DescribeConnection(target.Name, target.Value)}");
-            Console.WriteLine($"检查完成：共有 {scripts.Count} 个待执行脚本。");
+            Console.WriteLine($"检查完成：发现 {scripts.Count} 个内置脚本，仅供检查。");
 
             foreach (var script in scripts)
                 Console.WriteLine($"- {script.RelativePath}");
@@ -53,24 +53,9 @@ public static class DatabaseUpgradeTool
                 return 0;
 
             Console.WriteLine();
-            Console.Write("本工具将先备份数据库，再执行以上脚本。请输入“确认”继续：");
-            if (!string.Equals(Console.ReadLine(), "确认", StringComparison.Ordinal))
-            {
-                Console.WriteLine("用户未确认，已取消。");
-                return 2;
-            }
-
-            var backupFile = await BackupDatabaseAsync(target.Value, rootPath, options.PgDumpPath);
-            Console.WriteLine($"备份完成：{backupFile}");
-
-            foreach (var script in scripts)
-            {
-                Console.WriteLine($"执行脚本：{script.RelativePath}");
-                await ExecuteScriptAsync(connection, script);
-            }
-
-            Console.WriteLine("数据库升级完成。");
-            return 0;
+            Console.WriteLine("为避免绕过页面状态管理，db-upgrade 命令仅保留检查能力。");
+            Console.WriteLine("请进入数据库升级页面，在“内置脚本”中使用“功能脚本处理”或“优化脚本处理”执行升级。");
+            return 2;
         }
         catch (Exception ex)
         {
@@ -127,20 +112,30 @@ public static class DatabaseUpgradeTool
         AddScriptIfExists(scripts, rootPath, Path.Combine(rootPath, "init_database.sql"));
 
         var scriptsPath = Path.Combine(rootPath, "Scripts");
-        if (!Directory.Exists(scriptsPath))
-            return scripts;
-
-        foreach (var path in Directory.GetFiles(scriptsPath, "*.sql", SearchOption.TopDirectoryOnly)
-                     .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+        if (Directory.Exists(scriptsPath))
         {
-            AddScriptIfExists(scripts, rootPath, path);
+            foreach (var path in Directory.GetFiles(scriptsPath, "*.sql", SearchOption.TopDirectoryOnly)
+                         .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+            {
+                AddScriptIfExists(scripts, rootPath, path);
+            }
+
+            foreach (var path in Directory.GetFiles(scriptsPath, "*.sql", SearchOption.AllDirectories)
+                         .Where(path => !string.Equals(Path.GetDirectoryName(path), scriptsPath, StringComparison.OrdinalIgnoreCase))
+                         .OrderBy(path => Path.GetRelativePath(scriptsPath, path), StringComparer.OrdinalIgnoreCase))
+            {
+                AddScriptIfExists(scripts, rootPath, path);
+            }
         }
 
-        foreach (var path in Directory.GetFiles(scriptsPath, "*.sql", SearchOption.AllDirectories)
-                     .Where(path => !string.Equals(Path.GetDirectoryName(path), scriptsPath, StringComparison.OrdinalIgnoreCase))
-                     .OrderBy(path => Path.GetRelativePath(scriptsPath, path), StringComparer.OrdinalIgnoreCase))
+        var upgradesPath = Path.Combine(rootPath, "DatabaseUpgrades");
+        if (Directory.Exists(upgradesPath))
         {
-            AddScriptIfExists(scripts, rootPath, path);
+            foreach (var path in Directory.GetFiles(upgradesPath, "*.sql", SearchOption.AllDirectories)
+                         .OrderBy(path => Path.GetRelativePath(upgradesPath, path), StringComparer.OrdinalIgnoreCase))
+            {
+                AddScriptIfExists(scripts, rootPath, path);
+            }
         }
 
         return scripts;

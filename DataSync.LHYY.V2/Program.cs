@@ -126,6 +126,7 @@ public class Program
             builder.Services.AddScoped<MessageMappingPreviewService>();
             builder.Services.AddScoped<ConfigSyncService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
+            builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseUpgradeService>());
             builder.Services.AddSingleton<DatabaseCompareService>();
             builder.Services.AddSingleton<MessageProcessingNotifier>();
 

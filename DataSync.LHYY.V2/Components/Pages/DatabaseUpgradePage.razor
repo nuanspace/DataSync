@@ -7,11 +7,11 @@
     <header class="database-upgrade-header">
         <div class="database-upgrade-title-block">
             <MudText Typo="Typo.h4" Class="database-upgrade-title">数据库升级</MudText>
-            <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">选择目标库，检查待执行脚本，确认后先备份再升级。</MudText>
+            <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">选择目标库，检查内置脚本，确认后先备份再升级。</MudText>
         </div>
         <div class="database-upgrade-actions">
             <MudButton Variant="Variant.Outlined" Color="Color.Secondary" StartIcon="@Icons.Material.Filled.Refresh"
-                       OnClick="LoadConnections" Disabled="_busy">
+                       OnClick="LoadConnections" Disabled="@IsFormLocked">
                 刷新
             </MudButton>
         </div>
@@ -20,14 +20,14 @@
     <section class="database-upgrade-panel">
         <div class="database-upgrade-form">
             <MudSelect T="string" @bind-Value="_upgradeMode" Label="升级方式"
-                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked">
                 <MudSelectItem Value="@CompareMode">数据库比对</MudSelectItem>
                 <MudSelectItem Value="@ProjectScriptsMode">内置脚本</MudSelectItem>
                 <MudSelectItem Value="@SqlFileMode">数据库文件</MudSelectItem>
             </MudSelect>
 
             <MudSelect T="string" @bind-Value="_selectedConnectionName" Label="低版本目标数据库"
-                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                       Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked">
                 @foreach (var connection in _connections)
                 {
                     <MudSelectItem Value="@connection.Name">@connection.DisplayName</MudSelectItem>
@@ -35,7 +35,7 @@
             </MudSelect>
 
             <MudTextField @bind-Value="_pgDumpPath" Label="PostgreSQL 工具路径（可选）"
-                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked"
                           Placeholder="可填 bin 目录、pg_dump.exe 或 psql.exe 路径" />
         </div>
 
@@ -44,7 +44,7 @@
             <div class="database-upgrade-compare-panel">
                 <div class="database-upgrade-compare-grid">
                     <MudSelect T="string" @bind-Value="_compareSourceMode" Label="高版本来源"
-                               Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                               Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked">
                         <MudSelectItem Value="@CompareSourceConnectionMode">数据库连接</MudSelectItem>
                         <MudSelectItem Value="@CompareSourceSqlFileMode">SQL 文件</MudSelectItem>
                     </MudSelect>
@@ -52,7 +52,7 @@
                     @if (IsCompareSourceConnectionMode)
                     {
                         <MudSelect T="string" @bind-Value="_sourceConnectionName" Label="高版本标准数据库"
-                                   Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy">
+                                   Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked">
                             @foreach (var connection in _connections)
                             {
                                 <MudSelectItem Value="@connection.Name">@connection.DisplayName</MudSelectItem>
@@ -62,12 +62,12 @@
                     else
                     {
                         <MudTextField @bind-Value="_sourceSqlFilePath" Label="高版本 SQL 文件路径"
-                                      Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                      Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked"
                                       Placeholder="可填服务器路径，也可上传完整 .sql" />
                     }
 
                     <MudTextField @bind-Value="_schemasText" Label="Schema"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked"
                                   Placeholder="多个用英文逗号分隔，默认 lhyy" />
                 </div>
 
@@ -77,7 +77,7 @@
                         <label class="database-upgrade-upload">
                             <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
                             <span>上传高版本 SQL</span>
-                            <InputFile OnChange="OnSourceSqlFileChanged" accept=".sql" />
+                            <InputFile OnChange="OnSourceSqlFileChanged" accept=".sql" disabled="@IsFormLocked" />
                         </label>
                         @if (!string.IsNullOrWhiteSpace(_uploadedSourceSqlFileName))
                         {
@@ -86,13 +86,13 @@
                     </div>
                 }
 
-                <MudCheckBox T="bool" @bind-Value="_includeDrop" Color="Color.Error" Disabled="_busy"
+                <MudCheckBox T="bool" @bind-Value="_includeDrop" Color="Color.Error" Disabled="@IsFormLocked"
                              Label="允许生成删除多余表、字段、索引、约束、视图、函数、触发器的 SQL" />
             </div>
         }
 
         <div class="database-upgrade-backup">
-            <MudCheckBox T="bool" @bind-Value="_skipBackup" Color="Color.Warning" Disabled="_busy"
+            <MudCheckBox T="bool" @bind-Value="_skipBackup" Color="Color.Warning" Disabled="@IsFormLocked"
                          Label="我已手工备份，跳过自动备份" />
         </div>
 
@@ -101,12 +101,12 @@
             <div class="database-upgrade-file-panel">
                 <div class="database-upgrade-file-row">
                     <MudTextField @bind-Value="_sqlFilePath" Label="服务器 SQL 文件路径"
-                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked"
                                   Placeholder="例如 D:\Upgrade\upgrade.sql；也可使用下方上传" />
                     <label class="database-upgrade-upload">
                         <MudIcon Icon="@Icons.Material.Filled.UploadFile" Size="Size.Small" />
                         <span>上传 SQL 文件</span>
-                        <InputFile OnChange="OnSqlFileChanged" accept=".sql" />
+                        <InputFile OnChange="OnSqlFileChanged" accept=".sql" disabled="@IsFormLocked" />
                     </label>
                 </div>
                 @if (!string.IsNullOrWhiteSpace(_uploadedSqlFileName))
@@ -132,26 +132,177 @@
         {
             <div class="database-upgrade-summary">
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">脚本总数：@_checkResult.TotalScriptCount</MudChip>
-                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">待执行：@_checkResult.PendingScripts.Count</MudChip>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">功能脚本：@_checkResult.LegacyScripts.Count</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Outlined">优化脚本未执行：@CountManagedScripts(DatabaseUpgradeScriptStatus.Pending)</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Outlined">优化脚本未知：@CountManagedScripts(DatabaseUpgradeScriptStatus.Unknown)</MudChip>
             </div>
 
-            <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" Class="database-upgrade-tabs">
-                <MudTabPanel Text="待执行脚本" Icon="@Icons.Material.Filled.PendingActions">
-                    @if (_checkResult.PendingScripts.Count == 0)
+            @if (!_checkResult.IsStateWritable && !string.IsNullOrWhiteSpace(_checkResult.StateErrorMessage))
+            {
+                <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+                    @_checkResult.StateErrorMessage。优化脚本执行和状态标记已禁用；功能脚本处理不依赖该状态文件。
+                </MudAlert>
+            }
+
+            <MudTabs @bind-ActivePanelIndex="_projectScriptTabIndex"
+                     Elevation="0"
+                     Rounded="false"
+                     ApplyEffectsToContainer="false"
+                     Class="database-upgrade-tabs">
+                <MudTabPanel Text="功能脚本处理" Icon="@Icons.Material.Filled.History">
+                    <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">
+                        功能脚本保留原有方式：确认后会先备份目标库，再按顺序执行下方所有功能脚本。
+                    </MudText>
+                    @if (_checkResult.LegacyScripts.Count == 0)
                     {
-                        <MudText Typo="Typo.body2" Class="database-upgrade-empty">没有待执行脚本。</MudText>
+                        <MudText Typo="Typo.body2" Class="database-upgrade-empty">没有功能脚本。</MudText>
                     }
                     else
                     {
-                        <MudList T="string" Dense="true" Class="database-upgrade-script-list">
-                            @foreach (var script in _checkResult.PendingScripts)
-                            {
-                                <MudListItem Icon="@Icons.Material.Filled.Description">@script</MudListItem>
-                            }
-                        </MudList>
+                        <MudTable Items="_checkResult.LegacyScripts" Dense="true" Hover="true" Elevation="0" Class="database-upgrade-table">
+                            <HeaderContent>
+                                <MudTh>脚本名称</MudTh>
+                                <MudTh>简介</MudTh>
+                                <MudTh>创建时间</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="脚本名称">
+                                    <div class="database-upgrade-script-name">@context.ScriptName</div>
+                                    <div class="database-upgrade-script-path">@context.ScriptKey</div>
+                                </MudTd>
+                                <MudTd DataLabel="简介">@context.Description</MudTd>
+                                <MudTd DataLabel="创建时间">@context.CreatedAt.ToString("yyyy-MM-dd")</MudTd>
+                            </RowTemplate>
+                        </MudTable>
+                    }
+                </MudTabPanel>
+                <MudTabPanel Text="优化脚本处理" Icon="@Icons.Material.Filled.NewReleases">
+                    @if (_checkResult.ManagedScripts.Count == 0)
+                    {
+                        <MudText Typo="Typo.body2" Class="database-upgrade-empty">没有优化脚本。</MudText>
+                    }
+                    else
+                    {
+                        <MudTable Items="_checkResult.ManagedScripts" Dense="true" Hover="true" Elevation="0" Class="database-upgrade-table">
+                            <HeaderContent>
+                                <MudTh>脚本名称</MudTh>
+                                <MudTh>简介</MudTh>
+                                <MudTh>创建时间</MudTh>
+                                <MudTh>状态</MudTh>
+                                <MudTh>操作</MudTh>
+                            </HeaderContent>
+                            <RowTemplate>
+                                <MudTd DataLabel="脚本名称">
+                                    <div class="database-upgrade-script-name">@context.ScriptName</div>
+                                    <div class="database-upgrade-script-path">@context.ScriptKey</div>
+                                </MudTd>
+                                <MudTd DataLabel="简介">@context.Description</MudTd>
+                                <MudTd DataLabel="创建时间">@context.CreatedAt.ToString("yyyy-MM-dd")</MudTd>
+                                <MudTd DataLabel="状态">
+                                    <MudChip T="string" Size="Size.Small" Color="@GetScriptStatusColor(context.Status)" Variant="Variant.Outlined">
+                                        @context.StatusText
+                                    </MudChip>
+                                </MudTd>
+                                <MudTd DataLabel="操作">
+                                    <div class="database-upgrade-row-actions">
+                                        @if (context.Status == DatabaseUpgradeScriptStatus.Pending)
+                                        {
+                                            <MudButton Variant="Variant.Outlined"
+                                                       Color="Color.Primary"
+                                                       Size="Size.Small"
+                                                       StartIcon="@Icons.Material.Filled.PlayArrow"
+                                                       Disabled="@(_busy || !_checkResult.IsStateWritable || IsTaskRunning || !IsConfirmTextValid)"
+                                                       OnClick="@(() => StartManagedScriptTask(context))">
+                                                执行
+                                            </MudButton>
+                                        }
+                                        else if (context.Status == DatabaseUpgradeScriptStatus.Unknown)
+                                        {
+                                            @if (context.CanMarkStatus)
+                                            {
+                                                <MudButton Variant="Variant.Outlined"
+                                                           Color="Color.Success"
+                                                           Size="Size.Small"
+                                                           Disabled="@(_busy || !_checkResult.IsStateWritable || IsTaskRunning || !IsConfirmTextValid)"
+                                                           OnClick="@(() => MarkScriptStatus(context, DatabaseUpgradeScriptStatus.Executed))">
+                                                    标记已执行
+                                                </MudButton>
+                                                <MudButton Variant="Variant.Outlined"
+                                                           Color="Color.Warning"
+                                                           Size="Size.Small"
+                                                           Disabled="@(_busy || !_checkResult.IsStateWritable || IsTaskRunning || !IsConfirmTextValid)"
+                                                           OnClick="@(() => MarkScriptStatus(context, DatabaseUpgradeScriptStatus.Pending))">
+                                                    标记未执行
+                                                </MudButton>
+                                            }
+                                            else
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                    状态由目标库检测决定，不能手工标记。
+                                                </MudText>
+                                            }
+                                        }
+                                    </div>
+                                </MudTd>
+                            </RowTemplate>
+                        </MudTable>
                     }
                 </MudTabPanel>
             </MudTabs>
+
+            @if (_currentTask != null)
+            {
+                <MudAlert Severity="@GetTaskSeverity(_currentTask.Status)" Variant="Variant.Outlined" Dense="true">
+                    @if (IsTaskRunning)
+                    {
+                        <span class="database-upgrade-running-state">脚本正在执行中</span>
+                        <span>；当前步骤：@_currentTask.CurrentStep；@_currentTask.StatusText</span>
+                    }
+                    else
+                    {
+                        <span>后台任务：@_currentTask.StatusText；当前步骤：@_currentTask.CurrentStep</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(_currentTask.ErrorMessage))
+                    {
+                        <span>；错误：@_currentTask.ErrorMessage</span>
+                    }
+                </MudAlert>
+                @if (_currentTask.Progress != null)
+                {
+                    <div class="database-upgrade-progress">
+                        <div class="database-upgrade-progress-header">
+                            <span>迁移历史终态消息</span>
+                            <span>@_currentTask.Progress.Percent.ToString("0.##")%</span>
+                        </div>
+                        <MudProgressLinear Color="Color.Info"
+                                           Value="@_currentTask.Progress.Percent"
+                                           Rounded="true"
+                                           Size="Size.Medium" />
+                        <div class="database-upgrade-progress-detail">
+                            <span>消息：@_currentTask.Progress.MigratedMessages.ToString("N0") / @_currentTask.Progress.TotalMessages.ToString("N0")</span>
+                            <span>处理日志：@_currentTask.Progress.MigratedLogs.ToString("N0")</span>
+                            <span>批次：@_currentTask.Progress.BatchIndex.ToString("N0")</span>
+                            <span>阈值：@_currentTask.Progress.Threshold.ToString("yyyy-MM-dd HH:mm:ss")</span>
+                        </div>
+                    </div>
+                }
+                @if (_currentTask.Logs.Count > 0)
+                {
+                    <div class="database-upgrade-task-log">
+                        <div class="database-upgrade-task-log-title">执行日志</div>
+                        <div class="database-upgrade-task-log-list">
+                            @foreach (var log in _currentTask.Logs)
+                            {
+                                <div class="database-upgrade-task-log-row @GetTaskLogLevelClass(log.Level)">
+                                    <span class="database-upgrade-task-log-time">@log.Timestamp.ToString("HH:mm:ss")</span>
+                                    <span class="database-upgrade-task-log-step">@log.Step</span>
+                                    <span class="database-upgrade-task-log-message">@log.Message</span>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            }
         }
 
         @if (_compareResult != null && IsCompareMode)
@@ -219,13 +370,16 @@
             <MudText Typo="Typo.subtitle2" Class="database-upgrade-confirm-title">执行确认</MudText>
             <MudText Typo="Typo.body2" Class="database-upgrade-subtitle">确认目标库和待执行内容无误后，输入“确认”启用执行按钮。</MudText>
             <MudTextField @bind-Value="_confirmText" Label="确认文本"
-                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="_busy" />
-            <div class="database-upgrade-button-row">
-                <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.PlayArrow"
-                           OnClick="ExecuteUpgrade" Disabled="@(!CanExecute)">
-                    @ExecuteButtonText
-                </MudButton>
-            </div>
+                          Variant="Variant.Outlined" Margin="Margin.Dense" Disabled="@IsFormLocked" />
+            @if (ShowBulkExecuteButton)
+            {
+                <div class="database-upgrade-button-row">
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" StartIcon="@Icons.Material.Filled.PlayArrow"
+                               OnClick="ExecuteUpgrade" Disabled="@(!CanExecute)">
+                        @ExecuteButtonText
+                    </MudButton>
+                </div>
+            }
             @if (!string.IsNullOrWhiteSpace(_executeMessage))
             {
                 <MudAlert Severity="_executeMessageSeverity" Variant="Variant.Outlined" Dense="true">@_executeMessage</MudAlert>
@@ -289,31 +443,41 @@
     private bool _sqlFileChecked;
     private bool _skipBackup;
     private bool _includeDrop;
+    private int _projectScriptTabIndex;
+    private Guid? _currentTaskId;
+    private DatabaseUpgradeTaskSnapshot? _currentTask;
     private DatabaseUpgradeCheckResult? _checkResult;
     private DatabaseUpgradeExecuteResult? _executeResult;
     private DatabaseCompareResult? _compareResult;
     private DatabaseCompareExecuteResult? _compareExecuteResult;
     private List<TableSyncSelection> _tableSyncSelections = [];
 
-    private bool CanOperate => !_busy && !string.IsNullOrWhiteSpace(_selectedConnectionName);
+    private bool CanOperate => !_busy && !IsTaskRunning && !string.IsNullOrWhiteSpace(_selectedConnectionName);
+    private bool IsFormLocked => _busy || IsTaskRunning;
     private bool IsProjectScriptsMode => string.Equals(_upgradeMode, ProjectScriptsMode, StringComparison.Ordinal);
     private bool IsSqlFileMode => string.Equals(_upgradeMode, SqlFileMode, StringComparison.Ordinal);
     private bool IsCompareMode => string.Equals(_upgradeMode, CompareMode, StringComparison.Ordinal);
     private bool IsCompareSourceConnectionMode => string.Equals(_compareSourceMode, CompareSourceConnectionMode, StringComparison.Ordinal);
     private bool IsCompareSourceSqlFileMode => string.Equals(_compareSourceMode, CompareSourceSqlFileMode, StringComparison.Ordinal);
+    private bool IsConfirmTextValid => string.Equals(_confirmText, "确认", StringComparison.Ordinal);
+    private bool IsTaskRunning => _currentTask is { IsTerminal: false };
+    private bool ShowBulkExecuteButton => !IsProjectScriptsMode || _projectScriptTabIndex == 0;
     private string ExecuteButtonText => IsSqlFileMode
         ? (_skipBackup ? "执行文件" : "备份并执行文件")
+        : IsProjectScriptsMode
+        ? (_skipBackup ? "执行功能脚本" : "备份并执行功能脚本")
         : (_skipBackup ? "执行升级" : "备份并升级");
     private bool CanExecute =>
         CanOperate
-        && string.Equals(_confirmText, "确认", StringComparison.Ordinal)
+        && IsConfirmTextValid
         && string.Equals(_checkedConnectionName, _selectedConnectionName, StringComparison.OrdinalIgnoreCase)
         && (IsCompareMode
             ? _compareResult != null
                 && _compareResult.Differences.Count > 0
                 && string.Equals(_checkedCompareKey, BuildCompareKey(), StringComparison.Ordinal)
             : IsProjectScriptsMode
-            ? _checkResult?.PendingScripts.Count > 0
+            ? _projectScriptTabIndex == 0
+                && _checkResult?.LegacyScripts.Count > 0
             : _sqlFileChecked
                 && !string.IsNullOrWhiteSpace(_sqlFilePath)
                 && string.Equals(_checkedSqlFilePath, _sqlFilePath, StringComparison.OrdinalIgnoreCase));
@@ -340,6 +504,12 @@
     {
         if (string.IsNullOrWhiteSpace(_selectedConnectionName))
             return;
+        if (IsTaskRunning)
+        {
+            _message = "后台升级任务正在执行，请等待完成后再检查升级。";
+            _messageSeverity = Severity.Warning;
+            return;
+        }
 
         _busy = true;
         _message = "正在检查数据库升级脚本...";
@@ -347,6 +517,8 @@
         _executeMessage = null;
         _executeResult = null;
         _compareExecuteResult = null;
+        _currentTask = null;
+        _currentTaskId = null;
 
         try
         {
@@ -388,9 +560,7 @@
                 _sqlFileChecked = false;
                 _checkedConnectionName = _selectedConnectionName;
                 _checkedSqlFilePath = null;
-                _message = _checkResult.PendingScripts.Count == 0
-                    ? "检查完成，没有待执行脚本。"
-                    : $"检查完成，共 {_checkResult.PendingScripts.Count} 个待执行脚本。";
+                _message = $"检查完成，功能脚本 {_checkResult.LegacyScripts.Count} 个，优化脚本 {_checkResult.ManagedScripts.Count} 个。";
                 _messageSeverity = Severity.Success;
             }
         }
@@ -438,14 +608,17 @@
                     .Where(table => table.Selected)
                     .Select(table => new DatabaseTableDataSyncRequest(table.Schema, table.Table, table.Mode))
                     .ToList();
-                _compareExecuteResult = await inj_databaseCompareService.ExecuteAsync(BuildCompareRequest(), syncTables, _skipBackup, CancellationToken);
+                var request = BuildCompareRequest();
+                _compareExecuteResult = await inj_databaseUpgradeService.RunExclusiveUpgradeOperationAsync(
+                    request.TargetConnectionName,
+                    () => inj_databaseCompareService.ExecuteAsync(request, syncTables, _skipBackup, CancellationToken));
                 _executeResult = null;
             }
             else
             {
                 _executeResult = IsSqlFileMode
                     ? await inj_databaseUpgradeService.ExecuteSqlFileAsync(_selectedConnectionName, _sqlFilePath ?? "", _pgDumpPath, _skipBackup, CancellationToken)
-                    : await inj_databaseUpgradeService.ExecuteAsync(_selectedConnectionName, _pgDumpPath, _skipBackup, CancellationToken);
+                    : await inj_databaseUpgradeService.ExecuteLegacyScriptsAsync(_selectedConnectionName, _pgDumpPath, _skipBackup, CancellationToken);
                 _compareExecuteResult = null;
             }
             _confirmText = null;
@@ -557,6 +730,170 @@
             return $"{bytes / 1024d:0.##} KB";
 
         return $"{bytes} B";
+    }
+
+    private int CountManagedScripts(DatabaseUpgradeScriptStatus status) =>
+        _checkResult?.ManagedScripts.Count(script => script.Status == status) ?? 0;
+
+    private static Color GetScriptStatusColor(DatabaseUpgradeScriptStatus status) =>
+        status switch
+        {
+            DatabaseUpgradeScriptStatus.Executed => Color.Success,
+            DatabaseUpgradeScriptStatus.Pending => Color.Warning,
+            _ => Color.Default
+        };
+
+    private static Severity GetTaskSeverity(DatabaseUpgradeTaskStatus status) =>
+        status switch
+        {
+            DatabaseUpgradeTaskStatus.Succeeded => Severity.Success,
+            DatabaseUpgradeTaskStatus.Failed => Severity.Error,
+            _ => Severity.Info
+        };
+
+    private static string GetTaskLogLevelClass(string level) =>
+        level switch
+        {
+            "Success" => "is-success",
+            "Error" => "is-error",
+            _ => "is-info"
+        };
+
+    private async Task StartManagedScriptTask(DatabaseUpgradeScriptItem script)
+    {
+        if (_busy
+            || IsTaskRunning
+            || !IsConfirmTextValid
+            || string.IsNullOrWhiteSpace(_selectedConnectionName)
+            || script.Status != DatabaseUpgradeScriptStatus.Pending)
+            return;
+
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认执行脚本",
+            _skipBackup
+                ? $"将跳过自动备份，直接执行脚本：{script.ScriptName}。确认继续？"
+                : $"将先备份目标数据库，再执行脚本：{script.ScriptName}。确认继续？",
+            yesText: "确认执行",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        _busy = true;
+        _executeMessage = $"已提交后台任务：{script.ScriptName}";
+        _executeMessageSeverity = Severity.Info;
+        _executeResult = null;
+        _compareExecuteResult = null;
+
+        try
+        {
+            _currentTask = await inj_databaseUpgradeService.StartManagedScriptTaskAsync(
+                _selectedConnectionName,
+                script.ScriptKey,
+                _pgDumpPath,
+                _skipBackup,
+                CancellationToken);
+            _currentTaskId = _currentTask.TaskId;
+            _confirmText = null;
+            _ = PollCurrentTaskAsync(_currentTask.TaskId);
+        }
+        catch (Exception ex)
+        {
+            _executeMessage = $"提交后台任务失败：{ex.Message}";
+            _executeMessageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task PollCurrentTaskAsync(Guid taskId)
+    {
+        try
+        {
+            while (!CancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(1500, CancellationToken);
+                var snapshot = inj_databaseUpgradeService.GetTaskSnapshot(taskId);
+                if (snapshot is null)
+                    return;
+
+                await InvokeAsync(async () =>
+                {
+                    _currentTask = snapshot;
+                    if (snapshot.IsTerminal)
+                    {
+                        _executeMessage = snapshot.Status == DatabaseUpgradeTaskStatus.Succeeded
+                            ? "后台升级任务完成。"
+                            : $"后台升级任务失败：{snapshot.ErrorMessage}";
+                        _executeMessageSeverity = snapshot.Status == DatabaseUpgradeTaskStatus.Succeeded
+                            ? Severity.Success
+                            : Severity.Error;
+
+                        if (!string.IsNullOrWhiteSpace(snapshot.ConnectionName))
+                        {
+                            _selectedConnectionName = snapshot.ConnectionName;
+                            _checkedConnectionName = snapshot.ConnectionName;
+                            _checkResult = await inj_databaseUpgradeService.CheckAsync(snapshot.ConnectionName, CancellationToken);
+                        }
+                    }
+
+                    StateHasChanged();
+                });
+
+                if (snapshot.IsTerminal)
+                    return;
+            }
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            await InvokeAsync(() =>
+            {
+                _executeMessage = $"后台任务轮询失败：{ex.Message}";
+                _executeMessageSeverity = Severity.Error;
+                StateHasChanged();
+            });
+        }
+    }
+
+    private async Task MarkScriptStatus(DatabaseUpgradeScriptItem script, DatabaseUpgradeScriptStatus status)
+    {
+        if (_busy || IsTaskRunning || string.IsNullOrWhiteSpace(_selectedConnectionName) || !IsConfirmTextValid)
+            return;
+
+        var targetStatusText = status == DatabaseUpgradeScriptStatus.Executed ? "已执行" : "未执行";
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认标记脚本状态",
+            $"只修改本地升级状态，不执行 SQL。确定将「{script.ScriptName}」标记为「{targetStatusText}」？",
+            yesText: "确认标记",
+            cancelText: "取消");
+        if (confirmed != true)
+            return;
+
+        _busy = true;
+        _executeMessage = $"正在标记脚本状态：{script.ScriptName}";
+        _executeMessageSeverity = Severity.Info;
+
+        try
+        {
+            await inj_databaseUpgradeService.MarkScriptStatusAsync(_selectedConnectionName, script.ScriptKey, status, CancellationToken);
+            _confirmText = null;
+            _executeMessage = "脚本状态已更新。";
+            _executeMessageSeverity = Severity.Success;
+            _checkResult = await inj_databaseUpgradeService.CheckAsync(_selectedConnectionName, CancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _executeMessage = $"标记失败：{ex.Message}";
+            _executeMessageSeverity = Severity.Error;
+        }
+        finally
+        {
+            _busy = false;
+        }
     }
 
     private sealed class TableSyncSelection

@@ -15,6 +15,51 @@ public static class MessageArchiveTool
     public static bool IsCommand(string[] args) =>
         args.Length > 0 && string.Equals(args[0], CommandName, StringComparison.OrdinalIgnoreCase);
 
+    public static async Task RunIntegratedUpgradeAsync(
+        string connectionString,
+        string rootPath,
+        Action<string>? progress = null,
+        CancellationToken cancellationToken = default,
+        int batchSize = DefaultBatchSize,
+        Action<MessageArchiveProgress>? archiveProgress = null)
+    {
+        var backupStampPath = Path.Combine(
+            Path.GetTempPath(),
+            $"datasync_lhyy_esb_messages_{Guid.NewGuid():N}.stamp");
+
+        var options = new ToolOptions(
+            ScriptsPath: rootPath,
+            BackupStampPath: backupStampPath,
+            BatchSize: batchSize,
+            SkipBackup: true);
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Invoke("升级归档结构");
+            var upgradeResult = await UpgradeAsync(connectionString, options, cancellationToken);
+            if (upgradeResult != 0)
+                throw new InvalidOperationException("ESB 消息归档结构升级未成功完成。");
+
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Invoke("迁移历史终态消息");
+            var migrateResult = await MigrateAsync(connectionString, options, cancellationToken, archiveProgress);
+            if (migrateResult != 0)
+                throw new InvalidOperationException("ESB 历史消息迁移未成功完成。");
+
+            cancellationToken.ThrowIfCancellationRequested();
+            progress?.Invoke("校验归档结果");
+            var verifyResult = await VerifyAsync(connectionString, cancellationToken);
+            if (verifyResult != 0)
+                throw new InvalidOperationException("ESB 消息归档升级校验未通过。");
+        }
+        finally
+        {
+            if (File.Exists(backupStampPath))
+                File.Delete(backupStampPath);
+        }
+    }
+
     public static async Task<int> RunAsync(string[] args)
     {
         Console.OutputEncoding = System.Text.Encoding.UTF8;
@@ -47,26 +92,29 @@ public static class MessageArchiveTool
         }
     }
 
-    private static async Task<int> UpgradeAsync(string connectionString, ToolOptions options)
+    private static async Task<int> UpgradeAsync(
+        string connectionString,
+        ToolOptions options,
+        CancellationToken cancellationToken = default)
     {
         var rootPath = ToolConnectionHelper.ResolveRootPath(options.ScriptsPath);
         var scriptPath = Path.Combine(rootPath, UpgradeScriptRelativePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(scriptPath))
             throw new FileNotFoundException("未找到本次 ESB 消息性能优化升级脚本。", scriptPath);
 
-        var sql = await File.ReadAllTextAsync(scriptPath);
+        var sql = await File.ReadAllTextAsync(scriptPath, cancellationToken);
         await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
+        await connection.OpenAsync(cancellationToken);
 
-        if (!await TryAcquireArchiveLockAsync(connection))
+        if (!await TryAcquireArchiveLockAsync(connection, cancellationToken))
             throw new InvalidOperationException("已有归档任务正在执行，请等待后台归档或其他迁移工具结束后再重试。");
 
         try
         {
             Console.WriteLine("开始升级前自检：检查本次优化依赖的基础表结构。");
-            await ValidateOptimizationPrerequisitesAsync(connection);
+            await ValidateOptimizationPrerequisitesAsync(connection, cancellationToken);
 
-            if (await IsArchiveOptimizationReadyAsync(connection))
+            if (await IsArchiveOptimizationReadyAsync(connection, cancellationToken))
             {
                 Console.WriteLine("检测到本次 ESB 消息性能优化结构已安装且校验通过，跳过升级脚本和重复备份。");
                 return 0;
@@ -79,16 +127,16 @@ public static class MessageArchiveTool
             else
             {
                 Console.WriteLine("开始备份数据库。");
-                var backupFile = await BackupDatabaseAsync(connectionString, rootPath, options.PgDumpPath);
+                var backupFile = await BackupDatabaseAsync(connectionString, rootPath, options.PgDumpPath, cancellationToken);
                 WriteBackupStamp(options.BackupStampPath, backupFile);
                 Console.WriteLine($"备份完成：{backupFile}");
             }
 
             Console.WriteLine($"执行本次优化升级脚本：{Path.GetRelativePath(rootPath, scriptPath)}");
-            await SqlScriptExecutionHelper.ExecuteAsync(connection, sql);
+            await SqlScriptExecutionHelper.ExecuteAsync(connection, sql, cancellationToken);
 
             Console.WriteLine("开始升级后自检：检查归档表、统一视图和关键索引。");
-            await ValidateArchiveOptimizationAsync(connection);
+            await ValidateArchiveOptimizationAsync(connection, cancellationToken);
 
             Console.WriteLine("升级完成：ESB 消息冷热归档与查询优化已就绪。");
             return 0;
@@ -99,26 +147,32 @@ public static class MessageArchiveTool
         }
     }
 
-    private static async Task<int> MigrateAsync(string connectionString, ToolOptions options)
+    private static async Task<int> MigrateAsync(
+        string connectionString,
+        ToolOptions options,
+        CancellationToken cancellationToken = default,
+        Action<MessageArchiveProgress>? progress = null)
     {
         var rootPath = ToolConnectionHelper.ResolveRootPath(options.ScriptsPath);
         await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
+        await connection.OpenAsync(cancellationToken);
 
-        if (!await TryAcquireArchiveLockAsync(connection))
+        if (!await TryAcquireArchiveLockAsync(connection, cancellationToken))
             throw new InvalidOperationException("已有归档任务正在执行，请等待后台归档或其他迁移工具结束后再重试。");
 
         try
         {
-            await ValidateArchiveOptimizationAsync(connection);
+            await ValidateArchiveOptimizationAsync(connection, cancellationToken);
 
-            var hotDays = await ResolveHotRetentionDaysAsync(connection, options);
+            var hotDays = await ResolveHotRetentionDaysAsync(connection, options, cancellationToken);
             var threshold = DateTime.Now.AddDays(-hotDays);
             Console.WriteLine($"本次迁移使用热表保留天数：{hotDays}，阈值：{threshold:yyyy-MM-dd HH:mm:ss}。");
+            var plannedMessages = await CountEligibleMessagesAsync(connection, threshold, cancellationToken);
+            progress?.Invoke(new MessageArchiveProgress(plannedMessages, 0, 0, 0, 0, threshold, false));
 
-            if (!options.DryRun && !options.SkipBackup && await HasEligibleMessagesAsync(connection, threshold))
+            if (!options.DryRun && !options.SkipBackup && plannedMessages > 0)
             {
-                var backupFile = await EnsureRecentBackupAsync(connectionString, rootPath, options.PgDumpPath, options.BackupStampPath);
+                var backupFile = await EnsureRecentBackupAsync(connectionString, rootPath, options.PgDumpPath, options.BackupStampPath, cancellationToken);
                 Console.WriteLine($"迁移前备份确认完成：{backupFile}");
             }
             else if (!options.DryRun && options.SkipBackup)
@@ -132,8 +186,9 @@ public static class MessageArchiveTool
 
             while (true)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 batchIndex++;
-                await using var transaction = await connection.BeginTransactionAsync();
+                await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
                 try
                 {
                     await ExecuteNonQueryAsync(connection, transaction, """
@@ -141,7 +196,8 @@ public static class MessageArchiveTool
                             id BIGINT PRIMARY KEY,
                             created_at TIMESTAMP NOT NULL
                         ) ON COMMIT DROP;
-                        """);
+                        """,
+                        cancellationToken);
 
                     await ExecuteNonQueryAsync(connection, transaction, """
                         INSERT INTO tmp_esb_archive_batch (id, created_at)
@@ -153,30 +209,32 @@ public static class MessageArchiveTool
                         LIMIT @batchSize
                         FOR UPDATE SKIP LOCKED;
                         """,
+                        cancellationToken,
                         ("threshold", threshold),
                         ("batchSize", options.BatchSize));
 
-                    var batchCount = await ExecuteScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM tmp_esb_archive_batch;");
+                    var batchCount = await ExecuteScalarLongAsync(connection, transaction, "SELECT COUNT(*) FROM tmp_esb_archive_batch;", cancellationToken);
                     if (batchCount == 0)
                     {
-                        await transaction.RollbackAsync();
+                        await transaction.RollbackAsync(CancellationToken.None);
                         break;
                     }
 
-                    var months = await LoadArchiveMonthsAsync(connection, transaction);
+                    var months = await LoadArchiveMonthsAsync(connection, transaction, cancellationToken);
                     foreach (var month in months)
                     {
                         await ExecuteNonQueryAsync(
                             connection,
                             transaction,
                             "SELECT lhyy.ensure_esb_archive_partition(CAST(@month AS date));",
+                            cancellationToken,
                             ("month", month));
                     }
 
                     if (options.DryRun)
                     {
                         Console.WriteLine($"批次 {batchIndex}: 将迁移 {batchCount} 条消息，涉及 {months.Count} 个月份分区。");
-                        await transaction.RollbackAsync();
+                        await transaction.RollbackAsync(CancellationToken.None);
                         break;
                     }
 
@@ -240,7 +298,8 @@ public static class MessageArchiveTool
                         INNER JOIN tmp_esb_archive_batch b ON b.id = m.id
                         WHERE TRUE
                         ON CONFLICT DO NOTHING;
-                        """);
+                        """,
+                        cancellationToken);
 
                     var insertedLogs = await ExecuteNonQueryAsync(connection, transaction, """
                         INSERT INTO lhyy.esb_process_log_archive (
@@ -268,9 +327,10 @@ public static class MessageArchiveTool
                         INNER JOIN tmp_esb_archive_batch b ON b.id = l.message_id
                         WHERE TRUE
                         ON CONFLICT DO NOTHING;
-                        """);
+                        """,
+                        cancellationToken);
 
-                    await ExecuteNonQueryAsync(connection, transaction, """
+                    var deletedLogs = await ExecuteNonQueryAsync(connection, transaction, """
                         DELETE FROM lhyy.esb_process_log l
                         USING tmp_esb_archive_batch b
                         WHERE b.id = l.message_id
@@ -280,9 +340,10 @@ public static class MessageArchiveTool
                               WHERE a.id = b.id
                                 AND a.created_at = b.created_at
                           );
-                        """);
+                        """,
+                        cancellationToken);
 
-                    await ExecuteNonQueryAsync(connection, transaction, """
+                    var deletedMessages = await ExecuteNonQueryAsync(connection, transaction, """
                         DELETE FROM lhyy.esb_messages m
                         USING tmp_esb_archive_batch b
                         WHERE b.id = m.id
@@ -292,24 +353,35 @@ public static class MessageArchiveTool
                               WHERE a.id = b.id
                                 AND a.created_at = b.created_at
                           );
-                        """);
+                        """,
+                        cancellationToken);
 
-                    await transaction.CommitAsync();
-                    totalMessages += insertedMessages;
-                    totalLogs += insertedLogs;
-                    Console.WriteLine($"批次 {batchIndex}: 处理消息 {batchCount} 条，迁移消息 {insertedMessages} 条，处理日志 {insertedLogs} 条。");
+                    await transaction.CommitAsync(cancellationToken);
+                    totalMessages += deletedMessages;
+                    totalLogs += deletedLogs;
+                    progress?.Invoke(new MessageArchiveProgress(plannedMessages, totalMessages, totalLogs, batchIndex, batchCount, threshold, false));
+                    Console.WriteLine($"批次 {batchIndex}: 处理消息 {batchCount} 条，迁移消息 {deletedMessages} 条（新归档 {insertedMessages} 条），处理日志 {deletedLogs} 条（新归档 {insertedLogs} 条）。");
                 }
-                catch
+                catch (Exception ex)
                 {
-                    await transaction.RollbackAsync();
+                    try
+                    {
+                        await transaction.RollbackAsync(CancellationToken.None);
+                    }
+                    catch (Exception rollbackEx)
+                    {
+                        Console.WriteLine($"批次 {batchIndex}: 事务回滚失败：{rollbackEx.Message}。原始错误：{ex.Message}");
+                    }
+
                     throw;
                 }
             }
 
             if (!options.DryRun)
-                await SynchronizeIdentitySequencesAsync(connection);
+                await SynchronizeIdentitySequencesAsync(connection, cancellationToken);
 
             Console.WriteLine($"迁移完成：消息 {totalMessages} 条，处理日志 {totalLogs} 条，阈值 {threshold:yyyy-MM-dd HH:mm:ss}。");
+            progress?.Invoke(new MessageArchiveProgress(plannedMessages, totalMessages, totalLogs, batchIndex, 0, threshold, true));
             return 0;
         }
         finally
@@ -318,18 +390,20 @@ public static class MessageArchiveTool
         }
     }
 
-    private static async Task<int> VerifyAsync(string connectionString)
+    private static async Task<int> VerifyAsync(
+        string connectionString,
+        CancellationToken cancellationToken = default)
     {
         await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync();
-        await ValidateArchiveOptimizationAsync(connection);
+        await connection.OpenAsync(cancellationToken);
+        await ValidateArchiveOptimizationAsync(connection, cancellationToken);
 
-        var hotMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages;");
-        var archiveMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages_archive;");
-        var allMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages_all;");
-        var hotLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log;");
-        var archiveLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log_archive;");
-        var allLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log_all;");
+        var hotMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages;", cancellationToken);
+        var archiveMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages_archive;", cancellationToken);
+        var allMessages = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_messages_all;", cancellationToken);
+        var hotLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log;", cancellationToken);
+        var archiveLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log_archive;", cancellationToken);
+        var allLogs = await ExecuteScalarLongAsync(connection, null, "SELECT COUNT(*) FROM lhyy.esb_process_log_all;", cancellationToken);
 
         Console.WriteLine($"消息：热表={hotMessages}, 归档={archiveMessages}, 统一视图={allMessages}");
         Console.WriteLine($"处理日志：热表={hotLogs}, 归档={archiveLogs}, 统一视图={allLogs}");
@@ -347,7 +421,8 @@ public static class MessageArchiveTool
                 INTERSECT
                 SELECT id FROM lhyy.esb_messages_archive
             ) d;
-            """);
+            """,
+            cancellationToken);
         if (duplicatedMessageIdsAcrossHotAndArchive > 0)
             throw new InvalidOperationException($"热表与归档消息存在重复 ID：{duplicatedMessageIdsAcrossHotAndArchive} 个。");
 
@@ -358,7 +433,8 @@ public static class MessageArchiveTool
                 INTERSECT
                 SELECT id FROM lhyy.esb_process_log_archive
             ) d;
-            """);
+            """,
+            cancellationToken);
         if (duplicatedLogIdsAcrossHotAndArchive > 0)
             throw new InvalidOperationException($"热表与归档处理日志存在重复 ID：{duplicatedLogIdsAcrossHotAndArchive} 个。");
 
@@ -370,7 +446,8 @@ public static class MessageArchiveTool
                 GROUP BY id, created_at
                 HAVING COUNT(*) > 1
             ) d;
-            """);
+            """,
+            cancellationToken);
         if (duplicateMessages > 0)
             throw new InvalidOperationException($"归档消息存在重复数据：{duplicateMessages} 组。");
 
@@ -382,17 +459,20 @@ public static class MessageArchiveTool
                 GROUP BY id, created_at
                 HAVING COUNT(*) > 1
             ) d;
-            """);
+            """,
+            cancellationToken);
         if (duplicateLogs > 0)
             throw new InvalidOperationException($"归档处理日志存在重复数据：{duplicateLogs} 组。");
 
-        await SynchronizeIdentitySequencesAsync(connection);
+        await SynchronizeIdentitySequencesAsync(connection, cancellationToken);
 
         Console.WriteLine("校验通过。");
         return 0;
     }
 
-    private static async Task ValidateOptimizationPrerequisitesAsync(NpgsqlConnection connection)
+    private static async Task ValidateOptimizationPrerequisitesAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
     {
         var missingColumns = await ExecuteScalarLongAsync(connection, null, """
             SELECT COUNT(*)
@@ -443,13 +523,16 @@ public static class MessageArchiveTool
                   AND c.table_name = required.table_name
                   AND c.column_name = required.column_name
             );
-            """);
+            """,
+            cancellationToken);
 
         if (missingColumns > 0)
             throw new InvalidOperationException("当前数据库缺少本次优化依赖的基础表结构。请先完成客户当前版本应执行的基础升级，再执行本次 ESB 消息性能优化升级。");
     }
 
-    private static async Task ValidateArchiveOptimizationAsync(NpgsqlConnection connection)
+    private static async Task ValidateArchiveOptimizationAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
     {
         var missingObjects = await ExecuteScalarLongAsync(connection, null, """
             SELECT COUNT(*)
@@ -461,7 +544,8 @@ public static class MessageArchiveTool
                     ('lhyy.esb_process_log_all')
             ) AS required(object_name)
             WHERE to_regclass(required.object_name) IS NULL;
-            """);
+            """,
+            cancellationToken);
         if (missingObjects > 0)
             throw new InvalidOperationException("归档表或统一视图未创建完整。");
 
@@ -488,7 +572,8 @@ public static class MessageArchiveTool
                     ('ix_esb_process_log_archive_project_created')
             ) AS required(index_name)
             WHERE to_regclass('lhyy.' || required.index_name) IS NULL;
-            """);
+            """,
+            cancellationToken);
         if (missingIndexes > 0)
             throw new InvalidOperationException($"缺少 {missingIndexes} 个本次优化相关索引。");
 
@@ -510,7 +595,8 @@ public static class MessageArchiveTool
                   'ux_esb_process_log_archive_id_created_at'
               )
               AND i.indisvalid = FALSE;
-            """);
+            """,
+            cancellationToken);
         if (invalidIndexes > 0)
             throw new InvalidOperationException($"存在 {invalidIndexes} 个本次优化相关的无效索引。");
 
@@ -544,16 +630,19 @@ public static class MessageArchiveTool
                   SELECT bool_and(lower(pg_get_indexdef(c.oid)) LIKE '%' || lower(pattern) || '%')
                   FROM unnest(r.patterns) AS pattern
               );
-            """);
+            """,
+            cancellationToken);
         if (unexpectedIndexDefinitions > 0)
             throw new InvalidOperationException($"存在 {unexpectedIndexDefinitions} 个本次优化相关索引定义不符合预期。");
     }
 
-    private static async Task<bool> IsArchiveOptimizationReadyAsync(NpgsqlConnection connection)
+    private static async Task<bool> IsArchiveOptimizationReadyAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            await ValidateArchiveOptimizationAsync(connection);
+            await ValidateArchiveOptimizationAsync(connection, cancellationToken);
             return true;
         }
         catch
@@ -562,7 +651,10 @@ public static class MessageArchiveTool
         }
     }
 
-    private static async Task<int> ResolveHotRetentionDaysAsync(NpgsqlConnection connection, ToolOptions options)
+    private static async Task<int> ResolveHotRetentionDaysAsync(
+        NpgsqlConnection connection,
+        ToolOptions options,
+        CancellationToken cancellationToken = default)
     {
         if (options.HotDays.HasValue)
             return options.HotDays.Value;
@@ -572,47 +664,65 @@ public static class MessageArchiveTool
             FROM lhyy.esb_global_config
             WHERE config_key = 'MessageHotRetentionDays'
             LIMIT 1;
-            """);
+            """,
+            cancellationToken);
 
         return int.TryParse(configValue, out var days) && days > 0
             ? days
             : DefaultHotDays;
     }
 
-    private static async Task<bool> HasEligibleMessagesAsync(NpgsqlConnection connection, DateTime threshold)
+    private static async Task<bool> HasEligibleMessagesAsync(
+        NpgsqlConnection connection,
+        DateTime threshold,
+        CancellationToken cancellationToken = default)
     {
-        return await ExecuteScalarBoolAsync(connection, null, """
-            SELECT EXISTS (
-                SELECT 1
-                FROM lhyy.esb_messages
-                WHERE created_at < @threshold
-                  AND status IN (2, 4, 5, 6)
-                LIMIT 1
-            );
-            """, ("threshold", threshold));
+        var count = await CountEligibleMessagesAsync(connection, threshold, cancellationToken);
+        return count > 0;
     }
 
-    private static async Task SynchronizeIdentitySequencesAsync(NpgsqlConnection connection)
+    private static async Task<long> CountEligibleMessagesAsync(
+        NpgsqlConnection connection,
+        DateTime threshold,
+        CancellationToken cancellationToken = default)
+    {
+        return await ExecuteScalarLongAsync(connection, null, """
+            SELECT COUNT(*)
+            FROM lhyy.esb_messages
+            WHERE created_at < @threshold
+              AND status IN (2, 4, 5, 6);
+            """,
+            cancellationToken,
+            ("threshold", threshold));
+    }
+
+    private static async Task SynchronizeIdentitySequencesAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
     {
         await SynchronizeIdentitySequenceAsync(
             connection,
             "lhyy.esb_messages",
-            "lhyy.esb_messages_archive");
+            "lhyy.esb_messages_archive",
+            cancellationToken);
         await SynchronizeIdentitySequenceAsync(
             connection,
             "lhyy.esb_process_log",
-            "lhyy.esb_process_log_archive");
+            "lhyy.esb_process_log_archive",
+            cancellationToken);
     }
 
     private static async Task SynchronizeIdentitySequenceAsync(
         NpgsqlConnection connection,
         string hotTableName,
-        string archiveTableName)
+        string archiveTableName,
+        CancellationToken cancellationToken = default)
     {
         var sequenceName = await ExecuteScalarStringAsync(
             connection,
             null,
             "SELECT pg_get_serial_sequence(@tableName, 'id');",
+            cancellationToken,
             ("tableName", hotTableName));
         if (string.IsNullOrWhiteSpace(sequenceName))
             return;
@@ -622,19 +732,21 @@ public static class MessageArchiveTool
                 COALESCE((SELECT MAX(id) FROM {hotTableName}), 0),
                 COALESCE((SELECT MAX(id) FROM {archiveTableName}), 0),
                 1);
-            """);
+            """,
+            cancellationToken);
 
         await using var command = new NpgsqlCommand("SELECT setval(@sequenceName, @maxId, true);", connection);
         command.Parameters.AddWithValue("sequenceName", sequenceName);
         command.Parameters.AddWithValue("maxId", maxId);
-        await command.ExecuteScalarAsync();
+        await command.ExecuteScalarAsync(cancellationToken);
     }
 
     private static async Task<string> EnsureRecentBackupAsync(
         string connectionString,
         string rootPath,
         string? configuredPgDumpPath,
-        string? backupStampPath)
+        string? backupStampPath,
+        CancellationToken cancellationToken = default)
     {
         var stampedBackup = ReadStampedBackupFile(connectionString, backupStampPath, BackupReuseWindow);
         if (stampedBackup is not null)
@@ -651,12 +763,16 @@ public static class MessageArchiveTool
         }
 
         Console.WriteLine("迁移将删除热表中已归档数据，开始迁移前备份数据库。");
-        var backupFile = await BackupDatabaseAsync(connectionString, rootPath, configuredPgDumpPath);
+        var backupFile = await BackupDatabaseAsync(connectionString, rootPath, configuredPgDumpPath, cancellationToken);
         WriteBackupStamp(backupStampPath, backupFile);
         return backupFile;
     }
 
-    private static async Task<string> BackupDatabaseAsync(string connectionString, string rootPath, string? configuredPgDumpPath)
+    private static async Task<string> BackupDatabaseAsync(
+        string connectionString,
+        string rootPath,
+        string? configuredPgDumpPath,
+        CancellationToken cancellationToken = default)
     {
         var pgDumpPath = ResolvePgDumpPath(configuredPgDumpPath)
             ?? throw new InvalidOperationException("未找到 pg_dump.exe，无法备份，升级已停止。");
@@ -676,7 +792,7 @@ public static class MessageArchiveTool
             backupDirectory,
             $"{BuildBackupFilePrefix(host, port, database)}{DateTime.Now:yyyyMMdd_HHmmss}.backup");
 
-        var process = new Process();
+        using var process = new Process();
         process.StartInfo.FileName = pgDumpPath;
         process.StartInfo.UseShellExecute = false;
         process.StartInfo.RedirectStandardError = true;
@@ -696,15 +812,63 @@ public static class MessageArchiveTool
         process.StartInfo.ArgumentList.Add(backupFile);
         process.StartInfo.ArgumentList.Add("--no-password");
 
-        process.Start();
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
+        var (output, error) = await RunProcessAndCaptureOutputAsync(process, cancellationToken);
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException($"pg_dump 备份失败：{error}{output}");
 
         return backupFile;
+    }
+
+    private static async Task<(string Output, string Error)> RunProcessAndCaptureOutputAsync(
+        Process process,
+        CancellationToken cancellationToken)
+    {
+        process.Start();
+        var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+        var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken);
+            return (await outputTask, await errorTask);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+
+                try
+                {
+                    await process.WaitForExitAsync(CancellationToken.None);
+                }
+                catch (InvalidOperationException)
+                {
+                }
+            }
+
+            await ObserveProcessOutputTaskAsync(outputTask);
+            await ObserveProcessOutputTaskAsync(errorTask);
+            throw;
+        }
+    }
+
+    private static async Task ObserveProcessOutputTaskAsync(Task<string> task)
+    {
+        try
+        {
+            await task;
+        }
+        catch
+        {
+        }
     }
 
     private static string? FindRecentBackupFile(string connectionString, string rootPath, TimeSpan maxAge)
@@ -881,7 +1045,10 @@ public static class MessageArchiveTool
         return (host, port);
     }
 
-    private static async Task<List<DateTime>> LoadArchiveMonthsAsync(NpgsqlConnection connection, NpgsqlTransaction transaction)
+    private static async Task<List<DateTime>> LoadArchiveMonthsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken = default)
     {
         var result = new List<DateTime>();
         await using var command = new NpgsqlCommand("""
@@ -897,8 +1064,8 @@ public static class MessageArchiveTool
             ORDER BY 1;
             """, connection, transaction);
 
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
             result.Add(reader.GetDateTime(0));
 
         return result;
@@ -909,9 +1076,17 @@ public static class MessageArchiveTool
         NpgsqlTransaction? transaction,
         string sql,
         params (string Name, object Value)[] parameters)
+        => await ExecuteNonQueryAsync(connection, transaction, sql, CancellationToken.None, parameters);
+
+    private static async Task<int> ExecuteNonQueryAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = BuildCommand(connection, transaction, sql, parameters);
-        return await command.ExecuteNonQueryAsync();
+        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task<long> ExecuteScalarLongAsync(
@@ -919,9 +1094,17 @@ public static class MessageArchiveTool
         NpgsqlTransaction? transaction,
         string sql,
         params (string Name, object Value)[] parameters)
+        => await ExecuteScalarLongAsync(connection, transaction, sql, CancellationToken.None, parameters);
+
+    private static async Task<long> ExecuteScalarLongAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = BuildCommand(connection, transaction, sql, parameters);
-        var value = await command.ExecuteScalarAsync();
+        var value = await command.ExecuteScalarAsync(cancellationToken);
         return Convert.ToInt64(value);
     }
 
@@ -930,9 +1113,17 @@ public static class MessageArchiveTool
         NpgsqlTransaction? transaction,
         string sql,
         params (string Name, object Value)[] parameters)
+        => await ExecuteScalarBoolAsync(connection, transaction, sql, CancellationToken.None, parameters);
+
+    private static async Task<bool> ExecuteScalarBoolAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = BuildCommand(connection, transaction, sql, parameters);
-        var value = await command.ExecuteScalarAsync();
+        var value = await command.ExecuteScalarAsync(cancellationToken);
         return value is bool result && result;
     }
 
@@ -941,9 +1132,17 @@ public static class MessageArchiveTool
         NpgsqlTransaction? transaction,
         string sql,
         params (string Name, object Value)[] parameters)
+        => await ExecuteScalarStringAsync(connection, transaction, sql, CancellationToken.None, parameters);
+
+    private static async Task<string?> ExecuteScalarStringAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        string sql,
+        CancellationToken cancellationToken,
+        params (string Name, object Value)[] parameters)
     {
         await using var command = BuildCommand(connection, transaction, sql, parameters);
-        var value = await command.ExecuteScalarAsync();
+        var value = await command.ExecuteScalarAsync(cancellationToken);
         return value?.ToString();
     }
 
@@ -959,11 +1158,13 @@ public static class MessageArchiveTool
         return command;
     }
 
-    private static async Task<bool> TryAcquireArchiveLockAsync(NpgsqlConnection connection)
+    private static async Task<bool> TryAcquireArchiveLockAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken = default)
     {
         await using var command = new NpgsqlCommand("SELECT pg_try_advisory_lock(@lockKey);", connection);
         command.Parameters.AddWithValue("lockKey", ArchiveLockKey);
-        var value = await command.ExecuteScalarAsync();
+        var value = await command.ExecuteScalarAsync(cancellationToken);
         return value is bool acquired && acquired;
     }
 
@@ -1054,4 +1255,18 @@ public static class MessageArchiveTool
             return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : fallback;
         }
     }
+}
+
+public sealed record MessageArchiveProgress(
+    long TotalMessages,
+    long MigratedMessages,
+    long MigratedLogs,
+    int BatchIndex,
+    long CurrentBatchMessages,
+    DateTime Threshold,
+    bool IsCompleted)
+{
+    public double Percent => TotalMessages <= 0
+        ? (IsCompleted ? 100d : 0d)
+        : Math.Clamp(MigratedMessages * 100d / TotalMessages, 0d, 100d);
 }
