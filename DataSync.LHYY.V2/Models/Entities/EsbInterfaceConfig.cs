@@ -99,6 +99,21 @@ public class EsbInterfaceConfig
     [Column("medical_record_sync_role")]
     public MedicalRecordSyncRole MedicalRecordSyncRole { get; set; } = MedicalRecordSyncRole.None;
 
+    [Column("soap_enabled")]
+    public bool SoapEnabled { get; set; }
+
+    [Column("soap_service_code")]
+    [MaxLength(100)]
+    public string? SoapServiceCode { get; set; } = "bioo";
+
+    [Column("soap_operation")]
+    [MaxLength(100)]
+    public string? SoapOperation { get; set; }
+
+    [Column("soap_action")]
+    [MaxLength(500)]
+    public string? SoapAction { get; set; }
+
     [Column("sample_json")]
     public string? SampleJson { get; set; }
 }

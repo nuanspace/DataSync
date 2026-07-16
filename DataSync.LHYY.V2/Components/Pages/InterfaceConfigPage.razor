@@ -126,21 +126,83 @@
     </div>
 }
 
+<MudDialog @bind-Visible="_soapDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">配置 WebService</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_soapEditItem != null)
+        {
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_soapEditItem.TranCode" Label="接口代码" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_soapEditItem.TranName" Label="接口名称" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="_soapEditItem.SoapEnabled" Label="开放 SOAP 1.1 WebService" Color="Color.Primary" />
+                </MudItem>
+                @if (_soapEditItem.SoapEnabled)
+                {
+                    @if (!_soapEditItem.IsEnabled)
+                    {
+                        <MudItem xs="12">
+                            <MudAlert Severity="Severity.Warning" Dense="true">当前接口已停用，WebService 配置保存后不会对外生效。</MudAlert>
+                        </MudItem>
+                    }
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_soapEditItem.SoapServiceCode" Label="服务代码" Required="true"
+                                      MaxLength="100" Placeholder="bioo" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_soapEditItem.SoapOperation" Label="操作名" MaxLength="100"
+                                      Placeholder="默认使用接口代码" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_soapEditItem.SoapAction" Label="SOAPAction" MaxLength="500"
+                                      Placeholder="留空时自动生成" />
+                    </MudItem>
+                    @if (!string.IsNullOrWhiteSpace(_soapEditItem.SoapServiceCode))
+                    {
+                        <MudItem xs="12">
+                            <MudTextField Value="@GetSoapEndpoint(_soapEditItem)" Label="服务地址" ReadOnly="true" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField Value="@GetSoapWsdl(_soapEditItem)" Label="WSDL 地址" ReadOnly="true" />
+                        </MudItem>
+                    }
+                }
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _soapDialogVisible = false)" Disabled="_soapSaving">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveSoapConfigAsync" Disabled="_soapSaving">
+            @(_soapSaving ? "保存中..." : "保存")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
 @code {
     [Inject] private ConfigService ConfigSvc { get; set; } = default!;
     [Inject] private BioCoreIntegrationService BioCoreService { get; set; } = default!;
     [Inject] private LlmService LlmService { get; set; } = default!;
     [Inject] private MessageQueryService MessageQuerySvc { get; set; } = default!;
+    [Inject] private SoapWebServiceService SoapWebServiceSvc { get; set; } = default!;
     [SupplyParameterFromQuery(Name = "createFromMessageId")] public long? QueryCreateFromMessageId { get; set; }
 
     private List<EsbInterfaceConfig> _items = [];
     private List<EsbInterfaceConfig> _enabledItems = [];
     private List<EsbInterfaceConfig> _disabledItems = [];
     private EsbInterfaceConfig? _editItem;
+    private EsbInterfaceConfig? _soapEditItem;
     private bool _loading = true;
     private bool _dialogVisible;
+    private bool _soapDialogVisible;
     private bool _isNew;
     private bool _saving;
+    private bool _soapSaving;
     private bool _statusChanging;
     private bool _projectDocumentsVisible;
 
@@ -187,6 +249,7 @@
     private int _selectedJsonTreeVersion;
     private bool _advancedExpanded;
     private bool _dedupeExpanded;
+    private bool _webServiceExpanded;
     private bool _recognitionExpanded;
     private bool _filterExpanded;
 
@@ -272,6 +335,7 @@
     {
         _advancedExpanded = false;
         _dedupeExpanded = false;
+        _webServiceExpanded = _editItem?.SoapEnabled == true;
         _recognitionExpanded = hasExistingAdvancedConfig && _editMatchRules.Count > 0;
         _filterExpanded = hasExistingAdvancedConfig && _editFilterRules.Count > 0;
     }
@@ -306,6 +370,10 @@
                 <MudTh>启用</MudTh>
                 <MudTh>处理器</MudTh>
                 <MudTh>事件类型</MudTh>
+                <MudTh>WebService</MudTh>
+                <MudTh>服务/操作</MudTh>
+                <MudTh>SOAPAction</MudTh>
+                <MudTh>服务地址</MudTh>
                 <MudTh>说明</MudTh>
                 <MudTh>操作</MudTh>
             </HeaderContent>
@@ -314,30 +382,49 @@
                 <MudTd><MudText Typo="Typo.body2"><b>@context.TranCode</b></MudText></MudTd>
                 <MudTd>@context.TranName</MudTd>
                 <MudTd>
-                    @if (context.IsEnabled)
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                    }
-                    else
-                    {
-                        <MudIcon Icon="@Icons.Material.Filled.Cancel" Color="Color.Default" Size="Size.Small" />
-                    }
-                </MudTd>
-                <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
-                <MudTd>@context.EventTypeName</MudTd>
-                <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
-                <MudTd Class="interface-config-row-actions">
                     <MudTooltip Text="@(context.IsEnabled ? "停用接口" : "启用接口")">
-                        <MudIconButton Icon="@(context.IsEnabled ? Icons.Material.Filled.PauseCircle : Icons.Material.Filled.PlayCircle)"
+                        <MudIconButton Icon="@(context.IsEnabled ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.Cancel)"
                                        Size="Size.Small"
-                                       Color="@(context.IsEnabled ? Color.Warning : Color.Success)"
+                                       Color="@(context.IsEnabled ? Color.Success : Color.Default)"
                                        Disabled="@_statusChanging"
                                        OnClick="@(() => ToggleEnabled(context))" />
                     </MudTooltip>
+                </MudTd>
+                <MudTd>@GetHandlerTypeDisplayName(context.HandlerType)</MudTd>
+                <MudTd>@context.EventTypeName</MudTd>
+                <MudTd>
+                    <MudChip T="string" Size="Size.Small" Color="@(context.SoapEnabled ? Color.Info : Color.Default)">
+                        @(context.SoapEnabled ? "已开放" : "未开放")
+                    </MudChip>
+                </MudTd>
+                <MudTd>
+                    @if (context.SoapEnabled)
+                    {
+                        <MudText Typo="Typo.body2">@context.SoapServiceCode</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@context.SoapOperation</MudText>
+                    }
+                </MudTd>
+                <MudTd Style="max-width:240px;overflow:hidden;text-overflow:ellipsis;">@context.SoapAction</MudTd>
+                <MudTd Style="max-width:260px;overflow:hidden;text-overflow:ellipsis;">
+                    @(context.SoapEnabled ? GetSoapEndpoint(context) : "")
+                </MudTd>
+                <MudTd Style="max-width:200px;overflow:hidden;text-overflow:ellipsis;">@context.Description</MudTd>
+                <MudTd Class="interface-config-row-actions">
                     <MudTooltip Text="映射引导">
                         <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Size="Size.Small" Color="Color.Secondary"
                                        OnClick="@(() => inj_navigationManager.NavigateTo($"/config/wizard?tranCode={context.TranCode}"))" />
                     </MudTooltip>
+                    <MudTooltip Text="WebService配置">
+                        <MudIconButton Icon="@Icons.Material.Filled.SettingsInputComponent" Size="Size.Small" Color="Color.Info"
+                                       OnClick="@(() => OpenSoapConfig(context))" />
+                    </MudTooltip>
+                    @if (context.SoapEnabled && !string.IsNullOrWhiteSpace(context.SoapServiceCode))
+                    {
+                        <MudTooltip Text="打开 WSDL">
+                            <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small" Color="Color.Info"
+                                           Href="@GetSoapWsdl(context)" Target="_blank" />
+                        </MudTooltip>
+                    }
                     <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small" OnClick="@(() => Edit(context))" />
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                    OnClick="@(() => Delete(context))" />
@@ -427,7 +514,7 @@
                         {
                             <MudSelectItem Value="EventIdentityModeOption.LookupThenDegradeToPatientOnly">允许缺失，回查失败则只处理患者</MudSelectItem>
                         }
-                        <MudSelectItem Value="EventIdentityModeOption.LookupThenPending" Disabled="@(_editItem!.ReceiveMode == ReceiveMode.Direct)">允许缺失，回查失败则转待处理</MudSelectItem>
+                        <MudSelectItem Value="EventIdentityModeOption.LookupThenPending" Disabled="@(_editItem!.ReceiveMode == ReceiveMode.Direct)">允许缺失，回查失败则转待身份绑定</MudSelectItem>
                     </MudSelect>
                 </MudItem>
                 <MudItem xs="12" sm="6">
@@ -480,10 +567,17 @@
                 </MudItem>
             }
             <MudItem xs="12">
-                <MudTextField @bind-Value="_editItem!.SampleJson" Label="消息模板（JSON）" Lines="6"
+                <MudTextField @bind-Value="_editItem!.SampleJson" Label="消息模板（支持 JSON/XML）" Lines="6"
                               Variant="Variant.Outlined"
-                              HelperText="填写后左侧会显示 JSON 树，可直接点选路径"
-                              Placeholder="粘贴该接口的示例 JSON 数据..." />
+                              HelperText="可直接粘贴业务 XML 或完整 SOAP 请求，系统会转换为内部 JSON 模板"
+                              Placeholder="粘贴 JSON、<REQUEST>...</REQUEST> 或完整 SOAP 请求..." />
+                @if (_editItem.SampleJson?.TrimStart().StartsWith('<') == true)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Info" Size="Size.Small" Class="mt-2"
+                               StartIcon="@Icons.Material.Filled.Transform" OnClick="ConvertXmlTemplate">
+                        解析 XML 并预览
+                    </MudButton>
+                }
             </MudItem>
             <MudItem xs="12">
                 <MudExpansionPanels Class="interface-config-panels" MultiExpansion="true">
@@ -549,6 +643,38 @@
                                                          OnRequestPathPick="@(_hasSampleJson ? _idempotentKeyPartPathPickCallback : default)"
                                                          ActivePickIndex="@(_pathPickTarget == PathPickTarget.IdempotentKeyPart ? _pickIdempotentKeyPartIndex : -1)" />
                             </MudItem>
+                        </MudGrid>
+                    </MudExpansionPanel>
+                    <MudExpansionPanel Text="WebService" Icon="@Icons.Material.Filled.Language" @bind-Expanded="_webServiceExpanded">
+                        <MudGrid Class="mt-1">
+                            <MudItem xs="12">
+                                <MudSwitch @bind-Value="_editItem!.SoapEnabled" Label="开放 SOAP 1.1 WebService" Color="Color.Primary" />
+                            </MudItem>
+                            @if (_editItem!.SoapEnabled)
+                            {
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editItem.SoapServiceCode" Label="服务代码" Required="true"
+                                                  MaxLength="100" Placeholder="bioo"
+                                                  HelperText="同一服务代码下可配置多个接口 Action" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editItem.SoapOperation" Label="操作名" MaxLength="100"
+                                                  Placeholder="默认使用事件代码" />
+                                </MudItem>
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_editItem.SoapAction" Label="SOAPAction" MaxLength="500"
+                                                  Placeholder="留空时按服务代码和操作名生成" />
+                                </MudItem>
+                                @if (!string.IsNullOrWhiteSpace(_editItem.SoapServiceCode))
+                                {
+                                    <MudItem xs="12">
+                                        <MudTextField Value="@GetSoapEndpointPreview()" Label="服务地址" ReadOnly="true" />
+                                    </MudItem>
+                                    <MudItem xs="12">
+                                        <MudTextField Value="@GetSoapWsdlPreview()" Label="WSDL 地址" ReadOnly="true" />
+                                    </MudItem>
+                                }
+                            }
                         </MudGrid>
                     </MudExpansionPanel>
                     <MudExpansionPanel Text="接口识别规则" Icon="@Icons.Material.Filled.Rule" @bind-Expanded="_recognitionExpanded">
@@ -726,6 +852,10 @@
             AllowMissingEventTime = item.AllowMissingEventTime,
             ResponseMode = item.ResponseMode,
             MissingEventIdentityPolicy = item.MissingEventIdentityPolicy,
+            SoapEnabled = item.SoapEnabled,
+            SoapServiceCode = string.IsNullOrWhiteSpace(item.SoapServiceCode) ? "bioo" : item.SoapServiceCode,
+            SoapOperation = item.SoapOperation,
+            SoapAction = item.SoapAction,
             SampleJson = item.SampleJson,
             IntegrationProjectCode = item.IntegrationProjectCode,
         };
@@ -771,8 +901,8 @@
     private string GetReceiveModeHelperText()
         => SelectedReceiveMode switch
         {
-            ReceiveMode.Direct => "收到消息后立即处理，响应更快，但不支持转为待处理。",
-            _ => "先入队再由后台处理，支持待处理和失败重试。"
+            ReceiveMode.Direct => "收到消息后立即处理，响应更快，但不支持转为待身份绑定。",
+            _ => "先入队再由后台处理，支持待身份绑定和失败重试。"
         };
 
     private string GetEventIdentityModeHelperText()
@@ -787,7 +917,7 @@
         {
             EventIdentityModeOption.RequireEventTime => "消息里必须直接带事件开始时间；取不到就失败。",
             EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就只处理患者。",
-            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就转待处理。",
+            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就转待身份绑定。",
             _ => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就报错。"
         };
     }
@@ -1086,6 +1216,9 @@
 
         try
         {
+            if (!TryNormalizeMessageTemplate(false))
+                return;
+
             // 启用时校验关键路径
             if (_editItem.IsEnabled)
             {
@@ -1116,6 +1249,7 @@
             _editItem.VisitNoSourcePath = NormalizePickedPath(_editItem.VisitNoSourcePath);
             _editItem.InpatientNoSourcePath = NormalizePickedPath(_editItem.InpatientNoSourcePath);
             _editItem.SourceMessageIdPath = NormalizePickedPath(_editItem.SourceMessageIdPath);
+            SoapWebServiceService.NormalizeConfiguration(_editItem);
 
             foreach (var rule in _editFilterRules)
                 rule.SourcePath = NormalizePickedPath(rule.SourcePath);
@@ -1127,6 +1261,12 @@
                 part.SourcePath = NormalizePickedPath(part.SourcePath);
 
             await using var db = await ContextFactory.CreateDbContextAsync();
+            var soapValidationError = await SoapWebServiceSvc.ValidateConfigurationAsync(_editItem);
+            if (soapValidationError != null)
+            {
+                inj_snackbar.Add(soapValidationError, Severity.Error);
+                return;
+            }
             await using var transaction = await db.Database.BeginTransactionAsync();
 
             if (_isNew)
@@ -1162,6 +1302,10 @@
                     existing.AllowMissingEventTime = _editItem.AllowMissingEventTime;
                     existing.ResponseMode = _editItem.ResponseMode;
                     existing.MissingEventIdentityPolicy = _editItem.MissingEventIdentityPolicy;
+                    existing.SoapEnabled = _editItem.SoapEnabled;
+                    existing.SoapServiceCode = _editItem.SoapServiceCode;
+                    existing.SoapOperation = _editItem.SoapOperation;
+                    existing.SoapAction = _editItem.SoapAction;
                     existing.SampleJson = _editItem.SampleJson;
                     existing.IntegrationProjectCode = _editItem.IntegrationProjectCode;
                 }
@@ -1299,6 +1443,113 @@
 
     private static string Truncate(string? value, int maxLength)
         => string.IsNullOrEmpty(value) ? "" : value.Length <= maxLength ? value : value[..maxLength];
+
+    private void ConvertXmlTemplate()
+    {
+        if (TryNormalizeMessageTemplate(true))
+            StateHasChanged();
+    }
+
+    private bool TryNormalizeMessageTemplate(bool showSuccess)
+    {
+        if (_editItem == null || string.IsNullOrWhiteSpace(_editItem.SampleJson))
+            return true;
+
+        var template = _editItem.SampleJson.Trim();
+        if (!template.StartsWith('<'))
+            return true;
+
+        if (!SoapWebServiceService.TryConvertSampleXmlToInternalJson(
+                _editItem.TranCode,
+                template,
+                out var json,
+                out var errorMessage))
+        {
+            inj_snackbar.Add(errorMessage, Severity.Error);
+            return false;
+        }
+
+        _editItem.SampleJson = json;
+        if (showSuccess)
+            inj_snackbar.Add("XML 已转换为内部 JSON 模板", Severity.Success);
+        return true;
+    }
+
+    private void OpenSoapConfig(EsbInterfaceConfig item)
+    {
+        _soapEditItem = new EsbInterfaceConfig
+        {
+            Id = item.Id,
+            TranCode = item.TranCode,
+            TranName = item.TranName,
+            IntegrationProjectCode = item.IntegrationProjectCode,
+            IsEnabled = item.IsEnabled,
+            SoapEnabled = item.SoapEnabled,
+            SoapServiceCode = string.IsNullOrWhiteSpace(item.SoapServiceCode) ? "bioo" : item.SoapServiceCode,
+            SoapOperation = item.SoapOperation,
+            SoapAction = item.SoapAction
+        };
+        _soapDialogVisible = true;
+    }
+
+    private async Task SaveSoapConfigAsync()
+    {
+        if (_soapSaving || _soapEditItem == null)
+            return;
+
+        _soapSaving = true;
+        try
+        {
+            SoapWebServiceService.NormalizeConfiguration(_soapEditItem);
+            var error = await SoapWebServiceSvc.ValidateConfigurationAsync(_soapEditItem, CancellationToken);
+            if (error != null)
+            {
+                inj_snackbar.Add(error, Severity.Error);
+                return;
+            }
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.EsbInterfaceConfigs
+                .FirstOrDefaultAsync(item => item.Id == _soapEditItem.Id, CancellationToken);
+            if (entity == null)
+            {
+                inj_snackbar.Add("接口配置不存在", Severity.Warning);
+                return;
+            }
+
+            entity.SoapEnabled = _soapEditItem.SoapEnabled;
+            entity.SoapServiceCode = _soapEditItem.SoapServiceCode;
+            entity.SoapOperation = _soapEditItem.SoapOperation;
+            entity.SoapAction = _soapEditItem.SoapAction;
+            await db.SaveChangesAsync(CancellationToken);
+
+            ConfigSvc.ClearCache();
+            _soapDialogVisible = false;
+            inj_snackbar.Add("WebService 配置已保存", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _soapSaving = false;
+        }
+    }
+
+    private string GetSoapEndpoint(EsbInterfaceConfig item)
+        => $"{inj_navigationManager.BaseUri.TrimEnd('/')}/webservice/{Uri.EscapeDataString(item.SoapServiceCode?.Trim() ?? "")}";
+
+    private string GetSoapWsdl(EsbInterfaceConfig item) => GetSoapEndpoint(item) + "?wsdl";
+
+    private string GetSoapEndpointPreview()
+        => GetSoapEndpoint(_editItem!);
+
+    private string GetSoapWsdlPreview() => GetSoapEndpointPreview() + "?wsdl";
 
     private async Task SyncFilterRulesAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
     {

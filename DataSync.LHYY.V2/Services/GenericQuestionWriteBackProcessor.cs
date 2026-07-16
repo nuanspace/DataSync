@@ -117,6 +117,13 @@ public class GenericQuestionWriteBackProcessor
             var reason = string.IsNullOrWhiteSpace(mrn)
                 ? "业务跳过：未找到已有患者"
                 : $"业务跳过：未找到已有患者，MRN={mrn}";
+            if (config.MissingEventIdentityPolicy == MissingEventIdentityPolicy.Pending)
+            {
+                var waitingResult = ProcessResult.WaitingIdentity(reason);
+                waitingResult.Steps = result.Steps;
+                return waitingResult;
+            }
+
             var skippedResult = ProcessResult.BusinessSkipped(reason);
             skippedResult.Steps = result.Steps;
             return skippedResult;
@@ -489,7 +496,7 @@ public class GenericQuestionWriteBackProcessor
 
             if (dbEvent == null)
             {
-                return (null, ProcessResult.Fail(
+                return (null, BuildMissingEventResult(config,
                     $"未找到已有事件: MRN={mrn}, EventType={eventTypeName}, EventStartTime={eventStartTime.Value:yyyy-MM-dd}"));
             }
 
@@ -540,13 +547,18 @@ public class GenericQuestionWriteBackProcessor
 
         return config.MissingEventIdentityPolicy switch
         {
-            Models.Enums.MissingEventIdentityPolicy.Pending => (null, ProcessResult.Deferred("缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间")),
+            MissingEventIdentityPolicy.Pending => (null, ProcessResult.WaitingIdentity("缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间")),
             _ => (null, ProcessResult.Fail("缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间"))
         };
     }
 
     private static ProcessResult BuildMissingVisitIdentityResult(EsbInterfaceConfig config, string message)
-        => config.MissingEventIdentityPolicy == Models.Enums.MissingEventIdentityPolicy.Pending
-            ? ProcessResult.Deferred(message)
+        => config.MissingEventIdentityPolicy == MissingEventIdentityPolicy.Pending
+            ? ProcessResult.WaitingIdentity(message)
+            : ProcessResult.Fail(message);
+
+    private static ProcessResult BuildMissingEventResult(EsbInterfaceConfig config, string message)
+        => config.MissingEventIdentityPolicy == MissingEventIdentityPolicy.Pending
+            ? ProcessResult.WaitingIdentity(message)
             : ProcessResult.Fail(message);
 }

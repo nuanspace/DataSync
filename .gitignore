@@ -400,3 +400,5 @@ Tools/DataSync.PdfOcrTest/tessdata/*.traineddata
 /DataSync.LHYY.V2/docker包/20260403
 DataSync.CYYY/docker包/
 DataSync.LHYY.V2/docker包/
+DataSync.LHYY.V2/测试患者数据/11位患者/何忠泽/*.png
+DataSync.LHYY.V2/测试患者数据

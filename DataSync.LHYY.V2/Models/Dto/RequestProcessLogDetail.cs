@@ -10,6 +10,7 @@ public class RequestProcessLogDetail
     public int Processed { get; set; }
     public int Filtered { get; set; }
     public int Duplicated { get; set; }
+    public int WaitingIdentity { get; set; }
     public int Failed { get; set; }
     public int Unmatched { get; set; }
     public List<string> MatchedTranCodes { get; set; } = [];

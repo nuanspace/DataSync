@@ -73,4 +73,7 @@ public class ProcessResult
 
     public static ProcessResult Deferred(string message)
         => new() { Message = message, OverrideStatus = MessageStatus.Pending };
+
+    public static ProcessResult WaitingIdentity(string message)
+        => new() { Message = message, OverrideStatus = MessageStatus.WaitingIdentity };
 }

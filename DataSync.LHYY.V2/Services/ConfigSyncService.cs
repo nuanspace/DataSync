@@ -677,6 +677,10 @@ public sealed class ConfigSyncService
         ResponseMode = config.ResponseMode,
         MissingEventIdentityPolicy = config.MissingEventIdentityPolicy,
         MedicalRecordSyncRole = config.MedicalRecordSyncRole,
+        SoapEnabled = config.SoapEnabled,
+        SoapServiceCode = config.SoapServiceCode,
+        SoapOperation = config.SoapOperation,
+        SoapAction = config.SoapAction,
         SampleJson = config.SampleJson,
         FilterRules = filterRules,
         MatchRules = matchRules,
@@ -756,6 +760,10 @@ public sealed class ConfigSyncService
         entity.ResponseMode = item.ResponseMode;
         entity.MissingEventIdentityPolicy = item.MissingEventIdentityPolicy;
         entity.MedicalRecordSyncRole = item.MedicalRecordSyncRole;
+        entity.SoapEnabled = item.SoapEnabled;
+        entity.SoapServiceCode = item.SoapServiceCode;
+        entity.SoapOperation = item.SoapOperation;
+        entity.SoapAction = item.SoapAction;
         entity.SampleJson = item.SampleJson;
     }
 
@@ -940,6 +948,10 @@ public sealed class ConfigSyncService
         item.ResponseMode,
         item.MissingEventIdentityPolicy,
         item.MedicalRecordSyncRole,
+        item.SoapEnabled,
+        item.SoapServiceCode,
+        item.SoapOperation,
+        item.SoapAction,
         item.SampleJson,
         FilterRules = OrderRules(item.FilterRules),
         MatchRules = item.MatchRules.OrderBy(r => r.MatchGroup).ThenBy(r => r.SortOrder).ThenBy(r => r.SourcePath),

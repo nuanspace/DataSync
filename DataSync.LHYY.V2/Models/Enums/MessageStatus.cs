@@ -11,7 +11,8 @@ public enum MessageStatus : short
     Failed = 3,
     Filtered = 4,
     Unmatched = 5,
-    PartialSuccess = 6
+    PartialSuccess = 6,
+    WaitingIdentity = 7
 }
 
 public static class MessageStatusExtensions
@@ -25,6 +26,7 @@ public static class MessageStatusExtensions
         MessageStatus.Filtered => "已过滤",
         MessageStatus.Unmatched => "未匹配",
         MessageStatus.PartialSuccess => "部分成功",
+        MessageStatus.WaitingIdentity => "待身份绑定",
         _ => status.ToString()
     };
 }

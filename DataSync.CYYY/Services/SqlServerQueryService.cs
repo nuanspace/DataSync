@@ -431,12 +431,21 @@ public class DatabaseQueryService
 
     private static string BuildValueQuerySql(string sql, string databaseType, string? queryField)
     {
+        var trimmed = sql.Trim();
+        if (ContainsNamedParameter(trimmed, '@', "queryValue") ||
+            ContainsNamedParameter(trimmed, ':', "queryValue"))
+        {
+            return trimmed;
+        }
+
         if (string.IsNullOrWhiteSpace(queryField))
             throw new InvalidOperationException("数据库接口未配置查询字段，无法自动生成过滤条件");
 
-        var trimmed = sql.Trim();
-        if (trimmed.StartsWith("WITH", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.StartsWith("WITH", StringComparison.OrdinalIgnoreCase) &&
+            !IngestionService.IsOracleDatabaseType(databaseType))
+        {
             throw new InvalidOperationException("WITH 查询无法自动追加过滤条件，请在 SQL 中手动使用 @queryValue");
+        }
 
         var field = BuildColumnReference(databaseType, queryField);
         var parameter = IngestionService.IsOracleDatabaseType(databaseType) ? ":queryValue" : "@queryValue";

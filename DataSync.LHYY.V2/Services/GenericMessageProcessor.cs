@@ -546,14 +546,14 @@ public class GenericMessageProcessor
         return config.MissingEventIdentityPolicy switch
         {
             MissingEventIdentityPolicy.DegradeToPatientOnly => ProcessResult.Success($"已降级为仅处理患者：{message}", patientId, null),
-            MissingEventIdentityPolicy.Pending => CreateDeferredResult(patientId, message),
+            MissingEventIdentityPolicy.Pending => CreateWaitingIdentityResult(patientId, message),
             _ => ProcessResult.Fail(message)
         };
     }
 
-    private static ProcessResult CreateDeferredResult(Guid patientId, string message)
+    private static ProcessResult CreateWaitingIdentityResult(Guid patientId, string message)
     {
-        var result = ProcessResult.Deferred(message);
+        var result = ProcessResult.WaitingIdentity(message);
         result.PatientId = patientId;
         return result;
     }

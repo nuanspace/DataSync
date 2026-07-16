@@ -727,6 +727,7 @@ else
         MessageStatus.Filtered => "已过滤",
         MessageStatus.Unmatched => "未匹配",
         MessageStatus.PartialSuccess => "部分成功",
+        MessageStatus.WaitingIdentity => "待身份绑定",
         _ => status.ToString()
     };
 
@@ -739,6 +740,7 @@ else
         MessageStatus.Filtered => Color.Secondary,
         MessageStatus.Unmatched => Color.Default,
         MessageStatus.PartialSuccess => Color.Info,
+        MessageStatus.WaitingIdentity => Color.Warning,
         _ => Color.Default
     };
 

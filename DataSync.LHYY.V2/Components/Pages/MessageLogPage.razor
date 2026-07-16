@@ -34,6 +34,7 @@
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Failed)">失败</MudSelectItem>
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Filtered)">已过滤</MudSelectItem>
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Unmatched)">未匹配</MudSelectItem>
+                    <MudSelectItem Value="@((MessageStatus?)MessageStatus.WaitingIdentity)">待身份绑定</MudSelectItem>
                 </MudSelect>
                 <MudTextField T="string" Label="病案号" Value="_filterMrn" ValueChanged="OnMrnChanged"
                               Clearable="true" Margin="Margin.Dense" />
@@ -130,6 +131,9 @@
                     break;
                 case MessageStatus.PartialSuccess:
                     <MudChip T="string" Color="Color.Info" Size="Size.Small">部分成功</MudChip>
+                    break;
+                case MessageStatus.WaitingIdentity:
+                    <MudChip T="string" Color="Color.Warning" Size="Size.Small">待身份绑定</MudChip>
                     break;
             }
         </MudTd>

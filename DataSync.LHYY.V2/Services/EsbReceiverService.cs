@@ -52,6 +52,15 @@ public class EsbReceiverService
     public async Task<object> ProcessAsync(string rawJson, CancellationToken cancellationToken = default)
     {
         var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
+        return await ProcessAsync(rawJson, currentProjectCode, cancellationToken);
+    }
+
+    public async Task<object> ProcessAsync(
+        string rawJson,
+        string integrationProjectCode,
+        CancellationToken cancellationToken = default)
+    {
+        var currentProjectCode = integrationProjectCode.Trim();
         var hasParsedRoot = MessageJsonHelper.TryParseToken(rawJson, out var root, out var parseError);
         var message = BuildRequestLog(currentProjectCode, rawJson, hasParsedRoot ? root : null);
 
@@ -444,6 +453,15 @@ public class EsbReceiverService
             var result = await _messageExecutionService.ExecuteAsync(message, config);
             CaptureRequestSteps(summary, result);
 
+            if (result.OverrideStatus == MessageStatus.WaitingIdentity)
+            {
+                await CommitIdempotencyLockAsync(idempotencyLock, cancellationToken);
+                summary.PatientId ??= result.PatientId;
+                summary.EventId ??= result.EventId;
+                RecordWaitingIdentity(summary, slice.RecordIndex, config.TranCode, result.Message, result.Steps);
+                return;
+            }
+
             if (result.OverrideStatus == MessageStatus.Pending)
             {
                 await CommitIdempotencyLockAsync(idempotencyLock, cancellationToken);
@@ -540,12 +558,17 @@ public class EsbReceiverService
 
     private static MessageStatus ResolveFinalStatus(BatchSummary summary)
     {
-        var hasHandled = summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0;
+        var hasCompleted = summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0;
+        var hasHandled = hasCompleted || summary.WaitingIdentity > 0;
         if (summary.Unmatched > 0 && !hasHandled && summary.Failed == 0)
             return MessageStatus.Unmatched;
 
         if (summary.Failed == 0 && summary.Unmatched == 0)
         {
+            if (summary.WaitingIdentity > 0 && !hasCompleted)
+                return MessageStatus.WaitingIdentity;
+            if (summary.WaitingIdentity > 0 && hasCompleted)
+                return MessageStatus.PartialSuccess;
             if (summary.Processed > 0 || summary.Duplicated > 0)
                 return MessageStatus.Success;
             if (summary.Filtered > 0)
@@ -567,7 +590,8 @@ public class EsbReceiverService
                 : null,
             MessageStatus.Filtered => summary.Failures.FirstOrDefault()?.Message ?? "被过滤规则跳过",
             MessageStatus.Unmatched => summary.Failures.FirstOrDefault()?.Message ?? "未匹配到任何接口配置",
-            MessageStatus.PartialSuccess => $"部分成功：成功 {summary.Processed}，过滤 {summary.Filtered}，重复 {summary.Duplicated}，失败 {summary.Failed}，未匹配 {summary.Unmatched}",
+            MessageStatus.WaitingIdentity => summary.ItemResults.FirstOrDefault(i => i.Status == MessageStatus.WaitingIdentity.ToDisplayText())?.Message ?? "等待患者事件身份绑定",
+            MessageStatus.PartialSuccess => $"部分成功：成功 {summary.Processed}，过滤 {summary.Filtered}，重复 {summary.Duplicated}，待身份绑定 {summary.WaitingIdentity}，失败 {summary.Failed}，未匹配 {summary.Unmatched}",
             _ => summary.Failures.FirstOrDefault()?.Message ?? "处理失败"
         };
     }
@@ -594,7 +618,7 @@ public class EsbReceiverService
             MessageId = messageId,
             IntegrationProjectCode = integrationProjectCode,
             Step = status.ToDisplayText(),
-            IsSuccess = status is MessageStatus.Success or MessageStatus.Filtered,
+            IsSuccess = status is MessageStatus.Success or MessageStatus.Filtered or MessageStatus.WaitingIdentity,
             Detail = JsonSerializer.Serialize(detail),
             ElapsedMs = elapsedMs,
             CreatedAt = DateTime.Now,
@@ -644,6 +668,7 @@ public class EsbReceiverService
             Processed = summary.Processed,
             Filtered = summary.Filtered,
             Duplicated = summary.Duplicated,
+            WaitingIdentity = summary.WaitingIdentity,
             Failed = summary.Failed,
             Unmatched = summary.Unmatched,
             MatchedTranCodes = summary.MatchedTranCodes.ToList(),
@@ -863,6 +888,7 @@ public class EsbReceiverService
         var processed = 0;
         var filtered = 0;
         var duplicated = 0;
+        var waitingIdentity = 0;
         var failures = new List<string>();
 
         try
@@ -892,6 +918,16 @@ public class EsbReceiverService
                 }
 
                 var result = await _messageExecutionService.ExecuteAsync(message, config);
+                if (result.OverrideStatus == MessageStatus.WaitingIdentity)
+                {
+                    message.Status = MessageStatus.WaitingIdentity;
+                    message.ErrorMessage = result.Message;
+                    message.ProcessedAt = DateTime.Now;
+                    db.EsbMessages.Add(message);
+                    waitingIdentity++;
+                    continue;
+                }
+
                 if (result.OverrideStatus == MessageStatus.Pending)
                 {
                     failures.Add($"{config.TranCode}: 直处理模式不支持 Pending 策略");
@@ -920,7 +956,7 @@ public class EsbReceiverService
                 failures.Add($"{config.TranCode}: {result.Message}");
             }
 
-            if (queued > 0 || processed > 0 || filtered > 0)
+            if (queued > 0 || processed > 0 || filtered > 0 || waitingIdentity > 0)
                 await db.SaveChangesAsync();
             if (queued > 0)
                 _messageProcessingNotifier.Notify();
@@ -954,6 +990,7 @@ public class EsbReceiverService
                 processed,
                 filtered,
                 duplicated,
+                waitingIdentity,
                 projectCode = currentProjectCode,
                 matchedTranCodes = matches.Select(m => m.Config.TranCode).ToArray(),
                 failures
@@ -975,6 +1012,7 @@ public class EsbReceiverService
             processed,
             filtered,
             duplicated,
+            waitingIdentity,
             projectCode = currentProjectCode,
             matchedTranCodes = matches.Select(m => m.Config.TranCode).ToArray()
         });
@@ -1045,6 +1083,17 @@ public class EsbReceiverService
             }
 
             var result = await _messageExecutionService.ExecuteAsync(message, config);
+            if (result.OverrideStatus == MessageStatus.WaitingIdentity)
+            {
+                message.Status = MessageStatus.WaitingIdentity;
+                message.ErrorMessage = result.Message;
+                message.ProcessedAt = DateTime.Now;
+                db.EsbMessages.Add(message);
+                await db.SaveChangesAsync();
+                RecordWaitingIdentity(summary, slice.RecordIndex, config.TranCode, result.Message, result.Steps);
+                return;
+            }
+
             if (result.OverrideStatus == MessageStatus.Pending)
             {
                 RecordFailure(summary, slice.RecordIndex, config.TranCode, "直处理模式不支持 Pending 策略");
@@ -1241,6 +1290,7 @@ public class EsbReceiverService
         target.Processed += source.Processed;
         target.Filtered += source.Filtered;
         target.Duplicated += source.Duplicated;
+        target.WaitingIdentity += source.WaitingIdentity;
         target.Failed += source.Failed;
         target.Unmatched += source.Unmatched;
 
@@ -1285,6 +1335,17 @@ public class EsbReceiverService
         RecordItem(summary, recordIndex, tranCode, MessageStatus.Unmatched, message);
     }
 
+    private static void RecordWaitingIdentity(
+        BatchSummary summary,
+        string? recordIndex,
+        string? tranCode,
+        string? message,
+        List<ProcessStepInfo>? steps = null)
+    {
+        summary.WaitingIdentity++;
+        RecordItem(summary, recordIndex, tranCode, MessageStatus.WaitingIdentity, message, steps);
+    }
+
     private static void RecordItem(
         BatchSummary summary,
         string? recordIndex,
@@ -1316,6 +1377,7 @@ public class EsbReceiverService
             processed = summary.Processed,
             filtered = summary.Filtered,
             duplicated = summary.Duplicated,
+            waitingIdentity = summary.WaitingIdentity,
             failed = summary.Failed,
             unmatched = summary.Unmatched,
             projectCode = summary.ProjectCode,
@@ -1374,7 +1436,7 @@ public class EsbReceiverService
 
     private object BuildRequestBatchResponse(BatchSummary summary, ResponsePreference? responsePreference)
     {
-        var hasHandled = summary.Queued > 0 || summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0;
+        var hasHandled = summary.Queued > 0 || summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0 || summary.WaitingIdentity > 0;
         var data = new
         {
             batch = true,
@@ -1382,6 +1444,7 @@ public class EsbReceiverService
             processed = summary.Processed,
             filtered = summary.Filtered,
             duplicated = summary.Duplicated,
+            waitingIdentity = summary.WaitingIdentity,
             failed = summary.Failed,
             unmatched = summary.Unmatched,
             projectCode = summary.ProjectCode,
@@ -1420,7 +1483,7 @@ public class EsbReceiverService
 
     private object BuildBatchResponse(BatchSummary summary, ResponsePreference? responsePreference)
     {
-        var hasHandled = summary.Queued > 0 || summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0;
+        var hasHandled = summary.Queued > 0 || summary.Processed > 0 || summary.Filtered > 0 || summary.Duplicated > 0 || summary.WaitingIdentity > 0;
         var data = new
         {
             batch = true,
@@ -1428,6 +1491,7 @@ public class EsbReceiverService
             processed = summary.Processed,
             filtered = summary.Filtered,
             duplicated = summary.Duplicated,
+            waitingIdentity = summary.WaitingIdentity,
             failed = summary.Failed,
             projectCode = summary.ProjectCode,
             matchedTranCodes = summary.MatchedTranCodes.ToArray(),
@@ -1582,6 +1646,7 @@ public class EsbReceiverService
         public int Processed { get; set; }
         public int Filtered { get; set; }
         public int Duplicated { get; set; }
+        public int WaitingIdentity { get; set; }
         public int Failed { get; set; }
         public int Unmatched { get; set; }
         public string? ProjectCode { get; set; }

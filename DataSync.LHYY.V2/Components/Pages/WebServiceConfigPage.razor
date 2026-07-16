@@ -1,0 +1,237 @@
+@page "/config/webservices"
+@inherits BasePage
+
+<PageTitle>WebService配置 - LHYY V2</PageTitle>
+
+<MudStack Row="true" AlignItems="AlignItems.Center" Class="mb-4">
+    <div>
+        <MudText Typo="Typo.h5">WebService配置</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@CurrentIntegrationProjectName（@CurrentIntegrationProjectCode）</MudText>
+    </div>
+    <MudSpacer />
+    <MudTooltip Text="刷新">
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" Color="Color.Primary" OnClick="LoadDataAsync" />
+    </MudTooltip>
+</MudStack>
+
+<MudTable Items="_items" Dense="true" Hover="true" Bordered="true" Striped="true" Loading="_loading">
+    <HeaderContent>
+        <MudTh>接口代码</MudTh>
+        <MudTh>接口名称</MudTh>
+        <MudTh>接口状态</MudTh>
+        <MudTh>开放状态</MudTh>
+        <MudTh>服务代码</MudTh>
+        <MudTh>操作名</MudTh>
+        <MudTh>SOAPAction</MudTh>
+        <MudTh>服务地址</MudTh>
+        <MudTh>操作</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd><b>@context.TranCode</b></MudTd>
+        <MudTd>@context.TranName</MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@(context.IsEnabled ? Color.Success : Color.Default)">
+                @(context.IsEnabled ? "启用" : "停用")
+            </MudChip>
+        </MudTd>
+        <MudTd>
+            <MudChip T="string" Size="Size.Small" Color="@(context.SoapEnabled ? Color.Info : Color.Default)">
+                @(context.SoapEnabled ? "已开放" : "未开放")
+            </MudChip>
+        </MudTd>
+        <MudTd>@context.SoapServiceCode</MudTd>
+        <MudTd>@context.SoapOperation</MudTd>
+        <MudTd Style="max-width:260px;overflow:hidden;text-overflow:ellipsis;">@context.SoapAction</MudTd>
+        <MudTd Style="max-width:280px;overflow:hidden;text-overflow:ellipsis;">
+            @(context.SoapEnabled ? GetSoapEndpoint(context) : "")
+        </MudTd>
+        <MudTd>
+            <MudTooltip Text="配置">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small"
+                               Color="Color.Primary" OnClick="@(() => Edit(context))" />
+            </MudTooltip>
+            @if (context.SoapEnabled && !string.IsNullOrWhiteSpace(context.SoapServiceCode))
+            {
+                <MudTooltip Text="打开 WSDL">
+                    <MudIconButton Icon="@Icons.Material.Filled.OpenInNew" Size="Size.Small"
+                                   Color="Color.Info" Href="@GetSoapWsdl(context)" Target="_blank" />
+                </MudTooltip>
+            }
+        </MudTd>
+    </RowTemplate>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">当前项目暂无接口配置</MudText>
+    </NoRecordsContent>
+</MudTable>
+
+<MudDialog @bind-Visible="_dialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">配置 WebService</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_editItem != null)
+        {
+            <MudGrid>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_editItem.TranCode" Label="接口代码" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudTextField Value="@_editItem.TranName" Label="接口名称" ReadOnly="true" />
+                </MudItem>
+                <MudItem xs="12">
+                    <MudSwitch @bind-Value="_editItem.SoapEnabled" Label="开放 SOAP 1.1 WebService" Color="Color.Primary" />
+                </MudItem>
+                @if (_editItem.SoapEnabled)
+                {
+                    @if (!_editItem.IsEnabled)
+                    {
+                        <MudItem xs="12">
+                            <MudAlert Severity="Severity.Warning" Dense="true">当前接口已停用，WebService 配置保存后不会对外生效。</MudAlert>
+                        </MudItem>
+                    }
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editItem.SoapServiceCode" Label="服务代码" Required="true"
+                                      MaxLength="100" Placeholder="bioo" />
+                    </MudItem>
+                    <MudItem xs="12" sm="6">
+                        <MudTextField @bind-Value="_editItem.SoapOperation" Label="操作名" MaxLength="100"
+                                      Placeholder="默认使用接口代码" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudTextField @bind-Value="_editItem.SoapAction" Label="SOAPAction" MaxLength="500"
+                                      Placeholder="留空时自动生成" />
+                    </MudItem>
+                    @if (!string.IsNullOrWhiteSpace(_editItem.SoapServiceCode))
+                    {
+                        <MudItem xs="12">
+                            <MudTextField Value="@GetSoapEndpoint(_editItem)" Label="服务地址" ReadOnly="true" />
+                        </MudItem>
+                        <MudItem xs="12">
+                            <MudTextField Value="@GetSoapWsdl(_editItem)" Label="WSDL 地址" ReadOnly="true" />
+                        </MudItem>
+                    }
+                }
+            </MudGrid>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _dialogVisible = false)" Disabled="_saving">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAsync" Disabled="_saving">
+            @(_saving ? "保存中..." : "保存")
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [Inject] private SoapWebServiceService SoapWebServiceSvc { get; set; } = default!;
+    [Inject] private ConfigService ConfigSvc { get; set; } = default!;
+
+    private List<EsbInterfaceConfig> _items = [];
+    private EsbInterfaceConfig? _editItem;
+    private bool _loading = true;
+    private bool _dialogVisible;
+    private bool _saving;
+
+    protected override Task OnPageInitializedAsync()
+    {
+        inj_navigationManager.NavigateTo("/config/interfaces", replace: true);
+        return Task.CompletedTask;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loading = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            _items = await db.EsbInterfaceConfigs
+                .AsNoTracking()
+                .Where(item => item.IntegrationProjectCode == CurrentIntegrationProjectCode)
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.TranCode)
+                .ToListAsync(CancellationToken);
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Edit(EsbInterfaceConfig item)
+    {
+        _editItem = new EsbInterfaceConfig
+        {
+            Id = item.Id,
+            TranCode = item.TranCode,
+            TranName = item.TranName,
+            IntegrationProjectCode = item.IntegrationProjectCode,
+            IsEnabled = item.IsEnabled,
+            SoapEnabled = item.SoapEnabled,
+            SoapServiceCode = string.IsNullOrWhiteSpace(item.SoapServiceCode) ? "bioo" : item.SoapServiceCode,
+            SoapOperation = item.SoapOperation,
+            SoapAction = item.SoapAction
+        };
+        _dialogVisible = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving || _editItem == null)
+            return;
+
+        _saving = true;
+        try
+        {
+            SoapWebServiceService.NormalizeConfiguration(_editItem);
+            var error = await SoapWebServiceSvc.ValidateConfigurationAsync(_editItem, CancellationToken);
+            if (error != null)
+            {
+                inj_snackbar.Add(error, Severity.Error);
+                return;
+            }
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var entity = await db.EsbInterfaceConfigs
+                .FirstOrDefaultAsync(item => item.Id == _editItem.Id, CancellationToken);
+            if (entity == null)
+            {
+                inj_snackbar.Add("接口配置不存在", Severity.Warning);
+                return;
+            }
+
+            entity.SoapEnabled = _editItem.SoapEnabled;
+            entity.SoapServiceCode = _editItem.SoapServiceCode;
+            entity.SoapOperation = _editItem.SoapOperation;
+            entity.SoapAction = _editItem.SoapAction;
+            await db.SaveChangesAsync(CancellationToken);
+
+            ConfigSvc.ClearCache();
+            _dialogVisible = false;
+            inj_snackbar.Add("WebService 配置已保存", Severity.Success);
+            await LoadDataAsync();
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private string GetSoapEndpoint(EsbInterfaceConfig item)
+        => $"{inj_navigationManager.BaseUri.TrimEnd('/')}/webservice/{Uri.EscapeDataString(item.SoapServiceCode?.Trim() ?? "")}";
+
+    private string GetSoapWsdl(EsbInterfaceConfig item) => GetSoapEndpoint(item) + "?wsdl";
+}

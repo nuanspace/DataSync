@@ -65,6 +65,8 @@ public class DataSyncDbContext : DbContext
             e.HasIndex(c => new { c.IntegrationProjectCode, c.TranCode })
                 .IsUnique()
                 .HasFilter("integration_project_code IS NOT NULL");
+            e.HasIndex(c => c.SoapServiceCode)
+                .HasDatabaseName("ix_esb_interface_config_soap_service_code");
         });
 
         // esb_global_config 索引

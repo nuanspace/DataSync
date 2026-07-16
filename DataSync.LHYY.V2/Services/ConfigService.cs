@@ -283,7 +283,7 @@ public class ConfigService
         if (config.ReceiveMode == ReceiveMode.Direct &&
             config.MissingEventIdentityPolicy == MissingEventIdentityPolicy.Pending)
         {
-            errors.Add("直处理模式不支持 Pending 策略，请改为 Fail 或 DegradeToPatientOnly");
+            errors.Add("直处理模式不支持待身份绑定策略，请改为 Fail 或 DegradeToPatientOnly");
         }
 
         return errors;

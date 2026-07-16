@@ -51,6 +51,10 @@ public sealed class ConfigSyncInterfaceConfig
     public ApiResponseMode ResponseMode { get; set; } = ApiResponseMode.DefaultJson;
     public MissingEventIdentityPolicy MissingEventIdentityPolicy { get; set; } = MissingEventIdentityPolicy.Fail;
     public MedicalRecordSyncRole MedicalRecordSyncRole { get; set; } = MedicalRecordSyncRole.None;
+    public bool SoapEnabled { get; set; }
+    public string? SoapServiceCode { get; set; }
+    public string? SoapOperation { get; set; }
+    public string? SoapAction { get; set; }
     public string? SampleJson { get; set; }
     public List<ConfigSyncFilterRule> FilterRules { get; set; } = [];
     public List<ConfigSyncInterfaceMatchRule> MatchRules { get; set; } = [];

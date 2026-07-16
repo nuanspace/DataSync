@@ -71,6 +71,26 @@
         </MudItem>
 
         <MudItem xs="12" md="6" xl="3">
+            <MudPaper Elevation="0" Class="home-summary-card home-summary-card-pending">
+                <div class="home-summary-icon-shell">
+                    <MudIcon Icon="@Icons.Material.Filled.Link" Size="Size.Large" Color="Color.Warning" />
+                </div>
+                <MudText Typo="Typo.caption" Class="home-summary-label">待身份绑定</MudText>
+                @if (_summary.WaitingIdentity > 0)
+                {
+                    <MudLink Href="@GetMessageLogUrl(MessageStatus.WaitingIdentity)" Color="Color.Warning" Underline="Underline.None" Class="home-summary-value-link">
+                        <MudText Typo="Typo.h4" Class="home-summary-value" Color="Color.Warning">@_summary.WaitingIdentity</MudText>
+                    </MudLink>
+                }
+                else
+                {
+                    <MudText Typo="Typo.h4" Class="home-summary-value">@_summary.WaitingIdentity</MudText>
+                }
+                <MudText Typo="Typo.body2" Class="home-summary-note">等待基础住院事件补齐</MudText>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="6" xl="3">
             <MudPaper Elevation="0" Class="home-summary-card home-summary-card-success">
                 <div class="home-summary-icon-shell">
                     <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Size="Size.Large" Color="Color.Success" />
@@ -116,6 +136,7 @@
                 <MudTh>事件名称</MudTh>
                 <MudTh>总数</MudTh>
                 <MudTh>待处理</MudTh>
+                <MudTh>待身份绑定</MudTh>
                 <MudTh>处理中</MudTh>
                 <MudTh>成功</MudTh>
                 <MudTh>失败</MudTh>
@@ -129,6 +150,18 @@
                     {
                         <MudLink Href="@GetMessageLogUrl(MessageStatus.Pending, context.TranCode)" Color="Color.Warning" Underline="Underline.None">
                             @context.Pending
+                        </MudLink>
+                    }
+                    else
+                    {
+                        <MudText Color="Color.Warning">0</MudText>
+                    }
+                </MudTd>
+                <MudTd>
+                    @if (context.WaitingIdentity > 0)
+                    {
+                        <MudLink Href="@GetMessageLogUrl(MessageStatus.WaitingIdentity, context.TranCode)" Color="Color.Warning" Underline="Underline.None">
+                            @context.WaitingIdentity
                         </MudLink>
                     }
                     else
@@ -200,6 +233,9 @@
                             break;
                         case MessageStatus.PartialSuccess:
                             <MudChip T="string" Color="Color.Info" Size="Size.Small">部分成功</MudChip>
+                            break;
+                        case MessageStatus.WaitingIdentity:
+                            <MudChip T="string" Color="Color.Warning" Size="Size.Small">待身份绑定</MudChip>
                             break;
                     }
                 </MudTd>

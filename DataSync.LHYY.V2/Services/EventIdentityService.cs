@@ -1,5 +1,6 @@
 ﻿using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Entities;
+using DataSync.LHYY.V2.Models.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace DataSync.LHYY.V2.Services;
@@ -77,12 +78,12 @@ public class EventIdentityService
         string? visitNo,
         DateTime? eventStartTime)
     {
-        if (eventStartTime == null ||
-            (string.IsNullOrWhiteSpace(inpatientNo) && string.IsNullOrWhiteSpace(visitNo)))
+        if (eventStartTime == null)
         {
             return;
         }
 
+        var eventDate = eventStartTime.Value.Date;
         await using var db = await _contextFactory.CreateDbContextAsync();
 
         EsbEventIdentity? entity = null;
@@ -113,6 +114,15 @@ public class EventIdentityService
 
         if (entity == null)
         {
+            entity = await db.EsbEventIdentities.FirstOrDefaultAsync(x =>
+                x.IntegrationProjectCode == integrationProjectCode &&
+                x.Mrn == mrn &&
+                x.EventTypeName == eventTypeName &&
+                x.EventStartTime == eventDate);
+        }
+
+        if (entity == null)
+        {
             entity = new EsbEventIdentity
             {
                 IntegrationProjectCode = integrationProjectCode,
@@ -125,7 +135,7 @@ public class EventIdentityService
                 EventTypeName = eventTypeName,
                 InpatientNo = inpatientNo,
                 VisitNo = visitNo,
-                EventStartTime = eventStartTime?.Date,
+                EventStartTime = eventDate,
                 CreatedAt = DateTime.Now,
                 UpdatedAt = DateTime.Now,
             };
@@ -142,10 +152,51 @@ public class EventIdentityService
             entity.EventTypeName = string.IsNullOrWhiteSpace(entity.EventTypeName) ? eventTypeName : entity.EventTypeName;
             entity.InpatientNo = string.IsNullOrWhiteSpace(inpatientNo) ? entity.InpatientNo : inpatientNo;
             entity.VisitNo = string.IsNullOrWhiteSpace(visitNo) ? entity.VisitNo : visitNo;
-            entity.EventStartTime = eventStartTime?.Date ?? entity.EventStartTime;
+            entity.EventStartTime = eventDate;
             entity.UpdatedAt = DateTime.Now;
         }
 
         await db.SaveChangesAsync();
+        await RequeueWaitingIdentityMessagesAsync(
+            db,
+            integrationProjectCode,
+            mrn,
+            inpatientNo,
+            visitNo,
+            eventDate);
+    }
+
+    private static async Task RequeueWaitingIdentityMessagesAsync(
+        DataSyncDbContext db,
+        string? integrationProjectCode,
+        string mrn,
+        string? inpatientNo,
+        string? visitNo,
+        DateTime eventDate)
+    {
+        var baseQuery = db.EsbMessages
+            .Where(m => m.IntegrationProjectCode == integrationProjectCode &&
+                m.Status == MessageStatus.WaitingIdentity);
+
+        if (!string.IsNullOrWhiteSpace(inpatientNo))
+            await RequeueAsync(baseQuery.Where(m => m.InpatientNo == inpatientNo));
+
+        if (!string.IsNullOrWhiteSpace(visitNo))
+            await RequeueAsync(baseQuery.Where(m => m.Mrn == mrn && m.VisitNo == visitNo));
+
+        var nextDate = eventDate.AddDays(1);
+        await RequeueAsync(baseQuery.Where(m =>
+            m.Mrn == mrn &&
+            m.ResolvedEventTime >= eventDate &&
+            m.ResolvedEventTime < nextDate));
+    }
+
+    private static Task<int> RequeueAsync(IQueryable<EsbMessage> query)
+    {
+        return query.ExecuteUpdateAsync(s => s
+            .SetProperty(m => m.Status, MessageStatus.Pending)
+            .SetProperty(m => m.ErrorMessage, (string?)null)
+            .SetProperty(m => m.ProcessedAt, (DateTime?)null)
+            .SetProperty(m => m.ProcessingStartedAt, (DateTime?)null));
     }
 }

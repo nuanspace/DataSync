@@ -103,6 +103,7 @@ public class Program
             builder.Services.Configure<OcrRuntimeOptions>(builder.Configuration.GetSection("Ocr"));
             builder.Services.AddDataSyncOcr();
             builder.Services.AddScoped<EsbReceiverService>();
+            builder.Services.AddScoped<SoapWebServiceService>();
             builder.Services.AddScoped<IntegrationProjectService>();
             builder.Services.AddScoped<ConfigService>();
             builder.Services.AddScoped<ProjectDocumentService>();
@@ -299,6 +300,26 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             ALTER TABLE IF EXISTS lhyy.esb_interface_config
                 ADD COLUMN IF NOT EXISTS medical_record_sync_role INTEGER NOT NULL DEFAULT 0;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_interface_config
+                ADD COLUMN IF NOT EXISTS soap_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE IF EXISTS lhyy.esb_interface_config
+                ADD COLUMN IF NOT EXISTS soap_service_code VARCHAR(100);
+            ALTER TABLE IF EXISTS lhyy.esb_interface_config
+                ADD COLUMN IF NOT EXISTS soap_operation VARCHAR(100);
+            ALTER TABLE IF EXISTS lhyy.esb_interface_config
+                ADD COLUMN IF NOT EXISTS soap_action VARCHAR(500);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_interface_config_soap_operation
+                ON lhyy.esb_interface_config (LOWER(soap_service_code), LOWER(soap_operation))
+                WHERE soap_enabled = TRUE;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_interface_config_soap_action
+                ON lhyy.esb_interface_config (LOWER(soap_service_code), LOWER(soap_action))
+                WHERE soap_enabled = TRUE;
             """);
 
         db.Database.ExecuteSqlRaw("""

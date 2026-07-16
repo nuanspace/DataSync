@@ -98,6 +98,7 @@ public class MessageQueryService
                 Processing = await legacyQuery.CountAsync(m => m.Status == MessageStatus.Processing),
                 Success = await legacyQuery.CountAsync(m => m.Status == MessageStatus.Success),
                 Failed = await legacyQuery.CountAsync(m => m.Status == MessageStatus.Failed),
+                WaitingIdentity = await legacyQuery.CountAsync(m => m.Status == MessageStatus.WaitingIdentity),
             };
         }
 
@@ -111,6 +112,7 @@ public class MessageQueryService
             Processing = await query.CountAsync(m => m.Status == MessageStatus.Processing),
             Success = await query.CountAsync(m => m.Status == MessageStatus.Success),
             Failed = await query.CountAsync(m => m.Status == MessageStatus.Failed),
+            WaitingIdentity = await query.CountAsync(m => m.Status == MessageStatus.WaitingIdentity),
         };
     }
 
@@ -135,6 +137,7 @@ public class MessageQueryService
                     Processing = g.Count(m => m.Status == MessageStatus.Processing),
                     Success = g.Count(m => m.Status == MessageStatus.Success),
                     Failed = g.Count(m => m.Status == MessageStatus.Failed),
+                    WaitingIdentity = g.Count(m => m.Status == MessageStatus.WaitingIdentity),
                 })
                 .OrderBy(s => s.TranCode)
                 .ToListAsync();
@@ -153,6 +156,7 @@ public class MessageQueryService
                 Processing = g.Count(m => m.Status == MessageStatus.Processing),
                 Success = g.Count(m => m.Status == MessageStatus.Success),
                 Failed = g.Count(m => m.Status == MessageStatus.Failed),
+                WaitingIdentity = g.Count(m => m.Status == MessageStatus.WaitingIdentity),
             })
             .OrderBy(s => s.TranCode)
             .ToListAsync();
@@ -724,6 +728,7 @@ public class TodaySummary
     public int Processing { get; set; }
     public int Success { get; set; }
     public int Failed { get; set; }
+    public int WaitingIdentity { get; set; }
 }
 
 public class TranCodeStat
@@ -735,4 +740,5 @@ public class TranCodeStat
     public int Processing { get; set; }
     public int Success { get; set; }
     public int Failed { get; set; }
+    public int WaitingIdentity { get; set; }
 }

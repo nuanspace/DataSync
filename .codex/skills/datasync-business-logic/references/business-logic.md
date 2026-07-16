@@ -1,6 +1,6 @@
 # DataSync 工作空间业务逻辑记录
 
-更新时间：2026-07-03
+更新时间：2026-07-16
 
 本文件记录 `D:\Github\DataSync` 工作空间中 ntcare 产品与医院侧系统对接相关的业务逻辑。后续任何业务逻辑改动都必须同步更新本文件。
 
@@ -78,6 +78,12 @@
 - 现有启用任务通过 API 推送到 ESB 接收端，实际 Bio.Core 写入发生在 `DataSync.LHYY.V2`。
 - `DatabasePushService` 是 PostgreSQL 直连插入能力，按 `serverCode` 生成 `dl_{serverCode}` 表并执行 `INSERT ... ON CONFLICT DO NOTHING`；这不是当前启用 ntcare 任务的主路径。
 
+补数据与数据库采集查询：
+
+- 2026-07-03 起，`DataSync.CYYY` 的 Oracle 数据库采集源按患者 ID 或就诊号补数据时，支持对 `WITH` CTE 查询结果自动按任务配置字段追加外层过滤；患者 ID 与就诊号分别取决于任务的 `PatientIdField`、`VisitSnField`，采集 SQL 最终结果需包含对应字段。
+- 如果 SQL 已手动包含 `@queryValue` 或 `:queryValue`，仍直接执行原 SQL，由配置 SQL 自行决定过滤位置。
+- 影响链路：主动采集补数据；关键服务为 `IngestionService`、`DatabaseQueryService`。本次未涉及数据库结构变更，不新增迁移文件。
+
 ### DataSync.LHYY.V2
 
 `DataSync.LHYY.V2` 是 .NET 10 / ASP.NET Core / MudBlazor 应用，主要承担“统一接收、配置映射、消息处理、写入 ntcare”职责。
@@ -85,6 +91,7 @@
 核心职责：
 
 - 提供统一 ESB 接收入口 `POST /api/esb`。
+- 提供可按接口配置开放的 SOAP 1.1 WebService 入口。
 - 管理多医院/多项目接入配置。
 - 根据消息内容识别接口。
 - 按接口配置决定入队异步处理或直接处理。
@@ -102,6 +109,7 @@
 
 - 接收入口：`EsbController`，支持 gzip 请求体，默认最大 100MB。
 - 接收处理：`EsbReceiverService`。
+- SOAP 适配：`WebServiceController`、`SoapWebServiceService`。
 - 接口识别：`InterfaceRecognitionService`。
 - 配置服务：`ConfigService`、`IntegrationProjectService`。
 - 后台队列：`MessageProcessingService`、`MessageProcessingNotifier`。
@@ -116,6 +124,8 @@
 - JSON 读取与路径解析：`MessageJsonHelper`、`SubCardPathHelper`。
 - 项目文档：`ProjectDocumentService`。
 - LLM 辅助：`LlmService`，用于接口识别/配置辅助场景；配置中不得泄露密钥。
+
+2026-07-16 修复 `BioCoreIntegrationService` 查询有效事件类型时布尔条件的 SQL 拼写错误，避免 PostgreSQL 将 `truew` 误判为列名。该修复不改变事件类型筛选语义。
 
 关键表：
 
@@ -150,6 +160,11 @@
 - 消息回执：32016 条。
 - 处理日志：3464 条。
 
+当前字典模板：
+
+- `smoking_status`：吸烟情况，分类为“生活史”，推荐按 `priority_first` 匹配。
+- `drinking_history`：饮酒史，分类为“生活史”，推荐按 `priority_first` 匹配，目标选项为“从不饮酒”“偶尔饮酒（＜1次/月）”“经常饮酒（≥1次/月）”“偶尔饮酒”“仍在饮酒”，由 `Scripts\202607\20260701.sql` 维护。
+
 当前消息状态快照：
 
 - `LHYY` 项目消息大部分已成功，少量已过滤或部分成功。
@@ -170,8 +185,8 @@
 
 当前转换边界：
 
-- 现有统一处理链路以 JSON 为中心：`EsbController` 读取请求体后交给 `EsbReceiverService`，由 `MessageJsonHelper` 解析为 `JToken`，再通过 JSONPath、字段映射、字典和值表达式完成数据抽取和转换。
-- 当前没有独立的通用报文转换模块，也没有已落地的 XML 转 JSON 服务或接口适配层。
+- 除 SOAP 1.1 接收入口外，现有统一处理链路以 JSON 为中心：`EsbController` 读取请求体后交给 `EsbReceiverService`，由 `MessageJsonHelper` 解析为 `JToken`，再通过 JSONPath、字段映射、字典和值表达式完成数据抽取和转换。
+- SOAP 1.1 入口由 `WebServiceController` 和 `SoapWebServiceService` 将业务 XML 转为 JSON 后复用统一处理链路；当前没有独立的通用报文转换模块。
 - 代码中的 XML 处理主要用于项目文档预览、Word OpenXML 解析和配置导出，不属于医院业务报文转换链路。
 
 数据库升级机制：
@@ -228,6 +243,20 @@
 - 接口识别规则通过 `ConfigService` 读取，有 5 分钟内存缓存；修改规则后如需立即生效，需要通过现有配置缓存清理能力或重启服务触发重新加载。
 - 过滤规则通常由 `FilterRuleService` 按接口或映射 ID 查询启用规则。接口配置页、过滤规则页、接口向导和映射编辑弹窗可维护这些规则；也可以通过数据库脚本维护。
 - `DataSync.LHYY.V2` 数据库配置脚本必须放在 `Scripts/yyyyMM/yyyyMMdd.sql`，同一天变更追加到同一个 SQL 文件。示例：LHYY 血管项目病种过滤使用接口级 `esb_filter_rule`，对入院诊断或出院诊断字段执行 `contains` 判断。
+SOAP 1.1 接收流程：
+
+1. 通过“接入配置 → 接口配置”列表查看 WebService 开放状态、服务代码、操作名、`SOAPAction`、服务地址和 WSDL，并使用行内 WebService 配置按钮启用 SOAP；接口完整编辑弹窗的 `WebService` 区域仍可完成同样配置。旧地址 `/config/webservices` 自动跳转到 `/config/interfaces`。
+2. 同一服务代码下可配置多个接口动作；服务地址为 `/webservice/{serviceCode}`，WSDL 地址为 `/webservice/{serviceCode}?wsdl`。
+3. `WebServiceController` 接收 SOAP 1.1，请求参数名为 `INPUTPARA`，参数值是业务 XML 字符串；同时兼容 `CDATA`、转义 XML 文本和嵌套 XML 节点。
+4. `SoapWebServiceService` 按 `SOAPAction` 定位接口及接入项目，把业务 XML 结构化转换为 JSON，并补充 `serverCode` 后调用 `EsbReceiverService`。
+5. 后续继续复用接口识别、入队、映射、待身份绑定、幂等和 Bio.Core 写入逻辑。
+6. SOAP 返回值仍为字符串，内容格式为 `<RESPONSE><RESULT_CODE>true/false</RESULT_CODE><RESULT_CONTENT>...</RESULT_CONTENT></RESPONSE>`。
+
+接口配置的消息模板输入框支持直接粘贴业务 XML 或完整 SOAP 1.1 请求。页面可立即解析预览，保存时也会自动转换并仅保存内部 JSON 模板；医院实际调用时仍直接发送 XML，不要求医院改成 JSON。
+
+相关接口配置字段：`soap_enabled`、`soap_service_code`、`soap_operation`、`soap_action`。同一服务代码下操作名和 `SOAPAction` 均不得重复；数据库升级脚本为 `DataSync.LHYY.V2/Scripts/202607/20260716.sql`。
+
+页面新建 WebService 配置或打开尚未配置服务代码的接口时，`soap_service_code` 默认带出 `bioo`，用户仍可按部署分组需要修改。
 
 枚举语义：
 
@@ -241,6 +270,21 @@
 - `MappingTarget.Question = 2`：映射到题目值。
 - `MappingTarget.SubCard = 3`：映射到子卡。
 - `MessageStatus.Pending = 0`、`Processing = 1`、`Success = 2`、`Failed = 3`、`Filtered = 4`、`Unmatched = 5`、`PartialSuccess = 6`。
+- `MessageStatus.WaitingIdentity = 7`：待身份绑定。用于生命体征等先于基础住院事件到达的消息；消息已接收并保存原始报文，但暂时无法定位患者事件，不进入普通 `Pending` 队列。
+
+### 待身份绑定消息
+
+2026-07-02 起，`DataSync.LHYY.V2` 支持把缺少现成患者事件身份的回写类消息置为 `WaitingIdentity`。该状态主要服务于“医院实时推送生命体征，CYYY 后续主动采集基础住院/出院数据”的场景。
+
+处理边界：
+
+- 医院主动推送的生命体征仍直接进入 `DataSync.LHYY.V2` 的 `/api/esb`。
+- `DataSync.CYYY` 不接收也不暂存这类推送消息，只负责后续主动采集基础住院/出院数据并推送到 LHYY。
+- 生命体征建议配置为 `GenericQuestionWriteBack`，接收方式为入队异步处理，事件时间缺失策略选择“允许缺失，回查失败则转待身份绑定”。
+- 支持的统一事件身份组合为：住院号；患者 ID + 住院日期；患者 ID + 住院次数。
+- 基础住院事件处理成功后，`EventIdentityService.UpsertAsync` 写入或更新 `lhyy.esb_event_identity`，并把匹配的 `WaitingIdentity` 消息改回普通 `Pending`，由后台队列再次处理。
+- 匹配不到的消息保持 `WaitingIdentity`，不自动改为失败，不做人工确认流程。
+- 本次改造未新增数据库表或字段；数据库仍以 `lhyy.esb_messages.status` 的 `smallint` 保存消息状态。
 
 ## 医院接口文档与业务含义
 
@@ -283,8 +327,24 @@
 
 与项目对应：
 
-- 当前代码主链路以 JSON ESB 为主，生命体征文档代表医院要求我们按 XML/WebService 交换数据的场景。
-- 若实现此类接口，需要明确是新增推送通道、适配器，还是转成 `/api/esb` 内部 JSON 后复用现有映射。
+- 可在 LHYY 接口配置中把 `VitaInterface` 对应接口开放为 SOAP 1.1 动作。
+- 输入参数名为 `INPUTPARA`，业务 XML 根节点为 `REQUEST`；转换后的内部 JSON 为 `{"serverCode":"接口事件代码","REQUEST":{...}}`，字段映射从 `$.REQUEST` 下读取。
+- 建议使用入队异步处理和待身份绑定策略，按住院流水号、患者 ID + 住院日期或患者 ID + 住院次数复用现有事件定位方式。
+
+### 嘉和移动医护评估单 WebService
+
+文档：`JHMK-JHIP-JH1038-嘉和集成平台规范-移动医护评估单.docx`
+
+含义：
+
+- 接口名为 `MOBILEASSESSMENT`，输入参数 `INPUTPARA` 和返回值均为字符串。
+- 输入业务 XML 根节点为 `REQUEST`，包含增删改标记、评估类型、患者 ID、住院次数、病区、评估时间、评估人、总分、风险等级及 `systems/system` 循环评估项。
+- 返回 XML 包含区分大小写的 `RESULT_CODE` 和 `RESULT_CONTENT`。
+
+与项目对应：
+
+- 可与 `VitaInterface` 使用同一个 `soap_service_code`，分别配置不同的 `soap_operation` 和 `soap_action`。
+- SOAP 入口只做协议转换，评估字段映射和患者事件定位仍由对应 LHYY 接口配置处理。
 
 ### 世纪坛无纸化第三方接口
 
