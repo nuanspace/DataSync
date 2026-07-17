@@ -7,7 +7,9 @@ using DataSync.Common.Ocr;
 using DataSync.LHYY.V2.Components;
 using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Options;
+using DataSync.LHYY.V2.Models.FollowUp;
 using DataSync.LHYY.V2.Services;
+using DataSync.LHYY.V2.Services.FollowUp;
 using DataSync.LHYY.V2.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
@@ -101,6 +103,7 @@ public class Program
 
             // 平台服务注册
             builder.Services.Configure<OcrRuntimeOptions>(builder.Configuration.GetSection("Ocr"));
+            builder.Services.Configure<FollowUpPackageImportOptions>(builder.Configuration.GetSection("FollowUpPackageImport"));
             builder.Services.AddDataSyncOcr();
             builder.Services.AddScoped<EsbReceiverService>();
             builder.Services.AddScoped<SoapWebServiceService>();
@@ -126,6 +129,16 @@ public class Program
             builder.Services.AddScoped<MappingPreviewService>();
             builder.Services.AddScoped<MessageMappingPreviewService>();
             builder.Services.AddScoped<ConfigSyncService>();
+            builder.Services.AddScoped<FollowUpPackageImportRepository>();
+            builder.Services.AddSingleton<IFollowUpCubeAdvisoryLockProvider, PostgreSqlFollowUpCubeAdvisoryLockProvider>();
+            builder.Services.AddSingleton(sp => new FollowUpCubeOperationCoordinator(
+                sp.GetRequiredService<IFollowUpCubeAdvisoryLockProvider>()));
+            builder.Services.AddScoped<FollowUpPackageVerifyService>();
+            builder.Services.AddScoped<FollowUpPackageSchemaCheckService>();
+            builder.Services.AddScoped<FollowUpPackageBackupService>();
+            builder.Services.AddScoped<FollowUpPackageImportService>();
+            builder.Services.AddScoped<FollowUpPackageRestoreService>();
+            builder.Services.AddSingleton<FollowUpPackageImportKeyService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseUpgradeService>());
             builder.Services.AddSingleton<DatabaseCompareService>();
@@ -140,6 +153,7 @@ public class Program
 
             // 日志清理服务
             builder.Services.AddHostedService<ProcessLogCleanupService>();
+            builder.Services.AddHostedService<FollowUpPackageImportWorker>();
 
             // MudBlazor
             builder.Services.AddMudServices(config =>

@@ -611,7 +611,8 @@
                 var request = BuildCompareRequest();
                 _compareExecuteResult = await inj_databaseUpgradeService.RunExclusiveUpgradeOperationAsync(
                     request.TargetConnectionName,
-                    () => inj_databaseCompareService.ExecuteAsync(request, syncTables, _skipBackup, CancellationToken));
+                    () => inj_databaseCompareService.ExecuteAsync(request, syncTables, _skipBackup, CancellationToken),
+                    CancellationToken);
                 _executeResult = null;
             }
             else

@@ -3,6 +3,7 @@ using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
+using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.EntityFrameworkCore;
 
 namespace DataSync.LHYY.V2.Services;
@@ -15,6 +16,7 @@ public class MessageProcessingService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly MessageProcessingNotifier _notifier;
     private readonly ILogger<MessageProcessingService> _logger;
+    private readonly FollowUpCubeOperationCoordinator _operationCoordinator;
 
     private const int DefaultIntervalMs = 5000;
     private const int DefaultMaxRetry = 3;
@@ -25,11 +27,13 @@ public class MessageProcessingService : BackgroundService
     public MessageProcessingService(
         IServiceScopeFactory scopeFactory,
         MessageProcessingNotifier notifier,
-        ILogger<MessageProcessingService> logger)
+        ILogger<MessageProcessingService> logger,
+        FollowUpCubeOperationCoordinator operationCoordinator)
     {
         _scopeFactory = scopeFactory;
         _notifier = notifier;
         _logger = logger;
+        _operationCoordinator = operationCoordinator;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -40,7 +44,16 @@ public class MessageProcessingService : BackgroundService
         {
             try
             {
-                var processed = await ProcessBatchAsync(stoppingToken);
+                int processed;
+                await using (var operationLease = await _operationCoordinator.TryAcquireSharedAsync(stoppingToken))
+                {
+                    if (operationLease is null)
+                    {
+                        await _notifier.WaitAsync(TimeSpan.FromMilliseconds(DefaultIntervalMs), stoppingToken);
+                        continue;
+                    }
+                    processed = await ProcessBatchAsync(stoppingToken);
+                }
                 if (processed == 0)
                 {
                     var intervalMs = await GetIntervalMsAsync();

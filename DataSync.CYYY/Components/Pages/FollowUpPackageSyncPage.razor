@@ -1,0 +1,286 @@
+@page "/followup-packages"
+@inherits BasePage
+@rendermode InteractiveServer
+@inject FollowUpPackageSyncService SyncService
+@inject FollowUpPackageKeyService KeyService
+@inject IOptions<FollowUpPackageSyncOptions> SyncOptions
+
+<PageTitle>FollowUp 包同步</PageTitle>
+
+<div class="followup-sync-page">
+    <header class="followup-sync-heading">
+        <div>
+            <MudText Typo="Typo.h4" Class="page-title">FollowUp 包同步</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">管理医院来源、拉取计划、数据包与导入回执。</MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="@_busy">刷新</MudButton>
+    </header>
+
+    @if (_busy)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_overview.MissingTables.Count > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            数据库管理表尚未升级：@string.Join("、", _overview.MissingTables)。请在 LHYY 数据库升级页执行 CYYY FollowUp 脚本。
+        </MudAlert>
+    }
+    else
+    {
+        <section class="sync-overview" aria-label="同步概览">
+            <div><span>自动拉取服务</span><strong class="@("service-state " + (SyncOptions.Value.Enabled ? "is-on" : "is-off"))">@(SyncOptions.Value.Enabled ? "已启用" : "未启用")</strong></div>
+            <div><span>医院来源</span><strong>@_overview.Sources.Count</strong></div>
+            <div><span>定时来源</span><strong>@_overview.Sources.Count(item => item.IsEnabled)</strong></div>
+            <div><span>已拉取数据包</span><strong>@_overview.Packages.Count(item => item.PullStatus == "Pulled")</strong></div>
+            <div><span>待转发回执</span><strong>@_overview.Acks.Count(item => item.ForwardStatus is "Pending" or "Failed")</strong></div>
+        </section>
+
+        <section class="followup-preflight">
+            <div class="preflight-copy">
+                <MudText Typo="Typo.subtitle1">接入检查</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">全部就绪后才能通过 DMZ 安全拉取。</MudText>
+            </div>
+            @PreflightItem("SSH 私钥", _preflight.PrivateKeyReady)
+            @PreflightItem("SSH 公钥", _preflight.PublicKeyReady)
+            @PreflightItem("主机指纹", _preflight.KnownHostsReady)
+            @PreflightItem("DMZ 访问令牌", _preflight.TokenReady)
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="GenerateKeyAsync" Disabled="@(_busy || _preflight.PrivateKeyReady)">生成密钥</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_preflight.PublicKeyReady)">复制公钥</MudButton>
+        </section>
+
+        <section class="followup-workspace">
+            <aside class="followup-source-panel">
+                <div class="section-heading">
+                    <div>
+                        <MudText Typo="Typo.subtitle1">DMZ 来源</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">配置医院身份、连接与包仓库</MudText>
+                    </div>
+                    <MudIconButton Icon="@Icons.Material.Filled.Add" OnClick="NewSource" />
+                </div>
+                @foreach (var source in _overview.Sources)
+                {
+                    <button class="source-row @(ReferenceEquals(source, _selectedSource) ? "is-selected" : "")" @onclick="@(() => SelectSource(source))">
+                        <span class="source-state @(SyncOptions.Value.Enabled && source.IsEnabled ? "is-on" : "")"></span>
+                        <span><strong>@source.HospitalName</strong><small>@source.HospitalCode · @SourceSummary(source)</small></span>
+                    </button>
+                }
+            </aside>
+
+            <div class="followup-main-panel">
+                @if (_selectedSource is not null)
+                {
+                    <div class="selected-source-heading">
+                        <div><MudText Typo="Typo.h6">@(_selectedSource.HospitalName is { Length: > 0 } ? _selectedSource.HospitalName : "新建医院来源")</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">配置保存后作用于当前医院来源</MudText></div>
+                        <MudChip T="string" Size="Size.Small" Color="@(SyncOptions.Value.Enabled && _selectedSource.IsEnabled ? Color.Success : Color.Default)">@FollowUpDisplayText.SourceScheduleStatus(SyncOptions.Value.Enabled, _selectedSource.IsEnabled)</MudChip>
+                    </div>
+
+                    <section class="config-section">
+                        <div class="config-section-copy"><MudText Typo="Typo.subtitle2">连接信息</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">医院身份、DMZ 入口和共享包目录</MudText></div>
+                        <div class="source-form-grid">
+                            <MudTextField @bind-Value="_selectedSource.HospitalCode" Label="医院编码" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudTextField @bind-Value="_selectedSource.HospitalName" Label="医院名称" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudTextField @bind-Value="_selectedSource.DmzHost" Label="DMZ 主机" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudNumericField @bind-Value="_selectedSource.DmzPort" Label="SSH 端口" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudTextField @bind-Value="_selectedSource.DmzUser" Label="SSH 用户" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                            <MudTextField @bind-Value="_selectedSource.PackageRoot" Label="包仓库目录" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                        </div>
+                    </section>
+
+                    <section class="schedule-section">
+                        <div class="schedule-copy">
+                            <MudText Typo="Typo.subtitle2">自动拉取计划</MudText>
+                            <MudText Typo="Typo.body2">@FollowUpDisplayText.PullScheduleDescription(FollowUpDisplayText.PullIntervalSeconds(_pullIntervalMinutes))</MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">这是滚动间隔，不是每天固定钟点；服务重启后会重新开始计时。</MudText>
+                            @if (!SyncOptions.Value.Enabled && _selectedSource.IsEnabled)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Warning">自动拉取服务当前未启用；本来源计划可以保存，但不会自动执行。</MudText>
+                            }
+                        </div>
+                        <MudNumericField @bind-Value="_pullIntervalMinutes" Label="检查间隔（分钟）" Min="1" Max="1440" Variant="Variant.Outlined" Margin="Margin.Dense" Class="interval-field" />
+                        <MudSwitch @bind-Value="_selectedSource.IsEnabled" Color="Color.Primary">启用定时拉取</MudSwitch>
+                    </section>
+
+                    <div class="action-row">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveSourceAsync" Disabled="@_busy">保存配置</MudButton>
+                        <MudButton Variant="Variant.Outlined" OnClick="HealthAsync" Disabled="@_busy">连接诊断</MudButton>
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="PullAsync" Disabled="@_busy">查询并拉取</MudButton>
+                    </div>
+
+                    <details class="advanced-panel">
+                        <summary>按条件重新拉取</summary>
+                        <div class="source-form-grid repull-grid">
+                            <MudTextField @bind-Value="_repullPackageId" Label="指定包号" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                            <MudDatePicker @bind-Date="_repullFrom" Label="数据起始日期" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                            <MudDatePicker @bind-Date="_repullTo" Label="数据结束日期" Variant="Variant.Outlined" Margin="Margin.Dense" Clearable="true" />
+                            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" OnClick="RepullAsync" Disabled="@_busy">执行重拉</MudButton>
+                        </div>
+                    </details>
+                    <details class="advanced-panel">
+                        <summary>DMZ 主机指纹</summary>
+                        <MudTextField @bind-Value="_knownHostsText" Label="导入主机指纹（known-hosts）" HelperText="核对无误后保存，防止连接到错误的 DMZ 主机。" Lines="3" Variant="Variant.Outlined" Class="known-hosts-field" />
+                        <MudButton Variant="Variant.Text" OnClick="SaveKnownHostsAsync" Disabled="@string.IsNullOrWhiteSpace(_knownHostsText)">保存主机指纹</MudButton>
+                    </details>
+                }
+            </div>
+        </section>
+
+        <section class="package-section">
+            <div class="section-heading">
+                <div><MudText Typo="Typo.subtitle1">数据包</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">@SelectedSourceLabel · 序号只用于排序，主链连续性由前驱包决定</MudText></div>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@VisiblePackages.Count 个</MudChip>
+            </div>
+            <MudTable Items="VisiblePackages" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent><MudTh>序号 / 包号</MudTh><MudTh>类型 / 生成方式</MudTh><MudTh>数据范围</MudTh><MudTh>拉取状态</MudTh><MudTh>大小</MudTh><MudTh>异常</MudTh><MudTh>操作</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd><strong>#@context.SequenceNo</strong><small class="package-id">@context.PackageId</small></MudTd>
+                    <MudTd><strong class="type-label">@FollowUpDisplayText.PackageType(context.PackageType)</strong><small class="package-id">@FollowUpDisplayText.TriggerType(context.TriggerType)</small></MudTd>
+                    <MudTd>@FormatRange(context)</MudTd>
+                    <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.PullStatus)">@FollowUpDisplayText.PullStatus(context.PullStatus)</MudChip></MudTd>
+                    <MudTd>@FormatBytes(context.SizeBytes)</MudTd>
+                    <MudTd><span class="error-copy">@(context.ErrorMessage ?? context.ErrorCode ?? "—")</span></MudTd>
+                    <MudTd><MudTooltip Text="重新拉取此包"><MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small" Disabled="@(_busy || _selectedSource is null)" OnClick="@(() => RepullPackageAsync(context.PackageId))" /></MudTooltip></MudTd>
+                </RowTemplate>
+            </MudTable>
+        </section>
+
+        <section class="package-section">
+            <div class="section-heading"><div><MudText Typo="Typo.subtitle1">导入回执</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">@SelectedSourceLabel · 固定回执编号确保重复转发不会重复处理</MudText></div></div>
+            <MudTable Items="VisibleAcks" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent><MudTh>包号</MudTh><MudTh>导入结果</MudTh><MudTh>转发状态</MudTh><MudTh>重试次数</MudTh></HeaderContent>
+                <RowTemplate><MudTd>@context.PackageId</MudTd><MudTd><MudChip T="string" Size="Size.Small" Color="@AckColor(context.AckStatus)">@FollowUpDisplayText.AckStatus(context.AckStatus)</MudChip></MudTd><MudTd><MudChip T="string" Size="Size.Small" Color="@ForwardColor(context.ForwardStatus)">@FollowUpDisplayText.ForwardStatus(context.ForwardStatus)</MudChip></MudTd><MudTd>@context.RetryCount</MudTd></RowTemplate>
+            </MudTable>
+        </section>
+    }
+</div>
+
+@code {
+    private FollowUpPackageSyncOverview _overview = new();
+    private FollowUpPackageSourceConfig? _selectedSource;
+    private FollowUpKeyPreflight _preflight = new(false, false, false, false);
+    private string? _knownHostsText;
+    private string? _repullPackageId;
+    private DateTime? _repullFrom;
+    private DateTime? _repullTo;
+    private int _pullIntervalMinutes = 5;
+    private bool _busy;
+    private IReadOnlyList<FollowUpPackagePullState> VisiblePackages =>
+        _overview.PackagesFor(_selectedSource?.HospitalCode).ToList();
+    private IReadOnlyList<FollowUpPackageAckQueueItem> VisibleAcks =>
+        _overview.AcksFor(_selectedSource?.HospitalCode).ToList();
+    private string SelectedSourceLabel => _selectedSource is null
+        ? "请选择医院来源"
+        : $"当前医院：{_selectedSource.HospitalName}";
+
+    private string SourceSummary(FollowUpPackageSourceConfig source)
+    {
+        var status = FollowUpDisplayText.SourceScheduleStatus(SyncOptions.Value.Enabled, source.IsEnabled);
+        return source.IsEnabled
+            ? $"{status} · 每 {FollowUpDisplayText.PullIntervalMinutes(source.PullIntervalSeconds)} 分钟"
+            : status;
+    }
+
+    protected override Task OnPageInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            _overview = await SyncService.GetOverviewAsync(CancellationToken);
+            _preflight = KeyService.GetPreflight();
+            _selectedSource = _overview.Sources.FirstOrDefault(item => item.HospitalCode == _selectedSource?.HospitalCode) ?? _overview.Sources.FirstOrDefault();
+            UpdatePullIntervalEditor();
+        }
+        catch (Exception ex) { inj_snackbar.Add($"加载失败：{ex.Message}", Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private void NewSource()
+    {
+        _selectedSource = new FollowUpPackageSourceConfig { DmzPort = 22, PullIntervalSeconds = 300 };
+        UpdatePullIntervalEditor();
+    }
+
+    private void SelectSource(FollowUpPackageSourceConfig source)
+    {
+        _selectedSource = source;
+        UpdatePullIntervalEditor();
+    }
+
+    private async Task SaveSourceAsync()
+    {
+        if (_selectedSource is null) return;
+        _selectedSource.PullIntervalSeconds = FollowUpDisplayText.PullIntervalSeconds(_pullIntervalMinutes);
+        try { await SyncService.SaveSourceAsync(_selectedSource, CancellationToken); inj_snackbar.Add("配置已保存。", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error); }
+    }
+
+    private async Task HealthAsync()
+    {
+        if (_selectedSource is null) return;
+        var result = await SyncService.HealthAsync(_selectedSource, CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+    }
+
+    private async Task PullAsync()
+    {
+        if (_selectedSource is null) return;
+        _busy = true;
+        var result = await SyncService.SyncSourceAsync(_selectedSource, false, CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        await LoadAsync();
+    }
+
+    private Task RepullAsync() => RepullCoreAsync(_repullPackageId, _repullFrom, _repullTo);
+    private Task RepullPackageAsync(string packageId) => RepullCoreAsync(packageId, null, null);
+
+    private async Task RepullCoreAsync(string? packageId, DateTime? from, DateTime? to)
+    {
+        if (_selectedSource is null) return;
+        _busy = true;
+        try
+        {
+            var result = await SyncService.RepullAsync(_selectedSource, packageId, from, to, CancellationToken);
+            inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        }
+        finally
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task GenerateKeyAsync()
+    {
+        try { _ = await KeyService.GenerateKeyAsync(CancellationToken); inj_snackbar.Add("SSH 密钥已生成，请复制公钥到 DMZ 授权。", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private async Task CopyPublicKeyAsync()
+    {
+        var key = await KeyService.ReadPublicKeyAsync(CancellationToken);
+        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("公钥已复制。", Severity.Success); }
+    }
+
+    private async Task SaveKnownHostsAsync()
+    {
+        try { await KeyService.SaveKnownHostsAsync(_knownHostsText ?? "", CancellationToken); _knownHostsText = null; inj_snackbar.Add("known-hosts 已保存。", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private static RenderFragment PreflightItem(string label, bool ready) => builder =>
+    {
+        builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}");
+        builder.AddContent(2, $"{(ready ? "✓" : "!")} {label}"); builder.CloseElement();
+    };
+    private void UpdatePullIntervalEditor() =>
+        _pullIntervalMinutes = FollowUpDisplayText.PullIntervalMinutes(_selectedSource?.PullIntervalSeconds ?? 300);
+
+    private static string FormatRange(FollowUpPackagePullState item) => item.FromWatermark.HasValue
+        ? $"{item.FromWatermark:yyyy-MM-dd HH:mm} → {item.ToWatermark:yyyy-MM-dd HH:mm}"
+        : $"截至 {item.ToWatermark:yyyy-MM-dd HH:mm}";
+    private static string FormatBytes(long bytes) => bytes >= 1024 * 1024 * 1024 ? $"{bytes / 1024d / 1024 / 1024:F2} GB" : bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024:F1} MB" : bytes > 0 ? $"{bytes / 1024d:F1} KB" : "0 B";
+    private static Color StatusColor(string status) => status switch { "Pulled" => Color.Success, "Failed" => Color.Error, "Pulling" => Color.Info, _ => Color.Default };
+    private static Color AckColor(string status) => status switch { "Imported" => Color.Success, "ImportFailed" or "RejectedSchemaMismatch" => Color.Error, _ => Color.Default };
+    private static Color ForwardColor(string status) => status switch { "Forwarded" => Color.Success, "Failed" => Color.Error, "Forwarding" => Color.Info, _ => Color.Default };
+}

@@ -1,0 +1,99 @@
+services:
+  datasync-db:
+    image: "${DATASYNC_DB_IMAGE:?请在.env中设置DATASYNC_DB_IMAGE}"
+    container_name: s7-followup-datasync-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${DATASYNC_DB_NAME:-datasync}"
+      POSTGRES_USER: "${DATASYNC_DB_USER:-postgres}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/datasync_db_password
+      TZ: Asia/Shanghai
+    ports:
+      - "${DATABASE_BIND_ADDRESS:-127.0.0.1}:${DATASYNC_DB_HOST_PORT:-15432}:5432"
+    volumes:
+      - "${DATA_ROOT:-/data/s7-followup}/datasync-db:/var/lib/postgresql/data"
+    secrets:
+      - datasync_db_password
+    networks: [s7-followup]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  cube-db:
+    image: "${CUBE_DB_IMAGE:?请在.env中设置CUBE_DB_IMAGE}"
+    container_name: s7-followup-cube-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: "${CUBE_DB_NAME:-cube}"
+      POSTGRES_USER: "${CUBE_DB_USER:-postgres}"
+      POSTGRES_PASSWORD_FILE: /run/secrets/cube_db_password
+      TZ: Asia/Shanghai
+    ports:
+      - "${DATABASE_BIND_ADDRESS:-127.0.0.1}:${CUBE_DB_HOST_PORT:-15433}:5432"
+    volumes:
+      - "${DATA_ROOT:-/data/s7-followup}/cube-db:/var/lib/postgresql/data"
+    secrets:
+      - cube_db_password
+    networks: [s7-followup]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  datasync-cyyy:
+    image: "${CYYY_IMAGE:?请在.env中设置CYYY_IMAGE}"
+    container_name: s7-followup-cyyy
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      TZ: Asia/Shanghai
+    ports:
+      - "${MANAGEMENT_BIND_ADDRESS:-127.0.0.1}:${CYYY_HOST_PORT:-18080}:8080"
+    volumes:
+      - ./config/cyyy/appsettings.Production.json:/app/appsettings.Production.json:ro
+      - "${DATA_ROOT:-/data/s7-followup}/packages:/app/followup/packages"
+      - "${DATA_ROOT:-/data/s7-followup}/secrets/cyyy:/app/secrets"
+      - "${DATA_ROOT:-/data/s7-followup}/logs/cyyy:/app/logs"
+    depends_on:
+      datasync-db:
+        condition: service_healthy
+    networks: [s7-followup]
+
+  datasync-lhyy-v2:
+    image: "${LHYY_IMAGE:?请在.env中设置LHYY_IMAGE}"
+    container_name: s7-followup-lhyy
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      TZ: Asia/Shanghai
+    ports:
+      - "${MANAGEMENT_BIND_ADDRESS:-127.0.0.1}:${LHYY_HOST_PORT:-18081}:8080"
+    volumes:
+      - ./config/lhyy/appsettings.Production.json:/app/appsettings.Production.json:ro
+      - "${DATA_ROOT:-/data/s7-followup}/packages:/app/followup/packages"
+      - "${DATA_ROOT:-/data/s7-followup}/staging:/app/followup/staging"
+      - "${DATA_ROOT:-/data/s7-followup}/backups:/app/followup/backups"
+      - "${DATA_ROOT:-/data/s7-followup}/uploads:/app/uploads"
+      - "${DATA_ROOT:-/data/s7-followup}/secrets/lhyy:/app/secrets"
+      - "${DATA_ROOT:-/data/s7-followup}/logs/lhyy:/app/logs"
+    depends_on:
+      datasync-db:
+        condition: service_healthy
+      cube-db:
+        condition: service_healthy
+    networks: [s7-followup]
+
+networks:
+  s7-followup:
+    name: s7-followup
+
+secrets:
+  datasync_db_password:
+    file: ./secrets/datasync_db_password
+  cube_db_password:
+    file: ./secrets/cube_db_password

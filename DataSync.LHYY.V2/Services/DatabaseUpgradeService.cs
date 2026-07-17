@@ -1,3 +1,4 @@
+using DataSync.LHYY.V2.Services.FollowUp;
 using DataSync.LHYY.V2.Tools;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -36,12 +37,22 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
     private readonly IConfiguration _configuration;
     private readonly IWebHostEnvironment _environment;
+    private readonly FollowUpCubeOperationCoordinator _cubeOperationCoordinator;
+    private readonly string _cubeConnectionKey;
     private Task? _managedScriptWorker;
 
-    public DatabaseUpgradeService(IConfiguration configuration, IWebHostEnvironment environment)
+    public DatabaseUpgradeService(
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        FollowUpCubeOperationCoordinator cubeOperationCoordinator)
     {
         _configuration = configuration;
         _environment = environment;
+        _cubeOperationCoordinator = cubeOperationCoordinator;
+        var cubeConnectionString = configuration.GetConnectionString("CubeDb")
+            ?? throw new InvalidOperationException("未找到连接字符串 'CubeDb'");
+        _cubeConnectionKey = BuildConnectionFingerprint(
+            new DatabaseConnectionOption("CubeDb", cubeConnectionString, "CubeDb"));
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -106,6 +117,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
         var lease = BeginExclusiveUpgradeOperation(target);
         try
         {
+            await using var cubeLease = await AcquireCubeMaintenanceLeaseAsync(target, cancellationToken);
             var scripts = LoadScripts();
             await using var connection = new NpgsqlConnection(target.ConnectionString);
             await connection.OpenAsync(cancellationToken);
@@ -142,12 +154,14 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
     public async Task<T> RunExclusiveUpgradeOperationAsync<T>(
         string connectionName,
-        Func<Task<T>> operation)
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken = default)
     {
         var target = GetConnection(connectionName);
         var lease = BeginExclusiveUpgradeOperation(target);
         try
         {
+            await using var cubeLease = await AcquireCubeMaintenanceLeaseAsync(target, cancellationToken);
             return await operation();
         }
         finally
@@ -342,6 +356,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
         var lease = BeginExclusiveUpgradeOperation(target);
         try
         {
+            await using var cubeLease = await AcquireCubeMaintenanceLeaseAsync(target, cancellationToken);
             var path = ResolveSqlFilePath(sqlFilePath);
             if (!File.Exists(path))
                 throw new FileNotFoundException("SQL 文件不存在。", path);
@@ -375,6 +390,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
         try
         {
+            await using var cubeLease = await AcquireCubeMaintenanceLeaseAsync(target, cancellationToken);
             UpdateTask(taskId, DatabaseUpgradeTaskStatus.Running, "脚本正在执行中", "正在连接目标数据库", null, backupFile, executedScripts, null);
             var scripts = LoadScripts();
             script = scripts.FirstOrDefault(item => string.Equals(item.RelativePath, scriptKey, StringComparison.OrdinalIgnoreCase))
@@ -515,6 +531,18 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
     private void EndExclusiveUpgradeOperation(UpgradeOperationLease lease) =>
         _activeTasksByConnection.TryRemove(new KeyValuePair<string, Guid>(lease.ConnectionKey, lease.OperationId));
+
+    private async ValueTask<IAsyncDisposable?> AcquireCubeMaintenanceLeaseAsync(
+        DatabaseConnectionOption target,
+        CancellationToken cancellationToken)
+    {
+        if (!string.Equals(BuildConnectionFingerprint(target), _cubeConnectionKey, StringComparison.Ordinal))
+            return null;
+
+        var lease = await _cubeOperationCoordinator.TryAcquireExclusiveAsync(cancellationToken);
+        return lease ?? throw new InvalidOperationException(
+            "CubeDb 当前处于 FollowUp 导入、恢复或其他数据库维护操作中，请稍后重试。");
+    }
 
     private void CleanupTaskSnapshots(Guid preserveTaskId)
     {

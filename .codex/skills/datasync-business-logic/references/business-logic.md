@@ -1,6 +1,6 @@
 # DataSync 工作空间业务逻辑记录
 
-更新时间：2026-07-16
+更新时间：2026-07-17
 
 本文件记录 `D:\Github\DataSync` 工作空间中 ntcare 产品与医院侧系统对接相关的业务逻辑。后续任何业务逻辑改动都必须同步更新本文件。
 
@@ -394,6 +394,61 @@ SOAP 1.1 接收流程：
 - `V_BLOOD_VESSEL_RYXX`、`v_blood_vessel_jbxx` 映射患者和事件。
 - `v_blood_vessel_jcxx`、`v_blood_vessel_hysj`、`V_BLOOD_VESSEL_CYXX` 等更多用于题目或子卡写回。
 - `MRD0104` 使用 `GenericQuestionWriteBack`，用于病历/文书类题目写回。
+
+## FollowUp 医院数据回传链路
+
+该链路整合在现有两个应用中，不新增独立程序，也不引用 `FollowUp` 项目程序集：
+
+- `DataSync.Common/FollowUp` 保存独立、版本化的三端协议 DTO、外层 envelope 严格解析、包内容清单模型和包链判定。它是协议代码，不是对 `FollowUp` 仓库的项目引用。
+- `DataSync.CYYY` 负责通过 SSH forced-command 调用 DMZ 的 `relay-health`、`relay-list`、`relay-pull`、`relay-ack`，原样保存加密包，并维护拉取和 ACK 状态。
+- `DataSync.LHYY.V2` 负责验签、解密、结构校验、备份、导入、ACK 生成和恢复。
+
+CYYY 处理规则：
+
+- SSH 请求使用单个 stdin JSON；token、包号等业务参数不进入命令行。SSH 开启严格 host key 校验，禁用交互、PTY 和转发。
+- 包流写入隐藏 `.partial` 文件，同时计算大小和 SHA-256；通过后 `fsync` 并原子改名为 `<packageId>.fupkg`，之后才把数据库状态标记为 `Pulled`。
+- 同一医院串行拉取。普通同步按最大 `sequenceNo` 查询云端新候选，同时合并本地 `Pending`、`Failed` 以及进程中断遗留的 `Pulling` 包重新拉取，避免低序号包因传输失败或服务重启被后续水位永久跳过；序号只排序、不判断连续。页面仍支持按包号或水位日期范围重拉。
+- LHYY 对同一医院、包号、ACK 状态 upsert `cyyy.followup_package_ack_queue`，队列 UUID 的字符串形式作为稳定 `ackId`。CYYY 转发失败时保持 ackId 重试。
+- Worker 仅在 CYYY 管理表、Ed25519 私钥/公钥、known-hosts 和 token 文件均就绪时运行。
+
+LHYY 校验与导入顺序：
+
+1. 校验外层包大小和清单 SHA-256，拒绝多余、缺失或重复的 ZIP 顶层条目。
+2. 先对 `envelope.json` 精确字节执行 RSA-PSS-SHA256 验签，再严格解析字段、顺序、协议版本和算法。
+3. 用院内 RSA 私钥以 OAEP-SHA256 解包 64 字节密钥材料；前 32 字节用于 AES-256-CBC，后 32 字节用于 HMAC-SHA256。
+4. `payload.bin` 流式落临时文件并同时校验长度、SHA-256 和 `IV + payload` HMAC，避免大包整体进入内存。
+5. 解密后限制 ZIP 条目数、展开总量并阻止路径逃逸，随后校验 `checksums.sha256`、manifest 和三个结构文件 hash。
+6. 校验导出契约、最低导入器版本和包链。`sequenceNo` 只排序；Incremental 的前驱必须等于当前主链头；Supplement 引用已导入相关包且不推进主链；Replacement 只替代尚未成功导入的包。
+7. 以包内 `table-manifest.json` 为唯一导入范围，按 `ReferenceMaster`、`Relationship`、`BusinessData` 排序，并执行 `UseExistingById`、`RejectIfMissing`、`InsertIfMissing`、`Upsert`。不根据包缺项物理删除目标数据。
+8. `Compatible` 自动继续；`RequiresMapping` 可在页面保存目标表、字段、默认值映射，或标记等待数据库升级；`Breaking` 禁止自动导入。
+9. 导入前用 `pg_dump -Fc` 备份整个 `CubeDb`，并备份本包会覆盖的附件。数据写入事务在附件原子切换完成后提交；任一环节失败都会回滚数据库并恢复附件。附件自动恢复失败时必须写入 `RestoreFailed`，不能降级为普通 `ImportFailed`；每次校验/导入结束后清理本轮 `verify-*` staging 目录并清空失效路径。
+10. 数据提交后写入 `Imported` 状态和 ACK。提交后的审计/ACK 暂时失败不得把成功结果降级为失败，也不得自动重做已成功包。
+
+导入状态与维护门禁补充规则：
+
+- `cyyy.followup_package_pull_state` 再次发现已拉取包时，`lhyy.followup_package_import_state` 只允许新包或 `AwaitingPackage`、`WaitingForPredecessor` 进入 `Pending`；`WaitingForDecision`、`RejectedSchemaMismatch`、`ImportFailed`、`Restored`、`RestoreFailed` 等终态或人工处理状态必须保留。
+- 任一包处于 `RestoreFailed` 时，`FollowUpPackageImportWorker` 停止领取所有后续包，页面和服务端禁止直接重新导入覆盖该状态；人工核对后可对同一包重试恢复，恢复成功或人工完成处置并明确解除失败状态后才能继续。
+- FollowUp 导入、恢复或以 `CubeDb` 为目标的数据库升级/比对持有同一套独占 `CubeDb` 维护租约时，其他维护操作以及 JSON `/api/esb`、SOAP 1.1 WebService、后台消息 Worker 和页面手工重试均不得进入写库链路；SOAP 返回可重试的 `soap:Server` 故障。`DataSyncDb` 等非 `CubeDb` 升级仍只使用原目标库互斥登记。
+
+恢复规则：
+
+- 页面要求输入“确认”并再次弹窗确认。
+- 使用该包导入前的 `pg_restore --clean --if-exists` 完整业务库备份和附件备份恢复。
+- 只能恢复当前已导入链头；多包回退必须从高序号到低序号逐包执行。恢复过程写入 `lhyy.followup_package_restore_record` 和导入日志。
+- 恢复失败后保持 Worker 关闭，禁止继续导入后续包。恢复成功后可按包链重新执行校验和导入。
+
+配置与部署：
+
+- CYYY 和 LHYY 连接同一个 DataSync 管理库，并挂载同一包仓库；LHYY 的 `CubeDb` 指向目标 ntcare/PostgreSQL 业务库。
+- CYYY 镜像需要 `openssh-client`；LHYY 镜像需要 `postgresql-client`。
+- CYYY 密钥、known-hosts、token，LHYY 解密私钥、云端验签公钥、包仓库、staging、备份和附件目录都必须持久化并限制权限。
+- `FollowUpPackageImport.Enabled` 默认关闭，首次部署应在两个页面完成预检和测试包验证后再开启。
+
+数据库管理表脚本已合并到 `DataSync.LHYY.V2/Scripts/202607/20260708.sql`，包含 `cyyy` 包拉取/ACK 管理表与 `lhyy` 包导入/结构校验/备份恢复管理表。两个应用共用 `DataSyncDb`，现场在 LHYY 数据库升级页面选择 `DataSyncDb` 和“内置脚本”，检查后通过“功能脚本处理”统一备份并执行；脚本使用 `IF NOT EXISTS` 和条件约束保护。影响链路为 FollowUp 文件/报告归档的数据包拉取、校验、导入、ACK 与恢复管理，不改变 ESB 消息处理语义。验证结果：已核对合并文件包含两个来源脚本的全部 SQL，并由项目升级服务的 `Scripts/**.sql` 扫描规则纳入功能脚本列表；未连接现场数据库执行。现场步骤见 `DataSync.LHYY.V2/ProjectDocuments/FollowUp医院数据回传部署与恢复.md`。
+
+2026-07-17 修正 FollowUp 回传链路的重试、包链、维护门禁和状态迁移：影响项目为 `DataSync.CYYY`、`DataSync.LHYY.V2` 和 `DataSync.Common`，影响链路为医院数据包拉取、校验、导入与恢复；关键表为 `cyyy.followup_package_pull_state`、`lhyy.followup_package_import_state`，关键服务为 `FollowUpPackageSyncService`、`FollowUpPackageImportRepository`、`FollowUpPackageImportWorker`、`SoapWebServiceService`。本次不修改数据库结构，不新增 SQL。验证结果：`dotnet test DataSync.sln --no-restore -p:UseAppHost=false` 通过 66 项测试；Release 解决方案构建 0 警告、0 错误；CYYY 和 LHYY 两个最终 Docker 镜像构建通过。
+
+2026-07-17 继续修正 FollowUp 异常恢复与 CubeDb 运维互斥：影响项目为 `DataSync.CYYY`、`DataSync.LHYY.V2` 和 `DataSync.Common`，影响链路为包拉取、校验/导入、附件恢复、数据库升级与比对；关键表仍为 `cyyy.followup_package_pull_state`、`lhyy.followup_package_import_state`，未修改数据库结构且不新增 SQL。`Pulling` 可在进程重启后重新拉取；附件回滚失败进入 `RestoreFailed`；`RestoreFailed` 禁止直接导入但允许重试恢复；所有导入结果都会清理 staging；目标为 `CubeDb` 的数据库升级/比对与 FollowUp 共用维护租约。验证结果：聚焦测试均完成先失败后通过，`dotnet test DataSync.sln --no-restore -p:UseAppHost=false` 当前通过 98 项测试。
 
 ## 新增或修改接口的推荐步骤
 

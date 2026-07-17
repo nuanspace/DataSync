@@ -1,6 +1,7 @@
 ﻿using System.IO.Compression;
 using System.Text;
 using DataSync.LHYY.V2.Services;
+using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 
@@ -17,15 +18,18 @@ public class EsbController : ControllerBase
 
     private readonly EsbReceiverService _receiverService;
     private readonly ILogger<EsbController> _logger;
+    private readonly FollowUpCubeOperationCoordinator _operationCoordinator;
     private readonly long _maxRequestBodyBytes;
 
     public EsbController(
         EsbReceiverService receiverService,
         ILogger<EsbController> logger,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        FollowUpCubeOperationCoordinator operationCoordinator)
     {
         _receiverService = receiverService;
         _logger = logger;
+        _operationCoordinator = operationCoordinator;
         _maxRequestBodyBytes = ResolveMaxRequestBodyBytes(configuration);
     }
 
@@ -37,6 +41,9 @@ public class EsbController : ControllerBase
     {
         try
         {
+            await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(cancellationToken);
+            if (operationLease is null)
+                return Ok(BuildEsbErrorResponse("系统维护中，请稍后重试"));
             ApplyRequestBodyLimit();
 
             if (Request.ContentLength > _maxRequestBodyBytes)

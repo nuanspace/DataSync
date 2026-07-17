@@ -1,0 +1,252 @@
+@page "/followup-import"
+@inherits BasePage
+@rendermode InteractiveServer
+@inject FollowUpPackageImportRepository ImportRepository
+@inject FollowUpPackageImportService ImportService
+@inject FollowUpPackageRestoreService RestoreService
+@inject FollowUpPackageBackupService BackupService
+@inject FollowUpPackageImportKeyService KeyService
+@inject IOptions<FollowUpPackageImportOptions> ImportOptions
+
+<PageTitle>FollowUp 回传导入</PageTitle>
+
+<div class="followup-import-page">
+    <header class="followup-import-heading">
+        <div>
+            <MudText Typo="Typo.h4" Class="page-title">FollowUp 回传导入</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">验证包链与结构，备份后将增量数据安全写入本院数据库。</MudText>
+        </div>
+        <div class="heading-actions">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Search" OnClick="DiscoverAsync" Disabled="@_busy">发现包</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Refresh" OnClick="LoadAsync" Disabled="@_busy">刷新</MudButton>
+        </div>
+    </header>
+
+    @if (_busy) { <MudProgressLinear Indeterminate="true" Color="Color.Primary" /> }
+
+    @if (_overview.MissingTables.Count > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">
+            导入管理表尚未升级：@string.Join("、", _overview.MissingTables)。请在本系统数据库升级页执行 LHYY FollowUp 脚本。
+        </MudAlert>
+    }
+    else
+    {
+        <section class="import-preflight">
+            <div class="preflight-title"><MudText Typo="Typo.subtitle1">导入环境</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">全部通过后才能启用自动导入</MudText></div>
+            @Preflight("包仓库", _overview.PackageRootReady)
+            @Preflight("临时解包目录", _overview.StagingReady)
+            @Preflight("备份目录", _overview.BackupReady)
+            @Preflight("附件目录", _overview.AttachmentRootReady)
+            @Preflight("解密私钥", _overview.DecryptionKeyReady)
+            @Preflight("验签公钥", _overview.SigningKeyReady)
+            @Preflight("PostgreSQL 工具", _overview.PostgreSqlToolsReady)
+            <MudChip T="string" Size="Size.Small" Color="@(ImportOptions.Value.Enabled ? Color.Success : Color.Default)">
+                自动导入 @(ImportOptions.Value.Enabled ? "已启用" : "未启用")
+            </MudChip>
+        </section>
+
+        <section class="key-workspace">
+            <div><MudText Typo="Typo.subtitle1">密钥交换</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">院内私钥不可导出，只向 FollowUp 提供公钥</MudText></div>
+            <MudButton Variant="Variant.Outlined" OnClick="GenerateKeyAsync" Disabled="@(_busy || _overview.DecryptionKeyReady)">生成院内 RSA-3072 密钥</MudButton>
+            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_overview.DecryptionKeyReady)">复制院内公钥</MudButton>
+            <MudTextField @bind-Value="_signingPublicKey" Label="导入 FollowUp 云端验签公钥" Lines="3" Variant="Variant.Outlined" />
+            <MudButton Variant="Variant.Text" OnClick="SaveSigningKeyAsync" Disabled="@string.IsNullOrWhiteSpace(_signingPublicKey)">保存验签公钥</MudButton>
+        </section>
+
+        <section class="import-summary">
+            <div><span>待处理</span><strong>@Count("Pending")</strong></div>
+            <div><span>等待决定</span><strong>@(_overview.Packages.Count(item => item.ImportStatus.StartsWith("Waiting", StringComparison.Ordinal)))</strong></div>
+            <div><span>成功</span><strong>@Count("Imported")</strong></div>
+            <div><span>失败</span><strong>@(_overview.Packages.Count(item => item.ImportStatus.Contains("Failed", StringComparison.Ordinal)))</strong></div>
+        </section>
+
+        <section class="import-table-section">
+            <div class="section-heading">
+                <div><MudText Typo="Typo.subtitle1">包链与导入状态</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">基础包需人工确认；兼容的增量包可自动处理</MudText></div>
+                <MudTextField @bind-Value="_confirmText" Label="高危操作输入“确认”" Margin="Margin.Dense" Variant="Variant.Outlined" Class="confirm-field" />
+            </div>
+            <MudTable Items="_overview.Packages" Dense="true" Hover="true" Elevation="0">
+                <HeaderContent><MudTh>序号 / 包号</MudTh><MudTh>类型</MudTh><MudTh>前驱</MudTh><MudTh>结构</MudTh><MudTh>状态</MudTh><MudTh>错误</MudTh><MudTh>操作</MudTh></HeaderContent>
+                <RowTemplate>
+                    <MudTd><strong>#@context.SequenceNo</strong><small>@context.PackageId</small></MudTd>
+                    <MudTd>@FollowUpDisplayText.PackageType(context.PackageType)</MudTd>
+                    <MudTd><small>@(context.PreviousPackageId ?? "—")</small></MudTd>
+                    <MudTd>@FollowUpDisplayText.SchemaDiff(context.SchemaDiffLevel)</MudTd>
+                    <MudTd><MudChip T="string" Size="Size.Small" Color="@StatusColor(context.ImportStatus)">@FollowUpDisplayText.ImportStatus(context.ImportStatus)</MudChip></MudTd>
+                    <MudTd><span class="error-copy">@(context.ErrorMessage ?? context.ErrorCode ?? "—")</span></MudTd>
+                    <MudTd>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => ImportAsync(context))" Disabled="@(_busy || !FollowUpDisplayText.CanImport(context.ImportStatus))">校验 / 导入</MudButton>
+                        @if (context.RequiresSchemaReview || context.ImportStatus == "WaitingForDecision")
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Warning" OnClick="@(() => ConfigureSchemaAsync(context))" Disabled="@_busy">结构处理</MudButton>
+                        }
+                        @if (FollowUpDisplayText.CanRestore(context.ImportStatus))
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" OnClick="@(() => RestoreAsync(context))" Disabled="@(_busy || _confirmText != "确认")">恢复</MudButton>
+                        }
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </section>
+
+        @if (_decisionPackage is not null)
+        {
+            <section class="schema-decision-section">
+                <div class="section-heading">
+                    <div>
+                        <MudText Typo="Typo.subtitle1">结构处理 · #@_decisionPackage.SequenceNo</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">键为“源 schema.源表”，字段映射为“源字段: 目标字段”；默认值键使用目标字段名。</MudText>
+                    </div>
+                    <MudButton Variant="Variant.Text" OnClick="CloseSchemaDecision">关闭</MudButton>
+                </div>
+                <div class="schema-decision-form">
+                    <MudSelect T="string" @bind-Value="_decisionStatus" Label="处理方式" Variant="Variant.Outlined" Margin="Margin.Dense">
+                        <MudSelectItem Value="@("ApprovedMapping")">确认表/字段映射</MudSelectItem>
+                        <MudSelectItem Value="@("WaitingForUpgrade")">等待数据库升级</MudSelectItem>
+                    </MudSelect>
+                    <MudTextField @bind-Value="_operatorName" Label="操作人" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                </div>
+                @if (_decisionStatus == "ApprovedMapping")
+                {
+                    <MudTextField @bind-Value="_mappingJson" Label="表与字段映射（JSON）" Lines="12" Variant="Variant.Outlined" />
+                }
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SaveSchemaDecisionAsync" Disabled="@_busy">保存结构决定</MudButton>
+            </section>
+        }
+    }
+</div>
+
+@code {
+    private FollowUpPackageImportOverview _overview = new();
+    private string? _signingPublicKey;
+    private string? _confirmText;
+    private FollowUpPackageImportState? _decisionPackage;
+    private string _decisionStatus = "WaitingForUpgrade";
+    private string? _operatorName;
+    private string _mappingJson = "{}";
+    private bool _busy;
+    protected override bool RequiresIntegrationProject => false;
+    protected override Task OnPageInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _busy = true;
+        try
+        {
+            var missing = await ImportRepository.GetMissingTablesAsync(CancellationToken);
+            var options = ImportOptions.Value;
+            EnsureDirectory(options.StagingRoot);
+            EnsureDirectory(options.BackupRoot);
+            _overview = new FollowUpPackageImportOverview
+            {
+                TablesReady = missing.Count == 0,
+                MissingTables = missing,
+                PackageRootReady = Directory.Exists(options.PackageRoot),
+                StagingReady = CanWrite(options.StagingRoot),
+                BackupReady = CanWrite(options.BackupRoot),
+                AttachmentRootReady = Directory.Exists(options.AttachmentRoot),
+                DecryptionKeyReady = File.Exists(options.DecryptionPrivateKeyPath),
+                SigningKeyReady = File.Exists(options.CloudSigningPublicKeyPath),
+                PostgreSqlToolsReady = BackupService.PostgreSqlToolsReady,
+                Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : []
+            };
+        }
+        catch (Exception ex) { inj_snackbar.Add($"加载失败：{ex.Message}", Severity.Error); }
+        finally { _busy = false; }
+    }
+
+    private async Task DiscoverAsync()
+    {
+        try { await ImportRepository.DiscoverAsync(CancellationToken); await LoadAsync(); inj_snackbar.Add("已刷新 CYYY 包仓库状态。", Severity.Success); }
+        catch (Exception ex) { inj_snackbar.Add($"发现失败：{ex.Message}", Severity.Error); }
+    }
+
+    private async Task ImportAsync(FollowUpPackageImportState state)
+    {
+        if (!FollowUpDisplayText.CanImport(state.ImportStatus)) return;
+        if (state.PackageType == "Baseline")
+        {
+            var confirmed = await inj_dialogService.ShowMessageBox("确认导入基础包", "基础包将作为新的本地主链基线。确认继续？", yesText: "确认导入", cancelText: "取消");
+            if (confirmed != true) return;
+        }
+        _busy = true;
+        var result = await ImportService.ImportAsync(state, state.PackageType == "Baseline", CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        _confirmText = null;
+        await LoadAsync();
+    }
+
+    private async Task RestoreAsync(FollowUpPackageImportState state)
+    {
+        if (_confirmText != "确认") return;
+        var confirmed = await inj_dialogService.ShowMessageBox("确认恢复数据", "将使用该包导入前备份恢复数据库和附件，可能影响当前业务数据。确认继续？", yesText: "确认恢复", cancelText: "取消");
+        if (confirmed != true) return;
+        _busy = true;
+        var result = await RestoreService.RestoreAsync(state, CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        _confirmText = null;
+        await LoadAsync();
+    }
+
+    private async Task ConfigureSchemaAsync(FollowUpPackageImportState state)
+    {
+        _decisionPackage = state;
+        var decision = await ImportRepository.GetSchemaDecisionAsync(state.HospitalCode, state.PackageId, CancellationToken);
+        _decisionStatus = decision?.DecisionStatus ?? "WaitingForUpgrade";
+        _operatorName = decision?.OperatorName;
+        var mappings = decision?.TableMappings ?? new Dictionary<string, FollowUpTableMapping>();
+        _mappingJson = JsonSerializer.Serialize(mappings, new JsonSerializerOptions(FollowUpJson.Options) { WriteIndented = true });
+    }
+
+    private void CloseSchemaDecision() => _decisionPackage = null;
+
+    private async Task SaveSchemaDecisionAsync()
+    {
+        if (_decisionPackage is null) return;
+        try
+        {
+            var mappings = _decisionStatus == "ApprovedMapping"
+                ? JsonSerializer.Deserialize<Dictionary<string, FollowUpTableMapping>>(_mappingJson, FollowUpJson.Options)
+                    ?? throw new InvalidOperationException("映射 JSON 不能为空。")
+                : new Dictionary<string, FollowUpTableMapping>();
+            var decision = new FollowUpSchemaDecision
+            {
+                DecisionStatus = _decisionStatus,
+                OperatorName = _operatorName?.Trim() ?? string.Empty,
+                TableMappings = mappings
+            };
+            await ImportRepository.SaveSchemaDecisionAsync(
+                _decisionPackage.HospitalCode, _decisionPackage.PackageId, decision, CancellationToken);
+            inj_snackbar.Add("结构处理决定已保存，可再次执行校验 / 导入。", Severity.Success);
+            _decisionPackage = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存结构决定失败：{ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task GenerateKeyAsync()
+    {
+        try { _ = await KeyService.GenerateEncryptionKeyAsync(CancellationToken); inj_snackbar.Add("院内密钥已生成。", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+    }
+    private async Task CopyPublicKeyAsync()
+    {
+        var key = await KeyService.ReadEncryptionPublicKeyAsync(CancellationToken);
+        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("院内公钥已复制。", Severity.Success); }
+    }
+    private async Task SaveSigningKeyAsync()
+    {
+        try { await KeyService.SaveSigningPublicKeyAsync(_signingPublicKey ?? "", CancellationToken); _signingPublicKey = null; inj_snackbar.Add("验签公钥已保存。", Severity.Success); await LoadAsync(); }
+        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+    }
+
+    private int Count(string status) => _overview.Packages.Count(item => item.ImportStatus == status);
+    private static RenderFragment Preflight(string label, bool ready) => builder => { builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}"); builder.AddContent(2, $"{(ready ? "✓" : "!")} {label}"); builder.CloseElement(); };
+    private static Color StatusColor(string status) => status switch { "Imported" => Color.Success, "ImportFailed" or "RestoreFailed" or "RejectedSchemaMismatch" => Color.Error, "Importing" or "BackingUp" or "Validating" or "Restoring" => Color.Info, _ when status.StartsWith("Waiting") => Color.Warning, _ => Color.Default };
+    private static void EnsureDirectory(string path) { if (!string.IsNullOrWhiteSpace(path)) Directory.CreateDirectory(path); }
+    private static bool CanWrite(string path) { try { Directory.CreateDirectory(path); var probe = Path.Combine(path, $".probe-{Guid.NewGuid():N}"); File.WriteAllText(probe, "ok"); File.Delete(probe); return true; } catch { return false; } }
+}

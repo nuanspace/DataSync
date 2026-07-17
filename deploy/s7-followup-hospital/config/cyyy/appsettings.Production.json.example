@@ -1,0 +1,23 @@
+{
+  "ConnectionStrings": {
+    "SyncDb": "Host=datasync-db;Port=5432;Database=datasync;Username=postgres;Password=<填写DataSync数据库密码>"
+  },
+  "FollowUpPackageSync": {
+    "Enabled": false,
+    "PrivateKeyPath": "/app/secrets/cyyy_dmz_ed25519",
+    "KnownHostsPath": "/app/secrets/dmz_known_hosts",
+    "TokenFilePath": "/app/secrets/inner_device_token",
+    "DeviceId": "<填写七院设备编码>",
+    "RequestWindowSeconds": 300,
+    "ConnectTimeoutSeconds": 10,
+    "ListLimit": 100,
+    "MaxPackageBytes": 21474836480,
+    "AckRetrySeconds": 60
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}

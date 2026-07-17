@@ -2,6 +2,7 @@ using System.Xml;
 using System.Xml.Linq;
 using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Entities;
+using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -21,15 +22,18 @@ public sealed class SoapWebServiceService
     private readonly IDbContextFactory<DataSyncDbContext> _contextFactory;
     private readonly EsbReceiverService _receiverService;
     private readonly ILogger<SoapWebServiceService> _logger;
+    private readonly FollowUpCubeOperationCoordinator _operationCoordinator;
 
     public SoapWebServiceService(
         IDbContextFactory<DataSyncDbContext> contextFactory,
         EsbReceiverService receiverService,
-        ILogger<SoapWebServiceService> logger)
+        ILogger<SoapWebServiceService> logger,
+        FollowUpCubeOperationCoordinator operationCoordinator)
     {
         _contextFactory = contextFactory;
         _receiverService = receiverService;
         _logger = logger;
+        _operationCoordinator = operationCoordinator;
     }
 
     public static void NormalizeConfiguration(EsbInterfaceConfig config)
@@ -210,6 +214,10 @@ public sealed class SoapWebServiceService
         string requestXml,
         CancellationToken cancellationToken = default)
     {
+        await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(cancellationToken);
+        if (operationLease is null)
+            return SoapWebServiceResult.Fault("soap:Server", "系统维护中，请稍后重试");
+
         var actions = await GetActionsAsync(serviceCode, cancellationToken);
         if (actions.Count == 0)
             return SoapWebServiceResult.Fault("soap:Client", "WebService 服务不存在或未启用");

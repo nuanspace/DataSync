@@ -1,7 +1,9 @@
 ﻿using DataSync.CYYY.Components;
 using DataSync.CYYY.Data;
 using DataSync.CYYY.Models;
+using DataSync.CYYY.Models.FollowUp;
 using DataSync.CYYY.Services;
+using DataSync.CYYY.Services.FollowUp;
 using DataSync.CYYY.Workers;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor;
@@ -64,6 +66,13 @@ public class Program
             builder.Services.AddScoped<TaskManagementService>();
             builder.Services.AddScoped<ActiveMedicalRecordClient>();
             builder.Services.AddScoped<ActiveSyncService>();
+            builder.Services.Configure<FollowUpPackageSyncOptions>(builder.Configuration.GetSection("FollowUpPackageSync"));
+            builder.Services.AddScoped<FollowUpPackageRepository>();
+            builder.Services.AddScoped<FollowUpPackageSyncService>();
+            builder.Services.AddSingleton<FollowUpPackagePullCoordinator>();
+            builder.Services.AddSingleton<FollowUpPackageFileStore>();
+            builder.Services.AddSingleton<FollowUpPackageRelayClient>();
+            builder.Services.AddSingleton<FollowUpPackageKeyService>();
             builder.Services.AddTransient<SyncOrchestrator>();
             builder.Services.AddTransient<PushServiceFactory>();
             builder.Services.AddTransient<ApiPushService>();
@@ -78,6 +87,7 @@ public class Program
             builder.Services.AddHostedService<SyncWorker>();
             builder.Services.AddHostedService<IngestionWorker>();
             builder.Services.AddHostedService<ActiveMedicalRecordSyncWorker>();
+            builder.Services.AddHostedService<FollowUpPackagePullWorker>();
 
             // MudBlazor
             builder.Services.AddMudServices(config =>

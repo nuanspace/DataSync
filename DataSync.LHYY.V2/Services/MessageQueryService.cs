@@ -2,6 +2,7 @@ using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
+using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.EntityFrameworkCore;
 using Newtonsoft.Json.Linq;
 
@@ -13,6 +14,7 @@ namespace DataSync.LHYY.V2.Services;
 public class MessageQueryService
 {
     private const int DefaultHotDays = 30;
+    private const string MaintenanceMessage = "系统维护中，请稍后重试";
 
     private const string AllMessagesSql = """
         SELECT
@@ -61,17 +63,20 @@ public class MessageQueryService
     private readonly IntegrationProjectService _integrationProjectService;
     private readonly ConfigService _configService;
     private readonly EsbReceiverService _receiverService;
+    private readonly FollowUpCubeOperationCoordinator _operationCoordinator;
 
     public MessageQueryService(
         IDbContextFactory<DataSyncDbContext> contextFactory,
         IntegrationProjectService integrationProjectService,
         ConfigService configService,
-        EsbReceiverService receiverService)
+        EsbReceiverService receiverService,
+        FollowUpCubeOperationCoordinator operationCoordinator)
     {
         _contextFactory = contextFactory;
         _integrationProjectService = integrationProjectService;
         _configService = configService;
         _receiverService = receiverService;
+        _operationCoordinator = operationCoordinator;
     }
 
     public async Task<int> GetHotRetentionDaysAsync()
@@ -335,6 +340,8 @@ public class MessageQueryService
 
     public async Task<bool> RetryMessageAsync(long id)
     {
+        await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(CancellationToken.None);
+        if (operationLease is null) throw new InvalidOperationException(MaintenanceMessage);
         await using var db = await _contextFactory.CreateDbContextAsync();
         var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
         var message = await db.EsbMessages
@@ -352,6 +359,8 @@ public class MessageQueryService
 
     public async Task<bool> ProcessMessageNowAsync(long id, CancellationToken cancellationToken = default)
     {
+        await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(cancellationToken);
+        if (operationLease is null) throw new InvalidOperationException(MaintenanceMessage);
         if (!await PrepareMessageForDirectProcessAsync(id, cancellationToken))
             return false;
 
@@ -378,6 +387,8 @@ public class MessageQueryService
         DateTime? eventStartTime = null,
         DateTime? eventEndTime = null)
     {
+        await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(CancellationToken.None);
+        if (operationLease is null) throw new InvalidOperationException(MaintenanceMessage);
         await using var db = await _contextFactory.CreateDbContextAsync();
         var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
         var effectiveStartTime = await ResolveEffectiveStartTimeAsync(startTime, endTime);

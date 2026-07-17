@@ -1,0 +1,30 @@
+{
+  "ConnectionStrings": {
+    "DataSyncDb": "Host=datasync-db;Port=5432;Database=datasync;Username=postgres;Password=<填写DataSync数据库密码>",
+    "CubeDb": "Host=cube-db;Port=5432;Database=cube;Username=postgres;Password=<填写Cube数据库密码>;SearchPath=system,care,form,target,public"
+  },
+  "FollowUpPackageImport": {
+    "Enabled": false,
+    "PackageRoot": "/app/followup/packages",
+    "StagingRoot": "/app/followup/staging",
+    "BackupRoot": "/app/followup/backups",
+    "AttachmentRoot": "/app/uploads",
+    "DecryptionPrivateKeyPath": "/app/secrets/lhyy_package_private.pem",
+    "CloudSigningPublicKeyPath": "/app/secrets/cloud_signing_public.pem",
+    "EncryptionKeyId": "<填写七院正式keyId>",
+    "SupportedContractVersion": "1.0",
+    "ImporterVersion": "1.0.0",
+    "DeviceId": "<填写七院设备编码>",
+    "ScanIntervalSeconds": 60,
+    "MaxPackageBytes": 21474836480,
+    "MaxExpandedBytes": 85899345920,
+    "MaxArchiveEntries": 200000
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}

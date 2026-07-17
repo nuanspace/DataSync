@@ -19,7 +19,15 @@ FROM base AS final
 WORKDIR /app
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-chi-sim poppler-utils \
+    && apt-get install -y --no-install-recommends ca-certificates curl tesseract-ocr tesseract-ocr-chi-sim poppler-utils \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-17 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=publish /app/publish .
+RUN rm -f appsettings.json appsettings.Development.json appsettings.Production.json
 ENTRYPOINT ["dotnet", "DataSync.LHYY.V2.dll"]
