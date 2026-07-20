@@ -27,6 +27,8 @@ public sealed class FollowUpPackageImportService(
     {
         if (!FollowUpDisplayText.CanImport(state.ImportStatus))
             return new FollowUpImportOperationResult(false, $"当前状态不允许导入：{state.ImportStatus}。");
+        if (await repository.HasUnsafeOperationAsync(cancellationToken))
+            return new FollowUpImportOperationResult(false, "检测到导入或恢复中断状态，请先完成对应包的备份恢复。");
         await using var operationLease = await operationCoordinator.TryAcquireExclusiveAsync(cancellationToken);
         if (operationLease is null)
             return new FollowUpImportOperationResult(false, "CubeDb 当前有写入或维护任务正在执行。");
@@ -34,8 +36,13 @@ public sealed class FollowUpPackageImportService(
             state.HospitalCode, state.PackageId, cancellationToken);
         if (authoritativeStatus.Imported)
             return new FollowUpImportOperationResult(true, "该包已成功导入，无需重复执行。");
-        if (!FollowUpDisplayText.CanImport(authoritativeStatus.Status))
+        var hasUnsafeOperation = await repository.HasUnsafeOperationAsync(cancellationToken);
+        if (!FollowUpDisplayText.CanStartImport(authoritativeStatus.Status, hasUnsafeOperation))
+        {
+            if (hasUnsafeOperation)
+                return new FollowUpImportOperationResult(false, "检测到导入或恢复中断状态，请先完成对应包的备份恢复。");
             return new FollowUpImportOperationResult(false, $"数据库中的当前状态不允许导入：{authoritativeStatus.Status ?? "不存在"}。");
+        }
         var startedAt = DateTimeOffset.Now;
         FollowUpVerifiedPackage? package = null;
         FollowUpBackupArtifact? backup = null;
@@ -45,7 +52,13 @@ public sealed class FollowUpPackageImportService(
         {
             await repository.MarkAsync(state.HospitalCode, state.PackageId, "Validating", null, null, cancellationToken: cancellationToken);
             package = await verifyService.VerifyAndExtractAsync(
-                state.LocalPackagePath, state.PackageHash, state.HospitalCode, cancellationToken);
+                state.LocalPackagePath,
+                state.PackageHash,
+                state.HospitalCode,
+                state.PackageId,
+                state.SequenceNo,
+                state.PackageType,
+                cancellationToken);
             ValidateVersions(package.Manifest);
 
             if (package.Manifest.PackageType == "Baseline" && !allowBaseline)

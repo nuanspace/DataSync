@@ -53,7 +53,52 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_root, "escape.txt")));
     }
 
-    private async Task<PackageFixture> CreatePackageAsync(bool tamperSignature, bool addTraversalEntry)
+    [Fact]
+    public async Task 外层包哈希为空时拒绝导入()
+    {
+        var fixture = await CreatePackageAsync(false, false);
+        var service = new FollowUpPackageVerifyService(fixture.Options);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => service.VerifyAndExtractAsync(
+            fixture.PackagePath, null, "H1", CancellationToken.None));
+
+        Assert.Contains("SHA-256", exception.Message);
+    }
+
+    [Fact]
+    public async Task 包内标识与文件名包号不一致时拒绝导入()
+    {
+        var fixture = await CreatePackageAsync(false, false, packageId: "pkg-2");
+        var service = new FollowUpPackageVerifyService(fixture.Options);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => service.VerifyAndExtractAsync(
+            fixture.PackagePath, fixture.PackageHash, "H1", CancellationToken.None));
+
+        Assert.Contains("包标识", exception.Message);
+    }
+
+    [Fact]
+    public async Task Checksum路径逃逸时在读取文件前拒绝()
+    {
+        var externalPath = Path.Combine(_root, "outside.txt");
+        Directory.CreateDirectory(_root);
+        await File.WriteAllTextAsync(externalPath, "outside");
+        var relative = Path.GetRelativePath(Path.Combine(_root, "staging", "placeholder"), externalPath)
+            .Replace('\\', '/');
+        var fixture = await CreatePackageAsync(false, false, checksumExtraPath: relative);
+        var service = new FollowUpPackageVerifyService(fixture.Options);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => service.VerifyAndExtractAsync(
+            fixture.PackagePath, fixture.PackageHash, "H1", CancellationToken.None));
+
+        Assert.Contains("路径", exception.Message);
+    }
+
+    private async Task<PackageFixture> CreatePackageAsync(
+        bool tamperSignature,
+        bool addTraversalEntry,
+        string packageId = "pkg-1",
+        string? checksumExtraPath = null)
     {
         Directory.CreateDirectory(_root);
         using var decryptRsa = RSA.Create(3072);
@@ -68,7 +113,7 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
         var schemaDiff = "{\"diffLevel\":\"Compatible\",\"recommendation\":\"direct-import\",\"snapshotHash\":\"x\",\"addedTables\":[],\"removedTables\":[],\"changedColumns\":[],\"changedConstraints\":[]}"u8.ToArray();
         var manifest = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            hospitalCode = "H1", hospitalId = Guid.NewGuid(), packageId = "pkg-1", sequenceNo = 1,
+            hospitalCode = "H1", hospitalId = Guid.NewGuid(), packageId, sequenceNo = 1,
             packageType = "Baseline", fromWatermark = (DateTime?)null, toWatermark = new DateTime(2026, 7, 14, 10, 0, 0),
             previousPackageId = (string?)null, relatedPackageId = (string?)null, generatedAt = DateTimeOffset.Now,
             exportContractVersion = "1.0", minImporterVersion = "1.0.0", sourceDbFingerprint = "db",
@@ -83,7 +128,10 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
             ["schema/schema-diff.json"] = schemaDiff
         };
         if (addTraversalEntry) files["../escape.txt"] = "escape"u8.ToArray();
-        var checksums = string.Join("\n", files.OrderBy(item => item.Key).Select(item => $"{Hash(item.Value)}  {item.Key}")) + "\n";
+        var checksumLines = files.OrderBy(item => item.Key).Select(item => $"{Hash(item.Value)}  {item.Key}").ToList();
+        if (checksumExtraPath is not null)
+            checksumLines.Add($"{Hash("outside"u8.ToArray())}  {checksumExtraPath}");
+        var checksums = string.Join("\n", checksumLines) + "\n";
         files["checksums.sha256"] = Encoding.UTF8.GetBytes(checksums);
 
         byte[] innerZip;
@@ -118,7 +166,7 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
         byte[] hmac;
         using (var mac = new HMACSHA256(keyMaterial[32..])) hmac = mac.ComputeHash([.. iv, .. payload]);
         var wrapped = decryptRsa.Encrypt(keyMaterial, RSAEncryptionPadding.OaepSHA256);
-        var envelope = Encoding.UTF8.GetBytes($"{{\"protocolVersion\":\"1.0\",\"packageId\":\"pkg-1\",\"hospitalCode\":\"H1\",\"keyId\":\"hospital-key\",\"keyWrapAlgorithm\":\"RSA-OAEP-SHA256\",\"payloadCipherAlgorithm\":\"AES-256-CBC\",\"payloadMacAlgorithm\":\"HMAC-SHA256\",\"signatureAlgorithm\":\"RSA-PSS-SHA256\",\"wrappedKeyMaterial\":\"{Convert.ToBase64String(wrapped)}\",\"iv\":\"{Convert.ToBase64String(iv)}\",\"payloadSha256\":\"{Hash(payload)}\",\"payloadHmacSha256\":\"{Convert.ToHexString(hmac).ToLowerInvariant()}\",\"plaintextLength\":{innerZip.Length},\"payloadLength\":{payload.Length},\"generatedAt\":\"2026-07-14T10:00:00+08:00\"}}");
+        var envelope = Encoding.UTF8.GetBytes($"{{\"protocolVersion\":\"1.0\",\"packageId\":\"{packageId}\",\"hospitalCode\":\"H1\",\"keyId\":\"hospital-key\",\"keyWrapAlgorithm\":\"RSA-OAEP-SHA256\",\"payloadCipherAlgorithm\":\"AES-256-CBC\",\"payloadMacAlgorithm\":\"HMAC-SHA256\",\"signatureAlgorithm\":\"RSA-PSS-SHA256\",\"wrappedKeyMaterial\":\"{Convert.ToBase64String(wrapped)}\",\"iv\":\"{Convert.ToBase64String(iv)}\",\"payloadSha256\":\"{Hash(payload)}\",\"payloadHmacSha256\":\"{Convert.ToHexString(hmac).ToLowerInvariant()}\",\"plaintextLength\":{innerZip.Length},\"payloadLength\":{payload.Length},\"generatedAt\":\"2026-07-14T10:00:00+08:00\"}}");
         var signature = signingRsa.SignData(envelope, HashAlgorithmName.SHA256, RSASignaturePadding.Pss);
         if (tamperSignature) signature[0] ^= 0xff;
 

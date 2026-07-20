@@ -60,6 +60,19 @@ public sealed class FollowUpPackageTransportTests : IDisposable
     }
 
     [Fact]
+    public async Task 缺少外层Hash时在拉取落盘前拒绝()
+    {
+        var store = new FollowUpPackageFileStore();
+        var bytes = "missing-hash"u8.ToArray();
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() => store.SaveAsync(
+            _tempRoot, "pkg-no-hash", new MemoryStream(bytes), bytes.Length, null, 1024, CancellationToken.None));
+
+        Assert.Contains("SHA-256", exception.Message);
+        Assert.False(Directory.Exists(_tempRoot));
+    }
+
+    [Fact]
     public async Task 超过大小限制时拒绝且不保留文件()
     {
         var store = new FollowUpPackageFileStore();

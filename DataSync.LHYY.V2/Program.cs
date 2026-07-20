@@ -130,14 +130,20 @@ public class Program
             builder.Services.AddScoped<MessageMappingPreviewService>();
             builder.Services.AddScoped<ConfigSyncService>();
             builder.Services.AddScoped<FollowUpPackageImportRepository>();
+            builder.Services.AddScoped<IFollowUpRestoreCompletionReconciler>(sp =>
+                sp.GetRequiredService<FollowUpPackageImportRepository>());
             builder.Services.AddSingleton<IFollowUpCubeAdvisoryLockProvider, PostgreSqlFollowUpCubeAdvisoryLockProvider>();
+            builder.Services.AddSingleton<IFollowUpCubePersistentStateGate, PostgreSqlFollowUpCubePersistentStateGate>();
             builder.Services.AddSingleton(sp => new FollowUpCubeOperationCoordinator(
-                sp.GetRequiredService<IFollowUpCubeAdvisoryLockProvider>()));
+                sp.GetRequiredService<IFollowUpCubeAdvisoryLockProvider>(),
+                sp.GetRequiredService<IFollowUpCubePersistentStateGate>()));
             builder.Services.AddScoped<FollowUpPackageVerifyService>();
             builder.Services.AddScoped<FollowUpPackageSchemaCheckService>();
             builder.Services.AddScoped<FollowUpPackageBackupService>();
             builder.Services.AddScoped<FollowUpPackageImportService>();
             builder.Services.AddScoped<FollowUpPackageRestoreService>();
+            builder.Services.AddSingleton<FollowUpRestoreCompletionStore>();
+            builder.Services.AddHostedService<FollowUpRestoreReconciliationWorker>();
             builder.Services.AddSingleton<FollowUpPackageImportKeyService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseUpgradeService>());

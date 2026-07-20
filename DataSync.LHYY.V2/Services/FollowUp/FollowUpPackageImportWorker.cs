@@ -24,9 +24,9 @@ public sealed class FollowUpPackageImportWorker(
                 var backupService = scope.ServiceProvider.GetRequiredService<FollowUpPackageBackupService>();
                 if (!PreflightReady(backupService)) continue;
                 await repository.DiscoverAsync(stoppingToken);
-                if (await repository.HasRestoreFailureAsync(stoppingToken))
+                if (await repository.HasUnsafeOperationAsync(stoppingToken))
                 {
-                    logger.LogCritical("检测到 FollowUp 恢复失败状态，自动导入 Worker 已停止领取后续包，请转人工处置。");
+                    logger.LogCritical("检测到 FollowUp 恢复失败或中断中的危险操作状态，自动导入 Worker 已停止领取后续包，请转人工处置。");
                     continue;
                 }
                 var service = scope.ServiceProvider.GetRequiredService<FollowUpPackageImportService>();

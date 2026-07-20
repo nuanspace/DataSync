@@ -13,4 +13,4 @@
 - `${DATA_ROOT}/secrets/lhyy/lhyy_package_private.pem`
 - `${DATA_ROOT}/secrets/lhyy/cloud_signing_public.pem`
 
-密码、Token 和私钥文件权限必须为 `0600`，不得进入发布包、Git、日志或普通工单。
+密码、Token 和私钥文件权限必须为 `0600`，不得进入发布包、Git、日志或普通工单。`package-release.sh` 只会复制本说明文件，不会复制本目录下的其他文件。

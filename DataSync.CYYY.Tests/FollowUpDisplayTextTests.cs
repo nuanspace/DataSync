@@ -64,9 +64,9 @@ public sealed class FollowUpDisplayTextTests
 
     [Theory]
     [InlineData("Imported")]
-    [InlineData("ImportFailed")]
-    [InlineData("RestoreRequired")]
     [InlineData("RestoreFailed")]
+    [InlineData("Importing")]
+    [InlineData("Restoring")]
     public void 可恢复状态显示恢复入口(string status)
     {
         Assert.True(FollowUpDisplayText.CanRestore(status));
@@ -75,11 +75,24 @@ public sealed class FollowUpDisplayTextTests
     [Theory]
     [InlineData(null)]
     [InlineData("Pending")]
-    [InlineData("Restoring")]
+    [InlineData("ImportFailed")]
+    [InlineData("RestoreRequired")]
     [InlineData("Restored")]
     public void 非恢复状态不显示恢复入口(string? status)
     {
         Assert.False(FollowUpDisplayText.CanRestore(status));
+    }
+
+    [Theory]
+    [InlineData("Pending", false, true)]
+    [InlineData("Pending", true, false)]
+    [InlineData("Imported", false, false)]
+    public void 新包导入同时受当前状态和全局危险状态约束(
+        string status,
+        bool hasUnsafeOperation,
+        bool expected)
+    {
+        Assert.Equal(expected, FollowUpDisplayText.CanStartImport(status, hasUnsafeOperation));
     }
 
     [Fact]

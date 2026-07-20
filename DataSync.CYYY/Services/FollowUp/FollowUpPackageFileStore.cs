@@ -22,6 +22,10 @@ public sealed class FollowUpPackageFileStore
         }
         if (expectedSize < 0 || expectedSize > maxPackageBytes)
             throw new InvalidDataException("数据包大小超过允许上限。");
+        if (string.IsNullOrWhiteSpace(expectedSha256)
+            || expectedSha256.Length != 64
+            || expectedSha256.Any(value => !Uri.IsHexDigit(value)))
+            throw new InvalidDataException("数据包 SHA-256 不能为空且必须为 64 位十六进制值。");
 
         Directory.CreateDirectory(packageRoot);
         var finalPath = Path.Combine(packageRoot, $"{packageId}.fupkg");
@@ -54,8 +58,7 @@ public sealed class FollowUpPackageFileStore
                 if (total != expectedSize)
                     throw new InvalidDataException($"数据包长度不一致，期望 {expectedSize}，实际 {total}。");
                 var actualHash = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
-                if (!string.IsNullOrWhiteSpace(expectedSha256)
-                    && !string.Equals(actualHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(actualHash, expectedSha256, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidDataException("数据包 SHA-256 校验失败。");
                 }

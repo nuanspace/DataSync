@@ -82,11 +82,14 @@ public static class FollowUpDisplayText
         or "ImportFailed"
         or "Restored";
 
+    public static bool CanStartImport(string? importStatus, bool hasUnsafeOperation) =>
+        !hasUnsafeOperation && CanImport(importStatus);
+
     public static bool CanRestore(string? importStatus) => importStatus is
         "Imported"
-        or "ImportFailed"
-        or "RestoreRequired"
-        or "RestoreFailed";
+        or "RestoreFailed"
+        or "Importing"
+        or "Restoring";
 
     public static int PullIntervalMinutes(int seconds) => Math.Max(1, (int)Math.Ceiling(seconds / 60d));
 

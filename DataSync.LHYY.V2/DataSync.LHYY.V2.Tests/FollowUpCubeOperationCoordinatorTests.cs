@@ -70,6 +70,106 @@ public sealed class FollowUpCubeOperationCoordinatorTests
         }
     }
 
+    [Fact]
+    public async Task 持久危险状态阻断普通共享和独占操作但允许恢复操作()
+    {
+        var coordinator = new FollowUpCubeOperationCoordinator(
+            new FakeAdvisoryLockProvider(),
+            new FixedPersistentStateGate(true));
+
+        Assert.Null(await coordinator.TryAcquireSharedAsync(CancellationToken.None));
+        Assert.Null(await coordinator.TryAcquireExclusiveAsync(CancellationToken.None));
+        await using var recovery = await coordinator.TryAcquireRecoveryExclusiveAsync(CancellationToken.None);
+        Assert.NotNull(recovery);
+    }
+
+    [Fact]
+    public async Task 无危险状态时保持原有共享和独占租约行为()
+    {
+        var coordinator = new FollowUpCubeOperationCoordinator(
+            new FakeAdvisoryLockProvider(),
+            new FixedPersistentStateGate(false));
+
+        await using (var shared = await coordinator.TryAcquireSharedAsync(CancellationToken.None))
+            Assert.NotNull(shared);
+        await using var exclusive = await coordinator.TryAcquireExclusiveAsync(CancellationToken.None);
+        Assert.NotNull(exclusive);
+    }
+
+    [Fact]
+    public async Task 持久状态查询异常时释放已取得的独占锁()
+    {
+        var provider = new FakeAdvisoryLockProvider();
+        var coordinator = new FollowUpCubeOperationCoordinator(provider, new ThrowingPersistentStateGate());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await coordinator.TryAcquireExclusiveAsync(CancellationToken.None));
+
+        Assert.Equal(1, provider.ExclusiveReleaseCount);
+        Assert.False(coordinator.IsMaintenanceActive);
+    }
+
+    [Theory]
+    [InlineData("42P01", true)]
+    [InlineData("08006", false)]
+    public void 仅在管理表尚未创建时保持原有写入行为(string sqlState, bool expected)
+    {
+        Assert.Equal(expected, PostgreSqlFollowUpCubePersistentStateGate.IsMissingStateTable(sqlState));
+    }
+
+    [Fact]
+    public async Task 持久状态在有效期内复用且主动失效后立即重查()
+    {
+        var queryCount = 0;
+        var timeProvider = new MutableTimeProvider();
+        var cache = new FollowUpCubePersistentStateCache(
+            _ =>
+            {
+                queryCount++;
+                return ValueTask.FromResult(false);
+            },
+            timeProvider,
+            TimeSpan.FromSeconds(1));
+
+        Assert.False(await cache.IsBlockedAsync(CancellationToken.None));
+        Assert.False(await cache.IsBlockedAsync(CancellationToken.None));
+        Assert.Equal(1, queryCount);
+
+        cache.Invalidate();
+
+        Assert.False(await cache.IsBlockedAsync(CancellationToken.None));
+        Assert.Equal(2, queryCount);
+    }
+
+    [Fact]
+    public async Task 持久状态缓存到期后自动重查()
+    {
+        var queryCount = 0;
+        var timeProvider = new MutableTimeProvider();
+        var cache = new FollowUpCubePersistentStateCache(
+            _ =>
+            {
+                queryCount++;
+                return ValueTask.FromResult(false);
+            },
+            timeProvider,
+            TimeSpan.FromSeconds(1));
+
+        await cache.IsBlockedAsync(CancellationToken.None);
+        timeProvider.Advance(TimeSpan.FromSeconds(2));
+        await cache.IsBlockedAsync(CancellationToken.None);
+
+        Assert.Equal(2, queryCount);
+    }
+
+    [Fact]
+    public void 导入状态迁移主动失效持久状态缓存()
+    {
+        var source = ReadSource("DataSync.LHYY.V2", "Services", "FollowUp", "FollowUpPackageImportRepository.cs");
+
+        Assert.Contains("operationCoordinator.InvalidatePersistentStateGate()", source);
+    }
+
     private sealed class FakeAdvisoryLockProvider : IFollowUpCubeAdvisoryLockProvider
     {
         public int ExclusiveReleaseCount { get; private set; }
@@ -126,5 +226,35 @@ public sealed class FollowUpCubeOperationCoordinatorTests
             await _connections.WaitAsync(cancellationToken);
             return new CallbackLease(() => _connections.Release());
         }
+    }
+
+    private sealed class FixedPersistentStateGate(bool blocked) : IFollowUpCubePersistentStateGate
+    {
+        public ValueTask<bool> IsBlockedAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult(blocked);
+    }
+
+    private sealed class ThrowingPersistentStateGate : IFollowUpCubePersistentStateGate
+    {
+        public ValueTask<bool> IsBlockedAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromException<bool>(new InvalidOperationException("gate failed"));
+    }
+
+    private sealed class MutableTimeProvider : TimeProvider
+    {
+        private DateTimeOffset _now = DateTimeOffset.UtcNow;
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan duration) => _now += duration;
+    }
+
+    private static string ReadSource(params string[] segments)
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "DataSync.sln")))
+            directory = directory.Parent;
+        Assert.NotNull(directory);
+        return File.ReadAllText(Path.Combine([directory!.FullName, .. segments]));
     }
 }

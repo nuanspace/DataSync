@@ -21,14 +21,34 @@ public sealed class FollowUpPackageVerifyService
         string? expectedPackageHash,
         string expectedHospitalCode,
         CancellationToken cancellationToken = default)
+        => await VerifyAndExtractAsync(
+            packagePath,
+            expectedPackageHash,
+            expectedHospitalCode,
+            Path.GetFileNameWithoutExtension(packagePath),
+            null,
+            null,
+            cancellationToken);
+
+    public async Task<FollowUpVerifiedPackage> VerifyAndExtractAsync(
+        string packagePath,
+        string? expectedPackageHash,
+        string expectedHospitalCode,
+        string expectedPackageId,
+        long? expectedSequenceNo,
+        string? expectedPackageType,
+        CancellationToken cancellationToken = default)
     {
         if (!File.Exists(packagePath)) throw new FileNotFoundException("数据包不存在。", packagePath);
         var packageInfo = new FileInfo(packagePath);
         if (packageInfo.Length <= 0 || packageInfo.Length > _options.MaxPackageBytes)
             throw new InvalidDataException("数据包大小无效或超过限制。");
+        if (string.IsNullOrWhiteSpace(expectedPackageHash)
+            || expectedPackageHash.Length != 64
+            || expectedPackageHash.Any(value => !Uri.IsHexDigit(value)))
+            throw new InvalidDataException("外层数据包 SHA-256 不能为空且必须为 64 位十六进制值。");
         var actualPackageHash = await HashFileAsync(packagePath, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(expectedPackageHash)
-            && !string.Equals(actualPackageHash, expectedPackageHash, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(actualPackageHash, expectedPackageHash, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException("外层数据包 SHA-256 校验失败。");
 
         var stagingPath = Path.Combine(Path.GetFullPath(_options.StagingRoot), $"verify-{Guid.NewGuid():N}");
@@ -50,9 +70,10 @@ public sealed class FollowUpPackageVerifyService
                 VerifySignature(envelopeBytes, signatureBytes);
                 var parsedEnvelope = FollowUpEnvelopeParser.ParseAndValidate(envelopeBytes);
                 if (!string.Equals(parsedEnvelope.HospitalCode, expectedHospitalCode, StringComparison.Ordinal)
+                    || !string.Equals(parsedEnvelope.PackageId, expectedPackageId, StringComparison.Ordinal)
                     || (!string.IsNullOrWhiteSpace(_options.EncryptionKeyId)
                         && !string.Equals(parsedEnvelope.KeyId, _options.EncryptionKeyId, StringComparison.Ordinal)))
-                    throw new InvalidDataException("envelope 医院编码或 Key Id 与本机配置不匹配。");
+                    throw new InvalidDataException("envelope 医院编码、包标识或 Key Id 与待导入记录不匹配。");
 
                 var keyMaterial = UnwrapKey(parsedEnvelope.WrappedKeyMaterial);
                 try
@@ -80,8 +101,12 @@ public sealed class FollowUpPackageVerifyService
 
             await VerifyChecksumsAsync(stagingPath, cancellationToken);
             var manifest = await ReadJsonAsync<FollowUpPackageManifest>(Path.Combine(stagingPath, "manifest.json"), cancellationToken);
-            if (manifest.HospitalCode != expectedHospitalCode || manifest.PackageId != envelope.PackageId)
-                throw new InvalidDataException("manifest 与 envelope 的医院或包标识不一致。");
+            if (manifest.HospitalCode != expectedHospitalCode
+                || manifest.PackageId != envelope.PackageId
+                || manifest.PackageId != expectedPackageId
+                || expectedSequenceNo.HasValue && manifest.SequenceNo != expectedSequenceNo.Value
+                || expectedPackageType is not null && !string.Equals(manifest.PackageType, expectedPackageType, StringComparison.Ordinal))
+                throw new InvalidDataException("manifest 与待导入记录的医院、包标识、序号或包类型不一致。");
             var snapshotPath = Path.Combine(stagingPath, "schema", "schema-snapshot.json");
             var tableManifestPath = Path.Combine(stagingPath, "schema", "table-manifest.json");
             var diffPath = Path.Combine(stagingPath, "schema", "schema-diff.json");
@@ -220,9 +245,9 @@ public sealed class FollowUpPackageVerifyService
             var separator = line.IndexOf("  ", StringComparison.Ordinal);
             if (separator != 64) throw new InvalidDataException("checksums.sha256 格式无效。");
             var expected = line[..separator];
-            var relative = line[(separator + 2)..].Replace('/', Path.DirectorySeparatorChar);
+            var relative = NormalizeChecksumPath(line[(separator + 2)..]);
             if (!declared.Add(relative)) throw new InvalidDataException("checksums.sha256 包含重复文件。");
-            var path = Path.Combine(stagingPath, relative);
+            var path = SafeStagingFilePath(stagingPath, relative);
             if (!File.Exists(path) || await HashFileAsync(path, cancellationToken) != expected)
                 throw new InvalidDataException($"内层文件校验失败：{relative}");
         }
@@ -239,6 +264,28 @@ public sealed class FollowUpPackageVerifyService
         await using var stream = File.OpenRead(path);
         return await JsonSerializer.DeserializeAsync<T>(stream, FollowUpJson.Options, cancellationToken)
             ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
+    }
+
+    private static string NormalizeChecksumPath(string relative)
+    {
+        var normalized = relative.Replace('\\', '/');
+        if (string.IsNullOrWhiteSpace(normalized)
+            || Path.IsPathRooted(normalized)
+            || normalized.StartsWith('/')
+            || normalized.Contains(':')
+            || normalized.Split('/').Any(part => part is "" or "." or ".."))
+            throw new InvalidDataException("checksums.sha256 包含非法文件路径。");
+        return normalized.Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    private static string SafeStagingFilePath(string stagingPath, string relative)
+    {
+        var fullRoot = Path.GetFullPath(stagingPath);
+        var target = Path.GetFullPath(Path.Combine(fullRoot, relative));
+        var prefix = fullRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!target.StartsWith(prefix, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new InvalidDataException("checksums.sha256 文件路径逃逸 staging 目录。");
+        return target;
     }
 
     private static async Task<byte[]> ReadEntryAsync(ZipArchiveEntry entry, long maxBytes, CancellationToken cancellationToken)
