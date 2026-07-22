@@ -78,10 +78,10 @@ FollowUpPackageImport__Enabled
 ## 4. 首次启用
 
 1. 启动两个服务，但先保持 `FollowUpPackageSync__Enabled=false`、`FollowUpPackageImport__Enabled=false`，CYYY 来源配置也先不启用定时拉取。
-2. 在 CYYY“FollowUp 包同步”页面生成 Ed25519 密钥，只把公钥交给 DMZ 配置动态授权；导入经人工核对的 DMZ host key 到 known-hosts，并将设备 token 写入受限 token 文件。
-3. 保存医院编码、DMZ 主机、端口、用户、共享包仓库和拉取周期，执行“连接诊断”。
-4. 在 LHYY“FollowUp 回传导入”页面生成院内 RSA-3072 密钥，只把 `.public.pem` 公钥交给 FollowUp 云端；将云端 RSA 验签公钥粘贴到页面保存，并配置对应 `EncryptionKeyId`。
-5. 确认 LHYY 页面中包仓库、staging、备份、附件、两类密钥和 PostgreSQL 工具全部通过。
+2. 在 LHYY“FollowUp 回传导入 → 医院端统一初始化”生成并导出 `hospital-to-dmz.s7sync`。该动作同时生成 CYYY Ed25519 SSH 密钥和 LHYY RSA-3072 解密密钥，私钥都留在医院主机。
+3. 按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序在 DMZ、FollowUp、DMZ、LHYY 页面完成定向交换；不要再在 CYYY 单独生成密钥、手填 known-hosts 或手工复制 token。
+4. 保存医院编码、DMZ 主机、端口、用户、共享包仓库和拉取周期，执行 CYYY“连接诊断”。
+5. 在 LHYY 点击“一键验证”，并确认包仓库、staging、备份、附件、两类密钥和 PostgreSQL 工具全部通过。
 6. 在 CYYY 页面手工“查询并拉取”一个测试包，确认 relay 清单缺少合法的 64 位十六进制外层 SHA-256 时立即拒绝，状态只在完整文件原子落盘、大小和 SHA-256 均通过后变为 `Pulled`。
 7. 首次必须导入一份完整的 `Baseline` 或 `Replacement`，不能直接从历史链中间的增量包开始；在 LHYY 页面点击“发现包”，对测试包执行“校验 / 导入”。Baseline 必须二次确认；普通兼容增量包可由 Worker 自动导入。
 8. 导入成功后重启 NTCare，或执行医院已有的 NTCare 缓存刷新运维流程，确认患者管理能够读取最新表单定义和答案。

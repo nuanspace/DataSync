@@ -147,6 +147,7 @@ public class Program
             builder.Services.AddSingleton<FollowUpRestoreCompletionStore>();
             builder.Services.AddHostedService<FollowUpRestoreReconciliationWorker>();
             builder.Services.AddSingleton<FollowUpPackageImportKeyService>();
+            builder.Services.AddSingleton<FollowUpHospitalInitializationService>();
             builder.Services.AddSingleton<DatabaseUpgradeService>();
             builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseUpgradeService>());
             builder.Services.AddSingleton<DatabaseCompareService>();

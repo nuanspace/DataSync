@@ -40,12 +40,14 @@ bash status.sh
 
 全新部署的 Cube schema-only dump 必须已经包含 `20260722-cube-v2.sql` 的结构。若现场使用既有 CubeDb 升级，不恢复全新基础 dump，则在启动 LHYY 前手工连接 CubeDb 执行包内 `database/20260722-cube-v2.sql`，再按实施文档核对 v2 表和字段。`verify-fresh-databases.sh` 只用于全新空库，已有运行历史的管理库不要使用。该 SQL 不要只对 DataSyncDb 执行。
 
-首次部署完成后的验证顺序：关闭自动任务 → 检查服务和 v2/1.1.0 → 检查两库及来源映射 → 检查密钥和 CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内实施文档。
+首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任，再执行：关闭自动任务 → 检查服务和 v2/1.1.0 → 检查两库及来源映射 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
 
 首次启动前必须保持两个业务开关为 `false`：
 
 - `FollowUpPackageSync.Enabled=false`
 - `FollowUpPackageImport.Enabled=false`
+
+`.env` 中的 `CYYY_CONTAINER_UID` / `CYYY_CONTAINER_GID` 必须与 CYYY 镜像运行用户一致。LHYY 统一初始化以 root 生成 CYYY secret 后会把属主切换到该 UID/GID，确保 CYYY 能读取且文件仍保持 `0600`。
 
 待 DMZ、密钥、known_hosts、数据库和三端链路验收完成后，再按实施手册依次启用。
 

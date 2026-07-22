@@ -45,8 +45,7 @@
             @PreflightItem("SSH 公钥", _preflight.PublicKeyReady)
             @PreflightItem("主机指纹", _preflight.KnownHostsReady)
             @PreflightItem("DMZ 访问令牌", _preflight.TokenReady)
-            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="GenerateKeyAsync" Disabled="@(_busy || _preflight.PrivateKeyReady)">生成密钥</MudButton>
-            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_preflight.PublicKeyReady)">复制公钥</MudButton>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">首次密钥与信任配置请在同机 LHYY 的“医院端统一初始化”中完成。</MudText>
         </section>
 
         <section class="followup-workspace">
@@ -116,11 +115,6 @@
                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" OnClick="RepullAsync" Disabled="@_busy">执行重拉</MudButton>
                         </div>
                     </details>
-                    <details class="advanced-panel">
-                        <summary>DMZ 主机指纹</summary>
-                        <MudTextField @bind-Value="_knownHostsText" Label="导入主机指纹（known-hosts）" HelperText="核对无误后保存，防止连接到错误的 DMZ 主机。" Lines="3" Variant="Variant.Outlined" Class="known-hosts-field" />
-                        <MudButton Variant="Variant.Text" OnClick="SaveKnownHostsAsync" Disabled="@string.IsNullOrWhiteSpace(_knownHostsText)">保存主机指纹</MudButton>
-                    </details>
                 }
             </div>
         </section>
@@ -158,7 +152,6 @@
     private FollowUpPackageSyncOverview _overview = new();
     private FollowUpPackageSourceConfig? _selectedSource;
     private FollowUpKeyPreflight _preflight = new(false, false, false, false);
-    private string? _knownHostsText;
     private string? _repullPackageId;
     private DateTime? _repullFrom;
     private DateTime? _repullTo;
@@ -248,24 +241,6 @@
         {
             await LoadAsync();
         }
-    }
-
-    private async Task GenerateKeyAsync()
-    {
-        try { _ = await KeyService.GenerateKeyAsync(CancellationToken); inj_snackbar.Add("SSH 密钥已生成，请复制公钥到 DMZ 授权。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
-    }
-
-    private async Task CopyPublicKeyAsync()
-    {
-        var key = await KeyService.ReadPublicKeyAsync(CancellationToken);
-        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("公钥已复制。", Severity.Success); }
-    }
-
-    private async Task SaveKnownHostsAsync()
-    {
-        try { await KeyService.SaveKnownHostsAsync(_knownHostsText ?? "", CancellationToken); _knownHostsText = null; inj_snackbar.Add("known-hosts 已保存。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
     }
 
     private static RenderFragment PreflightItem(string label, bool ready) => builder =>

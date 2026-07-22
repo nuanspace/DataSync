@@ -5,7 +5,7 @@
 @inject FollowUpPackageImportService ImportService
 @inject FollowUpPackageRestoreService RestoreService
 @inject FollowUpPackageBackupService BackupService
-@inject FollowUpPackageImportKeyService KeyService
+@inject FollowUpHospitalInitializationService InitializationService
 @inject IOptions<FollowUpPackageImportOptions> ImportOptions
 
 <PageTitle>FollowUp 回传导入</PageTitle>
@@ -47,11 +47,20 @@
         </section>
 
         <section class="key-workspace">
-            <div><MudText Typo="Typo.subtitle1">密钥交换</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">院内私钥不可导出，只向 FollowUp 提供公钥</MudText></div>
-            <MudButton Variant="Variant.Outlined" OnClick="GenerateKeyAsync" Disabled="@(_busy || _overview.DecryptionKeyReady)">生成院内 RSA-3072 密钥</MudButton>
-            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_overview.DecryptionKeyReady)">复制院内公钥</MudButton>
-            <MudTextField @bind-Value="_signingPublicKey" Label="导入 FollowUp 云端验签公钥" Lines="3" Variant="Variant.Outlined" />
-            <MudButton Variant="Variant.Text" OnClick="SaveSigningKeyAsync" Disabled="@string.IsNullOrWhiteSpace(_signingPublicKey)">保存验签公钥</MudButton>
+            <div>
+                <MudText Typo="Typo.subtitle1">医院端统一初始化</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">同时管理 CYYY SSH 密钥与 LHYY 加密密钥；私钥始终留在医院主机。</MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined" OnClick="GenerateHospitalPackageAsync" Disabled="@_busy">生成并导出 hospital-to-dmz.s7sync</MudButton>
+            <MudFileUpload T="IBrowserFile" Accept=".s7sync,application/json" FilesChanged="ImportDmzResponseAsync" MaximumFileCount="1">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" Disabled="@_busy">导入 dmz-to-hospital.s7sync</MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+            <MudButton Variant="Variant.Text" OnClick="ValidateInitializationAsync" Disabled="@_busy">一键验证</MudButton>
+            <MudText Typo="Typo.caption" Color="@(_initializationStatus.Complete ? Color.Success : Color.Warning)">
+                @InitializationStatusText
+            </MudText>
         </section>
 
         <section class="import-summary">
@@ -119,7 +128,7 @@
 
 @code {
     private FollowUpPackageImportOverview _overview = new();
-    private string? _signingPublicKey;
+    private FollowUpHospitalInitializationStatus _initializationStatus = new(false, false, false, false, false, false, false);
     private string? _confirmText;
     private FollowUpPackageImportState? _decisionPackage;
     private string _decisionStatus = "WaitingForUpgrade";
@@ -151,6 +160,7 @@
                 PostgreSqlToolsReady = BackupService.PostgreSqlToolsReady,
                 Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : []
             };
+            _initializationStatus = InitializationService.GetStatus();
         }
         catch (Exception ex) { inj_snackbar.Add($"加载失败：{ex.Message}", Severity.Error); }
         finally { _busy = false; }
@@ -228,21 +238,54 @@
         }
     }
 
-    private async Task GenerateKeyAsync()
+    private async Task GenerateHospitalPackageAsync()
     {
-        try { _ = await KeyService.GenerateEncryptionKeyAsync(CancellationToken); inj_snackbar.Add("院内密钥已生成。", Severity.Success); await LoadAsync(); }
+        await RunInitializationAsync(async () =>
+        {
+            var content = await InitializationService.GenerateAndExportAsync(CancellationToken);
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.downloadFile", "hospital-to-dmz.s7sync", content, "application/json;charset=utf-8");
+            inj_snackbar.Add("医院端密钥已就绪，初始化包已导出。", Severity.Success);
+        });
+    }
+
+    private async Task ImportDmzResponseAsync(IBrowserFile file)
+    {
+        await RunInitializationAsync(async () =>
+        {
+            if (file.Size > 256 * 1024) throw new InvalidDataException("初始化包不能超过 256KB。");
+            await using var stream = file.OpenReadStream(256 * 1024, CancellationToken);
+            using var reader = new StreamReader(stream);
+            await InitializationService.ImportDmzResponseAsync(await reader.ReadToEndAsync(CancellationToken), CancellationToken);
+            inj_snackbar.Add("DMZ 回程包已导入。请删除交接介质上的敏感初始化包。", Severity.Success);
+        });
+    }
+
+    private Task ValidateInitializationAsync()
+    {
+        _initializationStatus = InitializationService.GetStatus();
+        inj_snackbar.Add(_initializationStatus.Complete ? "医院端初始化检查全部通过。" : InitializationStatusText,
+            _initializationStatus.Complete ? Severity.Success : Severity.Warning);
+        return Task.CompletedTask;
+    }
+
+    private async Task RunInitializationAsync(Func<Task> action)
+    {
+        _busy = true;
+        try { await action(); }
         catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; await LoadAsync(); }
     }
-    private async Task CopyPublicKeyAsync()
-    {
-        var key = await KeyService.ReadEncryptionPublicKeyAsync(CancellationToken);
-        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("院内公钥已复制。", Severity.Success); }
-    }
-    private async Task SaveSigningKeyAsync()
-    {
-        try { await KeyService.SaveSigningPublicKeyAsync(_signingPublicKey ?? "", CancellationToken); _signingPublicKey = null; inj_snackbar.Add("验签公钥已保存。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
-    }
+
+    private string InitializationStatusText => _initializationStatus.Complete
+        ? "CYYY/LHYY 密钥、DMZ 指纹与令牌、云端验签公钥均已就绪。"
+        : $"待完成：{string.Join("、", new[]
+        {
+            _initializationStatus.CyyyPrivateKeyReady && _initializationStatus.CyyyPublicKeyReady ? null : "CYYY SSH 密钥",
+            _initializationStatus.LhyyPrivateKeyReady && _initializationStatus.LhyyPublicKeyReady ? null : "LHYY 加密密钥",
+            _initializationStatus.DmzKnownHostsReady ? null : "DMZ 主机指纹",
+            _initializationStatus.DmzTokenReady ? null : "DMZ 访问令牌",
+            _initializationStatus.CloudSigningKeyReady ? null : "云端验签公钥"
+        }.Where(value => value is not null))}";
 
     private int Count(string status) => _overview.Packages.Count(item => item.ImportStatus == status);
     private static RenderFragment Preflight(string label, bool ready) => builder => { builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}"); builder.AddContent(2, $"{(ready ? "✓" : "!")} {label}"); builder.CloseElement(); };

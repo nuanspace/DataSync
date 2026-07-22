@@ -71,6 +71,8 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       TZ: Asia/Shanghai
+      FollowUpPackageImport__CyyyFileOwnerUid: "${CYYY_CONTAINER_UID:-1654}"
+      FollowUpPackageImport__CyyyFileOwnerGid: "${CYYY_CONTAINER_GID:-1654}"
     ports:
       - "${MANAGEMENT_BIND_ADDRESS:-127.0.0.1}:${LHYY_HOST_PORT:-18081}:8080"
     volumes:
@@ -80,6 +82,7 @@ services:
       - "${DATA_ROOT:-/data/s7-followup}/backups:/app/followup/backups"
       - "${DATA_ROOT:-/data/s7-followup}/uploads:/app/uploads"
       - "${DATA_ROOT:-/data/s7-followup}/secrets/lhyy:/app/secrets"
+      - "${DATA_ROOT:-/data/s7-followup}/secrets/cyyy:/app/hospital-init/cyyy"
       - "${DATA_ROOT:-/data/s7-followup}/logs/lhyy:/app/logs"
     depends_on:
       datasync-db:

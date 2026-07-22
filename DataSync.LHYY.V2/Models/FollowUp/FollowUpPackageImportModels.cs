@@ -16,10 +16,30 @@ public sealed class FollowUpPackageImportOptions
     public string SupportedContractVersion { get; set; } = "followup-hospital-sync.v2";
     public string ImporterVersion { get; set; } = "1.1.0";
     public string DeviceId { get; set; } = "datasync-device";
+    public string HospitalId { get; set; } = string.Empty;
+    public string HospitalCode { get; set; } = string.Empty;
+    public string CyyyPrivateKeyPath { get; set; } = "/app/hospital-init/cyyy/cyyy_dmz_ed25519";
+    public string CyyyKnownHostsPath { get; set; } = "/app/hospital-init/cyyy/dmz_known_hosts";
+    public string CyyyTokenFilePath { get; set; } = "/app/hospital-init/cyyy/inner_device_token";
+    public int CyyyFileOwnerUid { get; set; } = 1654;
+    public int CyyyFileOwnerGid { get; set; } = 1654;
     public int ScanIntervalSeconds { get; set; } = 60;
     public long MaxPackageBytes { get; set; } = 4L * 1024 * 1024 * 1024;
     public long MaxExpandedBytes { get; set; } = 8L * 1024 * 1024 * 1024;
     public int MaxArchiveEntries { get; set; } = 100000;
+}
+
+public sealed record FollowUpHospitalInitializationStatus(
+    bool CyyyPrivateKeyReady,
+    bool CyyyPublicKeyReady,
+    bool LhyyPrivateKeyReady,
+    bool LhyyPublicKeyReady,
+    bool DmzKnownHostsReady,
+    bool DmzTokenReady,
+    bool CloudSigningKeyReady)
+{
+    public bool OutboundReady => CyyyPrivateKeyReady && CyyyPublicKeyReady && LhyyPrivateKeyReady && LhyyPublicKeyReady;
+    public bool Complete => OutboundReady && DmzKnownHostsReady && DmzTokenReady && CloudSigningKeyReady;
 }
 
 public sealed record FollowUpVerifiedPackage(

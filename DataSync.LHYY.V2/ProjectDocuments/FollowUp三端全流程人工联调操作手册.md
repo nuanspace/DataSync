@@ -31,7 +31,7 @@ status: ready
 1. 关闭云端定时生成、CYYY 定时拉取和 LHYY 自动导入。
 2. 检查六个容器、两个管理页面、云端 Web/Gateway 及版本：v2 / 1.1.0。
 3. 恢复 Cube 模拟库，创建 `form.vector`，执行 `20260722.sql`，检查来源映射和患者范围映射。
-4. 保存恢复后初始备份，检查密钥、Token、known-hosts，并在 CYYY 执行连接诊断。
+4. 保存恢复后初始备份，按四包顺序完成三端统一初始化并执行三端“一键验证”，再在 CYYY 执行连接诊断。
 5. 云端手工生成 Baseline；CYYY 手工拉取；LHYY 人工确认并导入。
 6. 导入后重启 NTCare 或执行既有缓存刷新，在患者管理核对患者基础信息和合格表单。
 7. 核对目标适配、CYYY `Forwarded` ACK 和云端 `Imported` 状态。
@@ -45,7 +45,7 @@ status: ready
 | FollowUp 云端 | `http://120.46.184.202:1448/debugHospitalData` |
 | CYYY 包同步 | `http://127.0.0.1:18080/followup-packages` |
 | LHYY 回传导入 | `http://127.0.0.1:18081/followup-import` |
-| DMZ | WSL 容器 `followup-lab-dmz`，通过 CYYY“连接诊断”和容器日志检查 |
+| DMZ | 宿主机回环管理页 `http://127.0.0.1:8080`（模拟环境按端口映射访问） |
 
 ## 3. 测试前控制要求
 
