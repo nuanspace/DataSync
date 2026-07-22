@@ -139,6 +139,8 @@ public class Program
                 sp.GetRequiredService<IFollowUpCubePersistentStateGate>()));
             builder.Services.AddScoped<FollowUpPackageVerifyService>();
             builder.Services.AddScoped<FollowUpPackageSchemaCheckService>();
+            builder.Services.AddScoped<FollowUpTargetAdaptationService>();
+            builder.Services.AddScoped<FollowUpEdcScopeService>();
             builder.Services.AddScoped<FollowUpPackageBackupService>();
             builder.Services.AddScoped<FollowUpPackageImportService>();
             builder.Services.AddScoped<FollowUpPackageRestoreService>();

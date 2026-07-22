@@ -1,5 +1,6 @@
 using DataSync.Common.FollowUp;
 using DataSync.LHYY.V2.Models.FollowUp;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 using System.Text.Json;
@@ -8,6 +9,7 @@ namespace DataSync.LHYY.V2.Services.FollowUp;
 
 public sealed class FollowUpPackageImportRepository(
     IConfiguration configuration,
+    IOptions<FollowUpPackageImportOptions> options,
     FollowUpCubeOperationCoordinator operationCoordinator) : IFollowUpRestoreCompletionReconciler
 {
     // TODO: EF model sync 后改为 DataSyncDbContext DbSet 访问。
@@ -24,6 +26,7 @@ public sealed class FollowUpPackageImportRepository(
     internal static readonly string[] RestorableImportStatuses = ["Imported", "RestoreFailed", "Importing", "Restoring"];
     private readonly string _connectionString = configuration.GetConnectionString("DataSyncDb")
         ?? throw new InvalidOperationException("未找到连接字符串 'DataSyncDb'");
+    private readonly string _importerVersion = options.Value.ImporterVersion;
 
     public async Task<List<string>> GetMissingTablesAsync(CancellationToken cancellationToken = default)
     {
@@ -227,7 +230,7 @@ public sealed class FollowUpPackageImportRepository(
             command.Parameters.AddWithValue("stagingPath", package.StagingPath);
             command.Parameters.AddWithValue("contractVersion", package.Manifest.ExportContractVersion);
             command.Parameters.AddWithValue("minImporterVersion", package.Manifest.MinImporterVersion);
-            command.Parameters.AddWithValue("importerVersion", "1.0.0");
+            command.Parameters.AddWithValue("importerVersion", _importerVersion);
             command.Parameters.AddWithValue("checkStatus", check.Status);
             command.Parameters.AddWithValue("diffLevel", check.DiffLevel);
             command.Parameters.AddWithValue("requiresReview", !check.Compatible);
@@ -258,7 +261,7 @@ public sealed class FollowUpPackageImportRepository(
             command.Parameters.AddWithValue("packageId", package.Manifest.PackageId);
             command.Parameters.AddWithValue("status", check.Status);
             command.Parameters.AddWithValue("contract", package.Manifest.ExportContractVersion);
-            command.Parameters.AddWithValue("importer", "1.0.0");
+            command.Parameters.AddWithValue("importer", _importerVersion);
             command.Parameters.AddWithValue("level", check.DiffLevel);
             command.Parameters.AddWithValue("compatible", check.Compatible);
             command.Parameters.AddWithValue("result", JsonSerializer.Serialize(check, FollowUpJson.Options));

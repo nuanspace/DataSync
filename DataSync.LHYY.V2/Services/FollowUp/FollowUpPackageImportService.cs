@@ -11,11 +11,16 @@ public sealed class FollowUpPackageImportService(
     IOptions<FollowUpPackageImportOptions> options,
     FollowUpPackageVerifyService verifyService,
     FollowUpPackageSchemaCheckService schemaCheckService,
+    FollowUpTargetAdaptationService targetAdaptationService,
+    FollowUpEdcScopeService edcScopeService,
     FollowUpPackageBackupService backupService,
     FollowUpPackageImportRepository repository,
     FollowUpCubeOperationCoordinator operationCoordinator,
     ILogger<FollowUpPackageImportService> logger)
 {
+    internal const string NTCareRestartRequiredCode = "NTCARE_RESTART_REQUIRED";
+    internal const string NTCareRestartRequiredMessage = "数据已成功导入；NTCare 未提供缓存刷新接口，请重启 NTCare 或执行既有运维缓存刷新流程后查看最新表单。";
+
     private readonly string _cubeConnectionString = configuration.GetConnectionString("CubeDb")
         ?? throw new InvalidOperationException("未找到连接字符串 'CubeDb'");
     private readonly FollowUpPackageImportOptions _options = options.Value;
@@ -100,44 +105,96 @@ public sealed class FollowUpPackageImportService(
                 return new FollowUpImportOperationResult(false, $"结构校验结果：{schemaCheck.DiffLevel}", FollowUpErrorCodes.SchemaReviewRequired);
             }
 
+            FollowUpEdcScopePlan edcScopePlan;
+            try
+            {
+                await targetAdaptationService.EnsureReadyAsync(cancellationToken);
+                edcScopePlan = await edcScopeService.PrepareAsync(package, approvedDecision, cancellationToken);
+            }
+            catch (FollowUpPackageException ex) when (ex.ErrorCode == FollowUpErrorCodes.SchemaReviewRequired)
+            {
+                await repository.MarkAsync(
+                    state.HospitalCode,
+                    state.PackageId,
+                    "WaitingForDecision",
+                    ex.ErrorCode,
+                    ex.Message,
+                    cancellationToken: cancellationToken);
+                return new FollowUpImportOperationResult(false, ex.Message, ex.ErrorCode);
+            }
+
             await repository.MarkAsync(state.HospitalCode, state.PackageId, "BackingUp", null, null, cancellationToken: cancellationToken);
             backup = await backupService.CreateAsync(package, cancellationToken);
             await repository.AddBackupAsync(state.HospitalCode, state.PackageId, backup, cancellationToken);
 
             await repository.MarkAsync(state.HospitalCode, state.PackageId, "Importing", null, null, cancellationToken: cancellationToken);
-            try
-            {
-                var counts = await ImportDataAsync(
-                    package,
-                    approvedDecision,
-                    () => backupService.InstallAttachmentsAsync(package, cancellationToken),
-                    cancellationToken);
-                importCommitted = true;
+            return await ExecuteCommitBoundaryAsync(
+                async () =>
+                {
+                    var counts = await ImportDataAsync(
+                        package,
+                        approvedDecision,
+                        edcScopePlan,
+                        () => backupService.InstallAttachmentsAsync(package, cancellationToken),
+                        () => importCommitted = true,
+                        cancellationToken);
+                    return counts;
+                },
+                async importException =>
+                {
+                    if (importCommitted)
+                        return;
 
-                await repository.MarkAsync(state.HospitalCode, state.PackageId, "Imported", null, null,
-                    new { tables = counts.Count, records = counts.Values.Sum(), counts }, cancellationToken);
-                await EnqueueAckAsync(package, "Imported", startedAt, null, null, cancellationToken);
-                await repository.AddLogAsync(state.HospitalCode, state.PackageId, "import", "Info", "FollowUp 数据包导入完成",
-                    new { records = counts.Values.Sum(), tables = counts.Count }, cancellationToken);
-                return new FollowUpImportOperationResult(true, $"导入完成，共 {counts.Values.Sum()} 条记录。");
-            }
-            catch (Exception importException)
-            {
-                try
+                    try
+                    {
+                        await backupService.RestoreAttachmentsAsync(backup.AttachmentBackupPath, CancellationToken.None);
+                    }
+                    catch (Exception restoreException)
+                    {
+                        attachmentRestoreFailed = true;
+                        logger.LogCritical(restoreException,
+                            "FollowUp 导入失败后的附件恢复失败，必须停止后续导入。PackageId={PackageId}", state.PackageId);
+                        throw new InvalidOperationException(
+                            "数据导入失败且附件恢复失败，当前数据状态不确定，必须人工处置。",
+                            new AggregateException(importException, restoreException));
+                    }
+                },
+                async counts =>
                 {
-                    await backupService.RestoreAttachmentsAsync(backup.AttachmentBackupPath, CancellationToken.None);
-                }
-                catch (Exception restoreException)
-                {
-                    attachmentRestoreFailed = true;
-                    logger.LogCritical(restoreException,
-                        "FollowUp 导入失败后的附件恢复失败，必须停止后续导入。PackageId={PackageId}", state.PackageId);
-                    throw new InvalidOperationException(
-                        "数据导入失败且附件恢复失败，当前数据状态不确定，必须人工处置。",
-                        new AggregateException(importException, restoreException));
-                }
-                throw;
-            }
+                    await repository.MarkAsync(
+                        state.HospitalCode,
+                        state.PackageId,
+                        "Imported",
+                        NTCareRestartRequiredCode,
+                        NTCareRestartRequiredMessage,
+                        new { tables = counts.Count, records = counts.Values.Sum(), counts, ntcareAction = "restart-required" },
+                        cancellationToken);
+                    await EnqueueAckAsync(
+                        package,
+                        "Imported",
+                        startedAt,
+                        NTCareRestartRequiredCode,
+                        NTCareRestartRequiredMessage,
+                        cancellationToken);
+                    await repository.AddLogAsync(
+                        state.HospitalCode,
+                        state.PackageId,
+                        "import",
+                        "Warning",
+                        "FollowUp 数据包导入完成，NTCare 需要重启或执行既有缓存刷新流程",
+                        new
+                        {
+                            records = counts.Values.Sum(),
+                            tables = counts.Count,
+                            code = NTCareRestartRequiredCode,
+                            ntcareAction = "restart-required"
+                        },
+                        cancellationToken);
+                    return new FollowUpImportOperationResult(
+                        true,
+                        $"数据导入完成，共 {counts.Values.Sum()} 条记录；请重启 NTCare 或执行既有缓存刷新流程。",
+                        NTCareRestartRequiredCode);
+                });
         }
         catch (Exception ex)
         {
@@ -147,11 +204,17 @@ public sealed class FollowUpPackageImportService(
                 logger.LogCritical(ex, "FollowUp 数据和附件已提交，但写入导入成功状态或 ACK 失败，禁止降级为失败。PackageId={PackageId}", state.PackageId);
                 try
                 {
-                    await repository.MarkAsync(state.HospitalCode, state.PackageId, "Imported", null,
-                        "数据已提交，成功状态或 ACK 首次写入失败，请检查日志并重试状态同步。",
-                        new { committed = true, statusWriteError = ex.Message }, CancellationToken.None);
+                    await repository.MarkAsync(state.HospitalCode, state.PackageId, "Imported", NTCareRestartRequiredCode,
+                        $"{NTCareRestartRequiredMessage} 成功状态或 ACK 首次写入失败，请检查日志并重试状态同步。",
+                        new { committed = true, statusWriteError = ex.Message, ntcareAction = "restart-required" }, CancellationToken.None);
                     if (package is not null)
-                        await EnqueueAckAsync(package, "Imported", startedAt, null, null, CancellationToken.None);
+                        await EnqueueAckAsync(
+                            package,
+                            "Imported",
+                            startedAt,
+                            NTCareRestartRequiredCode,
+                            NTCareRestartRequiredMessage,
+                            CancellationToken.None);
                 }
                 catch (Exception retryException)
                 {
@@ -193,7 +256,9 @@ public sealed class FollowUpPackageImportService(
     private async Task<Dictionary<string, int>> ImportDataAsync(
         FollowUpVerifiedPackage package,
         FollowUpSchemaDecision? schemaDecision,
+        FollowUpEdcScopePlan edcScopePlan,
         Func<Task> beforeCommit,
+        Action onCommitted,
         CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -202,6 +267,7 @@ public sealed class FollowUpPackageImportService(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
+            var followUpPatients = new Dictionary<Guid, FollowUpPatientSource>();
             var ordered = package.TableManifest
                 .Where(item => item.Enabled && !item.Skipped && !string.IsNullOrWhiteSpace(item.ExportPath))
                 .OrderBy(item => CategoryOrder(item.DataCategory))
@@ -236,16 +302,25 @@ public sealed class FollowUpPackageImportService(
                     if (string.IsNullOrWhiteSpace(line)) continue;
                     using var _ = JsonDocument.Parse(line);
                     var mappedLine = FollowUpSchemaDecisionProcessor.MapRow(line, table.Schema, table.TableName, schemaDecision);
+                    if (FollowUpTargetAdaptationService.ReadPatientSource(
+                            targetTable.Schema,
+                            targetTable.TableName,
+                            mappedLine) is { } patientSource)
+                        followUpPatients[patientSource.PatientId] = patientSource;
+                    var adaptedLine = FollowUpTargetAdaptationService.AdaptRow(
+                        targetTable.Schema,
+                        targetTable.TableName,
+                        mappedLine);
                     if (table.ImportPolicy is "UseExistingById" or "RejectIfMissing")
                     {
-                        if (!await ExistsAsync(connection, transaction, targetTable.Schema, targetTable.TableName, primaryKey, mappedLine, cancellationToken))
+                        if (!await ExistsAsync(connection, transaction, targetTable.Schema, targetTable.TableName, primaryKey, adaptedLine, cancellationToken))
                             throw new InvalidOperationException($"{table.ImportPolicy} 要求的基础记录不存在：{targetTable.Schema}.{targetTable.TableName}");
                     }
                     else
                     {
                         var sql = FollowUpUpsertSqlBuilder.Build(targetTable.Schema, targetTable.TableName, columns, primaryKey, table.ImportPolicy);
                         await using var command = new NpgsqlCommand(sql, connection, transaction);
-                        command.Parameters.AddWithValue("row", mappedLine);
+                        command.Parameters.AddWithValue("row", adaptedLine);
                         await command.ExecuteNonQueryAsync(cancellationToken);
                     }
                     count++;
@@ -254,9 +329,23 @@ public sealed class FollowUpPackageImportService(
                     throw new InvalidDataException($"表 {table.Schema}.{table.TableName} 记录数与清单不一致。");
                 result[$"{targetTable.Schema}.{targetTable.TableName}"] = count;
             }
+            var sourceMapCount = await targetAdaptationService.ApplySourceMapAsync(
+                connection,
+                transaction,
+                followUpPatients.Values.ToArray(),
+                package.Manifest.HospitalCode,
+                package.Manifest.PackageId,
+                cancellationToken);
+            if (sourceMapCount > 0)
+                result["datasync.followup_patient_source_map"] = sourceMapCount;
+            var scopeMapCount = await edcScopeService.ApplyAsync(connection, transaction, edcScopePlan, cancellationToken);
+            if (scopeMapCount > 0)
+                result["public.patient_data_scope_map"] = scopeMapCount;
             // 附件先原子替换，随后提交数据库；任一环节失败都会回滚数据库并由上层恢复附件。
             await beforeCommit();
             await transaction.CommitAsync(cancellationToken);
+            // 必须在 CommitAsync 成功的瞬间标记；之后即使事务/连接释放失败，也不能恢复旧附件。
+            onCommitted();
             return result;
         }
         catch
@@ -329,7 +418,18 @@ public sealed class FollowUpPackageImportService(
             FinishedAt = DateTimeOffset.Now,
             ErrorCode = errorCode,
             ErrorMessage = errorMessage is { Length: > 1000 } ? errorMessage[..1000] : errorMessage,
-            Detail = JsonSerializer.SerializeToElement(new { sequenceNo = package.Manifest.SequenceNo, packageType = package.Manifest.PackageType }, FollowUpJson.Options)
+            Detail = JsonSerializer.SerializeToElement(new
+            {
+                sequenceNo = package.Manifest.SequenceNo,
+                packageType = package.Manifest.PackageType,
+                targetAdaptation = new
+                {
+                    patientSourceType = "care",
+                    sourceMarker = "datasync.followup_patient_source_map"
+                },
+                code = status == "Imported" ? NTCareRestartRequiredCode : null,
+                ntcareAction = status == "Imported" ? "restart-required" : null
+            }, FollowUpJson.Options)
         }, cancellationToken);
     }
 
@@ -344,6 +444,25 @@ public sealed class FollowUpPackageImportService(
     }
     internal static string ResolveFailureStatus(bool attachmentRestoreFailed) =>
         attachmentRestoreFailed ? "RestoreFailed" : "ImportFailed";
+
+    internal static async Task<TResult> ExecuteCommitBoundaryAsync<TCommit, TResult>(
+        Func<Task<TCommit>> commitAsync,
+        Func<Exception, Task> recoverPreCommitFailureAsync,
+        Func<TCommit, Task<TResult>> finalizeCommittedAsync)
+    {
+        TCommit committed;
+        try
+        {
+            committed = await commitAsync();
+        }
+        catch (Exception ex)
+        {
+            await recoverPreCommitFailureAsync(ex);
+            throw;
+        }
+
+        return await finalizeCommittedAsync(committed);
+    }
 
     internal static void CleanupStaging(string stagingPath, ILogger logger)
     {

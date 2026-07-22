@@ -13,8 +13,8 @@ public sealed class FollowUpPackageImportOptions
     public string DecryptionPrivateKeyPath { get; set; } = "/app/secrets/followup_decryption_private.pem";
     public string CloudSigningPublicKeyPath { get; set; } = "/app/config/followup_signing_public.pem";
     public string EncryptionKeyId { get; set; } = string.Empty;
-    public string SupportedContractVersion { get; set; } = "1.0";
-    public string ImporterVersion { get; set; } = "1.0.0";
+    public string SupportedContractVersion { get; set; } = "followup-hospital-sync.v2";
+    public string ImporterVersion { get; set; } = "1.1.0";
     public string DeviceId { get; set; } = "datasync-device";
     public int ScanIntervalSeconds { get; set; } = 60;
     public long MaxPackageBytes { get; set; } = 4L * 1024 * 1024 * 1024;

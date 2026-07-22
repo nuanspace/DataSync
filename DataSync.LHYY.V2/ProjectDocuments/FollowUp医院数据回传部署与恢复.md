@@ -25,6 +25,14 @@
 
 合并脚本使用 `IF NOT EXISTS` 和条件约束创建，适合重复检查和执行；正式环境仍应先在同版本测试库演练并核对备份文件。
 
+目标业务库还需要单独执行以下 CubeDb 专用迁移：
+
+- `DataSync.LHYY.V2/Scripts/202607/20260722.sql`
+
+该迁移创建 DataSync 自有的 `datasync.followup_patient_source_map` 来源映射表，并用 `original_source_type` 保存包内患者最近一次携带的原始来源。脚本在常规 `DataSyncDb` 升级链中会识别到目标业务表不存在并安全跳过；部署人员仍必须连接 `ConnectionStrings__CubeDb` 对应数据库手工执行同一文件。导入器会在备份前检查该表及关键字段，缺失时以结构待处理状态阻断导入。
+
+本版本只接受业务契约 `followup-hospital-sync.v2`，导入器版本为 `1.1.0`，要求数据包 `minImporterVersion` 不高于 `1.1.0`。SSH relay、加密 envelope 和 ACK 的传输协议版本仍为 `1.0`，没有随业务契约升级。
+
 ## 3. 容器与目录
 
 新版 Dockerfile 已包含以下运行依赖：
@@ -75,8 +83,9 @@ FollowUpPackageImport__Enabled
 4. 在 LHYY“FollowUp 回传导入”页面生成院内 RSA-3072 密钥，只把 `.public.pem` 公钥交给 FollowUp 云端；将云端 RSA 验签公钥粘贴到页面保存，并配置对应 `EncryptionKeyId`。
 5. 确认 LHYY 页面中包仓库、staging、备份、附件、两类密钥和 PostgreSQL 工具全部通过。
 6. 在 CYYY 页面手工“查询并拉取”一个测试包，确认 relay 清单缺少合法的 64 位十六进制外层 SHA-256 时立即拒绝，状态只在完整文件原子落盘、大小和 SHA-256 均通过后变为 `Pulled`。
-7. 在 LHYY 页面点击“发现包”，对测试包执行“校验 / 导入”。Baseline 必须二次确认；普通兼容增量包可由 Worker 自动导入。
-8. 校验通过后设置 `FollowUpPackageSync__Enabled=true`、开启 CYYY 来源定时拉取，再设置 `FollowUpPackageImport__Enabled=true` 并重启两个服务。
+7. 首次必须导入一份完整的 `Baseline` 或 `Replacement`，不能直接从历史链中间的增量包开始；在 LHYY 页面点击“发现包”，对测试包执行“校验 / 导入”。Baseline 必须二次确认；普通兼容增量包可由 Worker 自动导入。
+8. 导入成功后重启 NTCare，或执行医院已有的 NTCare 缓存刷新运维流程，确认患者管理能够读取最新表单定义和答案。
+9. 校验通过后设置 `FollowUpPackageSync__Enabled=true`、开启 CYYY 来源定时拉取，再设置 `FollowUpPackageImport__Enabled=true` 并重启两个 DataSync 服务。
 
 CYYY 总开关默认为 `false`；关闭时拉取 Worker 在创建服务 Scope 和访问数据库前直接退出，页面手工配置和连接诊断仍可使用。Worker 只有在总开关、管理表、安全材料、目录和外部工具预检均通过时才工作。
 
@@ -86,8 +95,11 @@ CYYY 总开关默认为 `false`；关闭时拉取 Worker 在创建服务 Scope �
 2. 需要补拉时，可直接点击某包的重拉按钮，或填写包号/增量日期范围执行条件重拉。
 3. LHYY 页面点击“发现包”，再执行“校验 / 导入”。服务要求外层 SHA-256 非空，并依次验证外层 hash、待导入包号/序号/类型、RSA-PSS 签名、RSA-OAEP 密钥解包、HMAC、AES 解密、内层 checksum 路径与内容、契约版本、包链和目标数据库结构。
 4. `Compatible` 自动继续；`RequiresMapping` 可在“结构处理”中保存目标表、字段和默认值映射，或标记“等待数据库升级”；`Breaking` 必须升级数据库或导入器后重试。
-5. 导入前自动生成目标业务库完整备份和受影响附件备份。业务数据按清单策略幂等写入，不执行物理删除。
-6. 导入成功后 LHYY 写入 `Imported` ACK，CYYY 使用稳定 `ackId` 重试转发。已成功导入的包不会再次执行，也不会被迟到失败状态降级。
+5. 导入前自动生成目标业务库完整备份和受影响附件备份。业务数据按清单策略幂等写入，不执行物理删除。原始包、staging 文件和导入前备份保持原始内容不变；所有包内 `public.patient` 写入目标库时统一适配为 `source_type=care`，包内原始值写入来源映射表的 `original_source_type`，其他 UUID 和患者字段保持原值。
+6. `care.patient_event` 始终保留事件和基础信息。只有 `is_valid` 未作废且满足以下任一条件的事件可携带 `form_set_id`、`form_set_name`、`event_type_definition_id`：状态为“已审核/已随访”；或事件类型为“预问诊/门诊签到”、`input_time` 非空且状态为“门诊结束/办理住院/入组随访/转诊”；或“转诊记录+已确认”。其他事件在目标写入时只清空这三个表单链接字段；后续同 UUID 的合格增量会按 Upsert 自动恢复链接。
+7. 同一个 CubeDb 事务会把回传患者登记到 `datasync.followup_patient_source_map`，再为其中涉及 EDC 的患者幂等补齐 `patient_data_scope_map`。补图同时覆盖患者事件的 `project_id` 和患者自身的 `public.patient.project_id`，因此没有事件或没有已填写表单的回传患者也可获得 EDC 数据范围；纯 FormSet 增量切换为 EDC 时，也只回填来源映射表中的回传患者，不扩展 NTCare 原生患者。非 EDC 包不会访问 `patient_data_scope_map`，缺少映射表或关键列时在备份和导入前阻断。
+8. DataSync 不依赖也不调用 NTCare 新接口。数据和附件提交后，导入状态和 ACK 仍为 `Imported`，同时以 `NTCARE_RESTART_REQUIRED` 和警告日志明确提示：重启 NTCare 或执行医院既有缓存刷新运维流程。该提示不回滚已提交数据。
+9. 导入成功后 LHYY 写入 `Imported` ACK，CYYY 使用稳定 `ackId` 重试转发。已成功导入的包不会再次执行，也不会被迟到失败状态降级。后续 `Incremental`、`Supplement` 和 `Replacement` 仍按相同 UUID 幂等增量写入。
 
 映射 JSON 示例：
 
@@ -128,8 +140,10 @@ CYYY 服务如果在包状态写为 `Pulling` 后异常退出，重启后的普�
 ## 7. 上线验收最小集
 
 - 合并数据库脚本经升级页执行成功，两个管理页预检通过。
+- CubeDb 专用来源映射迁移已执行；确认没有误应用到 DataSyncDb。
 - SSH 严格 host key 校验生效，错误 key、缺 token 和非法 shell 均被拒绝。
 - 正常包可拉取、验签、解密、备份、导入并回传 ACK。
+- 首次完整 Baseline/Replacement 导入后重启 NTCare，患者管理可查看回传表单；后续增量重复导入不产生重复患者或 EDC 权限记录。
 - 修改 envelope、payload、签名或内层文件后均在备份前被拒绝。
 - 验证序号间隙、错误前驱、Supplement、Replacement、重复导入和 ACK 重试。
 - 在隔离测试库完成一次链头恢复及顺序重放，并核对数据库与附件。
