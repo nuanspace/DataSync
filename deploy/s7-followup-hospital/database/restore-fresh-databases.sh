@@ -50,6 +50,7 @@ docker cp "$dump_file" "$container:$remote_dump"
 docker exec -e PGPASSWORD="$password" "$container" pg_restore --list "$remote_dump" >/dev/null
 docker exec -e PGPASSWORD="$password" "$container" pg_restore \
   --exit-on-error \
+  --single-transaction \
   --no-owner \
   --no-privileges \
   --username "$user" \

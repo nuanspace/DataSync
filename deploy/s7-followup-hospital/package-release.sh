@@ -13,6 +13,7 @@ datasync_dump="$2"
 cube_dump="$3"
 docs_source="$4"
 release_env="${5:-$root/.env.example}"
+cube_v2_migration="$root/../../DataSync.LHYY.V2/Scripts/202607/20260722.sql"
 
 command -v docker >/dev/null 2>&1 || { echo "未找到 docker。" >&2; exit 1; }
 command -v sha256sum >/dev/null 2>&1 || { echo "未找到 sha256sum。" >&2; exit 1; }
@@ -22,6 +23,7 @@ command -v pg_restore >/dev/null 2>&1 || { echo "未找到 pg_restore。" >&2; e
 [[ -d "$docs_source" ]] || { echo "实施文档目录不存在：$docs_source" >&2; exit 1; }
 [[ ! -L "$docs_source" ]] || { echo "实施文档目录不允许符号链接：$docs_source" >&2; exit 1; }
 [[ -f "$release_env" ]] || { echo "发布环境文件不存在：$release_env" >&2; exit 1; }
+[[ -f "$cube_v2_migration" ]] || { echo "缺少 Cube v2 迁移脚本：$cube_v2_migration" >&2; exit 1; }
 [[ ! -e "$output" ]] || { echo "输出目录已存在，拒绝覆盖：$output" >&2; exit 1; }
 docs_source="$(cd "$docs_source" && pwd -P)"
 
@@ -36,6 +38,36 @@ validate_schema_only_dump() {
     echo "基础 dump 包含业务数据条目，必须使用 pg_dump --schema-only 重新生成：$dump_path" >&2
     exit 1
   fi
+}
+
+validate_cube_v2_dump() {
+  local dump_path="$1" schema_sql source_map_sql scope_map_sql required
+  if ! schema_sql="$(pg_restore --schema-only --no-owner --no-privileges --file=- "$dump_path")"; then
+    echo "无法读取 Cube 基础 dump 结构：$dump_path" >&2
+    exit 1
+  fi
+
+  for required in \
+    'CREATE TABLE public\.patient ' \
+    'CREATE TABLE care\.patient_event ' \
+    'CREATE TABLE form\.form_project ' \
+    'CREATE TABLE datasync\.followup_patient_source_map ' \
+    'CREATE TABLE public\.patient_data_scope_map ' \
+    'CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA form;'; do
+    grep -Eq "$required" <<<"$schema_sql" || { echo "Cube 基础 dump 缺少 v2 结构：$required" >&2; exit 1; }
+  done
+
+  source_map_sql="$(sed -n '/^CREATE TABLE datasync\.followup_patient_source_map (/,/^);/p' <<<"$schema_sql")"
+  for required in patient_id original_source_type hospital_code first_package_id last_package_id created_at updated_at; do
+    grep -Eq "^[[:space:]]+$required[[:space:]]" <<<"$source_map_sql" \
+      || { echo "Cube 基础 dump 缺少字段：datasync.followup_patient_source_map.$required" >&2; exit 1; }
+  done
+
+  scope_map_sql="$(sed -n '/^CREATE TABLE public\.patient_data_scope_map (/,/^);/p' <<<"$schema_sql")"
+  for required in id created_time patient_id hospital_id department_id ward_id project_id; do
+    grep -Eq "^[[:space:]]+$required[[:space:]]" <<<"$scope_map_sql" \
+      || { echo "Cube 基础 dump 缺少字段：public.patient_data_scope_map.$required" >&2; exit 1; }
+  done
 }
 
 validate_release_docs() {
@@ -84,6 +116,7 @@ ensure_output_outside_docs() {
 
 validate_schema_only_dump "$datasync_dump"
 validate_schema_only_dump "$cube_dump"
+validate_cube_v2_dump "$cube_dump"
 validate_release_docs "$docs_source"
 
 unset RELEASE_VERSION CYYY_IMAGE LHYY_IMAGE DATASYNC_DB_IMAGE CUBE_DB_IMAGE
@@ -125,6 +158,7 @@ cp "$root/config/cyyy/appsettings.Production.json.example" "$stage/config/cyyy/"
 cp "$root/config/lhyy/appsettings.Production.json.example" "$stage/config/lhyy/"
 cp "$root/database/restore-fresh-databases.sh" "$stage/database/"
 cp "$root/database/verify-fresh-databases.sh" "$stage/database/"
+cp "$cube_v2_migration" "$stage/database/20260722-cube-v2.sql"
 cp "$root/postgres-cube/Dockerfile" "$stage/postgres-cube/"
 cp "$root/secrets/README.md" "$stage/secrets/"
 
@@ -140,6 +174,11 @@ done < <(find "$docs_source" -type f -print0)
 safe_version="${RELEASE_VERSION//[^A-Za-z0-9._-]/_}"
 cp "$datasync_dump" "$stage/database/datasync-base-${safe_version}.dump"
 cp "$cube_dump" "$stage/database/cube-base-${safe_version}.dump"
+
+while IFS= read -r -d '' script; do
+  sed -i 's/\r$//' "$script"
+  bash -n "$script"
+done < <(find "$stage" -type f -name '*.sh' -print0)
 
 declare -A saved_images=()
 image_index=0
