@@ -69,11 +69,11 @@ FollowUpPackageImport__BackupRoot
 FollowUpPackageImport__AttachmentRoot
 FollowUpPackageImport__DecryptionPrivateKeyPath
 FollowUpPackageImport__CloudSigningPublicKeyPath
-FollowUpPackageImport__EncryptionKeyId
 FollowUpPackageImport__Enabled
 ```
 
 连接串、token 和私钥不得写入镜像或提交到仓库。
+加密 Key ID 由当前解密私钥计算，不再单独配置，避免统一初始化后残留旧值。
 
 ## 4. 首次启用
 

@@ -96,6 +96,15 @@ public sealed class FollowUpRecoverySafetyTests
         Assert.Contains("image-%02d-%s.tar", releaseScript);
     }
 
+    [Fact]
+    public void LHYY部署同时提供AspNetCore和BioCore配置文件名()
+    {
+        var compose = ReadSource("deploy", "s7-followup-hospital", "docker-compose.yml");
+
+        Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.Production.json:ro", compose);
+        Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.json:ro", compose);
+    }
+
     [Theory]
     [InlineData(false, "RestoreFailed")]
     [InlineData(true, "Restored")]

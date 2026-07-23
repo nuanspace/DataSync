@@ -69,10 +69,11 @@ public sealed class FollowUpPackageVerifyService
                 signatureBytes = await ReadEntryAsync(outer.GetEntry("signature.bin")!, 16 * 1024, cancellationToken);
                 VerifySignature(envelopeBytes, signatureBytes);
                 var parsedEnvelope = FollowUpEnvelopeParser.ParseAndValidate(envelopeBytes);
+                // 重新初始化会让部署配置中的 KeyId 失效，实际解密私钥才是包加密身份的信任根。
+                var actualEncryptionKeyId = GetDecryptionKeyId();
                 if (!string.Equals(parsedEnvelope.HospitalCode, expectedHospitalCode, StringComparison.Ordinal)
                     || !string.Equals(parsedEnvelope.PackageId, expectedPackageId, StringComparison.Ordinal)
-                    || (!string.IsNullOrWhiteSpace(_options.EncryptionKeyId)
-                        && !string.Equals(parsedEnvelope.KeyId, _options.EncryptionKeyId, StringComparison.Ordinal)))
+                    || !string.Equals(parsedEnvelope.KeyId, actualEncryptionKeyId, StringComparison.Ordinal))
                     throw new InvalidDataException("envelope 医院编码、包标识或 Key Id 与待导入记录不匹配。");
 
                 var keyMaterial = UnwrapKey(parsedEnvelope.WrappedKeyMaterial);
@@ -148,6 +149,18 @@ public sealed class FollowUpPackageVerifyService
         rsa.ImportFromPem(File.ReadAllText(_options.DecryptionPrivateKeyPath));
         try { return rsa.Decrypt(Convert.FromBase64String(wrappedKey), RSAEncryptionPadding.OaepSHA256); }
         catch (CryptographicException ex) { throw new InvalidDataException("包密钥解包失败。", ex); }
+    }
+
+    private string GetDecryptionKeyId()
+    {
+        if (!File.Exists(_options.DecryptionPrivateKeyPath)) throw new InvalidOperationException("院内解密私钥不存在。");
+        using var rsa = RSA.Create();
+        try { rsa.ImportFromPem(File.ReadAllText(_options.DecryptionPrivateKeyPath)); }
+        catch (Exception ex) when (ex is CryptographicException or ArgumentException)
+        {
+            throw new InvalidOperationException("院内解密私钥不是有效的 RSA PEM。", ex);
+        }
+        return $"rsa-sha256-{Convert.ToHexString(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))[..16].ToLowerInvariant()}";
     }
 
     private async Task CopyAndVerifyPayloadAsync(

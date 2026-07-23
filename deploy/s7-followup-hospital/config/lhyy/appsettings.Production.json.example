@@ -11,7 +11,6 @@
     "AttachmentRoot": "/app/uploads",
     "DecryptionPrivateKeyPath": "/app/secrets/lhyy_package_private.pem",
     "CloudSigningPublicKeyPath": "/app/secrets/cloud_signing_public.pem",
-    "EncryptionKeyId": "<填写七院正式keyId>",
     "SupportedContractVersion": "followup-hospital-sync.v2",
     "ImporterVersion": "1.1.0",
     "DeviceId": "<填写七院设备编码>",
