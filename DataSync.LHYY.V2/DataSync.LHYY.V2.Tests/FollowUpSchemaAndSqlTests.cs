@@ -1,4 +1,5 @@
 using DataSync.Common.FollowUp;
+using DataSync.LHYY.V2.Models.FollowUp;
 using DataSync.LHYY.V2.Services.FollowUp;
 using Xunit;
 
@@ -35,6 +36,91 @@ public sealed class FollowUpSchemaAndSqlTests
 
         Assert.False(result.Compatible);
         Assert.Equal("Breaking", result.DiffLevel);
+    }
+
+    [Fact]
+    public void 无导出文件的空表不参与结构校验()
+    {
+        var result = FollowUpPackageSchemaCheckService.Evaluate(
+            [CreateTable("uuid", false)],
+            [CreateTable("integer", false)],
+            [CreateManifest(exportPath: null, recordCount: 0)]);
+
+        Assert.True(result.Compatible);
+        Assert.Equal("Compatible", result.DiffLevel);
+    }
+
+    [Fact]
+    public void 有导出文件的表仍执行完整结构校验()
+    {
+        var result = FollowUpPackageSchemaCheckService.Evaluate(
+            [CreateTable("uuid", false)],
+            [CreateTable("integer", false)],
+            [CreateManifest("data/care_patient.jsonl", 1)]);
+
+        Assert.False(result.Compatible);
+        Assert.Equal("Breaking", result.DiffLevel);
+    }
+
+    [Fact]
+    public void 空表与有数据表混合时只校验实际导入表()
+    {
+        var result = FollowUpPackageSchemaCheckService.Evaluate(
+            [
+                CreateTable("uuid", false),
+                CreateTable("uuid", false, "system", "sys_hospital")
+            ],
+            [
+                CreateTable("integer", false),
+                CreateTable("uuid", false, "system", "sys_hospital")
+            ],
+            [
+                CreateManifest(exportPath: null, recordCount: 0),
+                CreateManifest("data/system_sys_hospital.jsonl", 1, "system", "sys_hospital")
+            ]);
+
+        Assert.True(result.Compatible);
+        Assert.Equal("Compatible", result.DiffLevel);
+    }
+
+    [Fact]
+    public void 表映射碰撞时不会重新带入无导出文件的空表()
+    {
+        var decision = new FollowUpSchemaDecision
+        {
+            DecisionStatus = "ApprovedMapping",
+            TableMappings =
+            {
+                ["legacy.patient"] = new FollowUpTableMapping
+                {
+                    TargetSchema = "care",
+                    TargetTable = "patient"
+                }
+            }
+        };
+        var manifest = new[]
+        {
+            CreateManifest(exportPath: null, recordCount: 0, "legacy", "patient"),
+            CreateManifest("data/care_patient.jsonl", 1)
+        };
+
+        var sources = FollowUpPackageSchemaCheckService.SelectAndMapSourceTables(
+            [
+                CreateTable("integer", false, "legacy", "patient"),
+                CreateTable("uuid", false)
+            ],
+            manifest,
+            decision);
+        var mappedManifest = manifest
+            .Select(item => FollowUpSchemaDecisionProcessor.MapManifest(item, decision))
+            .ToList();
+        var result = FollowUpPackageSchemaCheckService.Evaluate(
+            sources,
+            [CreateTable("uuid", false)],
+            mappedManifest);
+
+        Assert.True(result.Compatible);
+        Assert.Single(sources);
     }
 
     [Fact]
@@ -88,10 +174,27 @@ public sealed class FollowUpSchemaAndSqlTests
         Assert.Contains("循环父子关系", exception.Message);
     }
 
-    private static FollowUpTableSchema CreateTable(string idType, bool nullable) => new()
+    private static FollowUpTableManifestItem CreateManifest(
+        string? exportPath,
+        int recordCount,
+        string schema = "care",
+        string tableName = "patient") => new()
     {
-        SchemaName = "care",
-        TableName = "patient",
+        Schema = schema,
+        TableName = tableName,
+        Enabled = true,
+        ExportPath = exportPath,
+        RecordCount = recordCount
+    };
+
+    private static FollowUpTableSchema CreateTable(
+        string idType,
+        bool nullable,
+        string schema = "care",
+        string tableName = "patient") => new()
+    {
+        SchemaName = schema,
+        TableName = tableName,
         PrimaryKey = ["id"],
         Columns =
         [

@@ -17,15 +17,15 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
         FollowUpSchemaDecision? decision = null,
         CancellationToken cancellationToken = default)
     {
-        var mappedTables = snapshot.Tables.Select(item => FollowUpSchemaDecisionProcessor.MapSchema(item, decision)).ToList();
+        var mappedTables = SelectAndMapSourceTables(snapshot.Tables, manifest, decision);
         var mappedManifest = manifest.Select(item => FollowUpSchemaDecisionProcessor.MapManifest(item, decision)).ToList();
-        var target = await LoadTargetSchemasAsync(mappedTables, cancellationToken);
+        var target = await LoadTargetSchemasAsync(SelectSourceTables(mappedTables, mappedManifest), cancellationToken);
         var result = Evaluate(mappedTables, target, mappedManifest, FollowUpSchemaDecisionProcessor.GetDefaultColumns(decision));
         if (!result.Compatible || !DeploymentModePolicy.IsExternalCube(configuration))
             return result;
 
         var packageTables = mappedManifest
-            .Where(item => item.Enabled && !item.Skipped)
+            .Where(HasImportPayload)
             .Select(item => new ExternalCubePackageTable(item.Schema, item.TableName, item.ImportPolicy))
             .ToArray();
         var accessIssues = await ExternalCubeCompatibilityTool.CheckPackageAccessAsync(
@@ -47,12 +47,7 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
         IReadOnlyCollection<FollowUpTableManifestItem> manifest,
         IReadOnlyDictionary<string, HashSet<string>>? defaultColumns = null)
     {
-        var enabled = manifest.Where(item => item.Enabled && !item.Skipped)
-            .Select(item => $"{item.Schema}.{item.TableName}")
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var sources = enabled.Count == 0
-            ? sourceTables
-            : sourceTables.Where(item => enabled.Contains($"{item.SchemaName}.{item.TableName}")).ToList();
+        var sources = SelectSourceTables(sourceTables, manifest);
         var targets = targetTables.ToDictionary(item => $"{item.SchemaName}.{item.TableName}", StringComparer.OrdinalIgnoreCase);
         var messages = new List<string>();
         var breaking = false;
@@ -103,6 +98,32 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
         var level = breaking ? "Breaking" : requiresMapping ? "RequiresMapping" : "Compatible";
         return new FollowUpSchemaCheckResult(level == "Compatible" ? "Passed" : "ReviewRequired", level, level == "Compatible", messages);
     }
+
+    internal static IReadOnlyCollection<FollowUpTableSchema> SelectAndMapSourceTables(
+        IReadOnlyCollection<FollowUpTableSchema> sourceTables,
+        IReadOnlyCollection<FollowUpTableManifestItem> manifest,
+        FollowUpSchemaDecision? decision) =>
+        SelectSourceTables(sourceTables, manifest)
+            .Select(item => FollowUpSchemaDecisionProcessor.MapSchema(item, decision))
+            .ToList();
+
+    private static IReadOnlyCollection<FollowUpTableSchema> SelectSourceTables(
+        IReadOnlyCollection<FollowUpTableSchema> sourceTables,
+        IReadOnlyCollection<FollowUpTableManifestItem> manifest)
+    {
+        if (manifest.Count == 0) return sourceTables;
+
+        var importTables = manifest.Where(HasImportPayload)
+            .Select(item => $"{item.Schema}.{item.TableName}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return sourceTables
+            .Where(item => importTables.Contains($"{item.SchemaName}.{item.TableName}"))
+            .ToList();
+    }
+
+    // ImportDataAsync 不会访问没有导出文件的空表，结构和权限预检必须使用同一写入集合。
+    private static bool HasImportPayload(FollowUpTableManifestItem item) =>
+        item.Enabled && !item.Skipped && !string.IsNullOrWhiteSpace(item.ExportPath);
 
     private async Task<List<FollowUpTableSchema>> LoadTargetSchemasAsync(
         IReadOnlyCollection<FollowUpTableSchema> sourceTables,
