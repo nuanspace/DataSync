@@ -12,7 +12,9 @@
     "ConnectTimeoutSeconds": 10,
     "ListLimit": 100,
     "MaxPackageBytes": 21474836480,
-    "AckRetrySeconds": 60
+    "AckRetrySeconds": 60,
+    "StorageWarningUsedPercent": 80,
+    "StorageCriticalUsedPercent": 90
   },
   "Logging": {
     "LogLevel": {

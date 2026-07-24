@@ -1,7 +1,7 @@
 {
   "ConnectionStrings": {
     "DataSyncDb": "Host=datasync-db;Port=5432;Database=datasync;Username=postgres;Password=<填写DataSync数据库密码>",
-    "CubeDb": "Host=<填写现有CubeDb地址>;Port=<填写现有CubeDb端口>;Database=<填写现有CubeDb库名>;Username=<填写现有CubeDb用户>;Password=<填写现有CubeDb密码>;SearchPath=system,care,form,target,public"
+    "CubeDb": "Host=cube-db;Port=5432;Database=cube;Username=postgres;Password=<填写Cube数据库密码>;SearchPath=system,care,form,target,public"
   },
   "FollowUpPackageImport": {
     "Enabled": false,
@@ -29,7 +29,7 @@
     "StorageCriticalUsedPercent": 90
   },
   "Deployment": {
-    "Mode": "external-cube"
+    "Mode": "fresh-cube"
   },
   "Logging": {
     "LogLevel": {

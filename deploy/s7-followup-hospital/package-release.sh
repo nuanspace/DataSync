@@ -130,6 +130,7 @@ set +a
 : "${DATASYNC_DB_IMAGE:?发布环境文件缺少 DATASYNC_DB_IMAGE}"
 : "${CUBE_DB_IMAGE:?发布环境文件缺少 CUBE_DB_IMAGE}"
 : "${RELEASE_VERSION:?发布环境文件缺少 RELEASE_VERSION}"
+[[ "$RELEASE_VERSION" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "RELEASE_VERSION 只能包含字母、数字、点、下划线和连字符。" >&2; exit 1; }
 
 for image in "$CYYY_IMAGE" "$LHYY_IMAGE" "$DATASYNC_DB_IMAGE" "$CUBE_DB_IMAGE"; do
   docker image inspect "$image" >/dev/null 2>&1 || { echo "本机缺少待打包镜像：$image" >&2; exit 1; }
@@ -147,15 +148,17 @@ trap cleanup EXIT
 mkdir -p "$stage/config/cyyy" "$stage/config/lhyy" "$stage/database" "$stage/docs" "$stage/images" "$stage/manifest" "$stage/postgres-cube" "$stage/secrets"
 {
   printf 'RELEASE_VERSION=%s\n' "$RELEASE_VERSION"
+  printf 'DEPLOYMENT_MODE=external-cube\n'
   printf 'CYYY_IMAGE=%s\n' "$CYYY_IMAGE"
   printf 'LHYY_IMAGE=%s\n' "$LHYY_IMAGE"
   printf 'DATASYNC_DB_IMAGE=%s\n' "$DATASYNC_DB_IMAGE"
   printf 'CUBE_DB_IMAGE=%s\n' "$CUBE_DB_IMAGE"
-  awk '!/^(RELEASE_VERSION|CYYY_IMAGE|LHYY_IMAGE|DATASYNC_DB_IMAGE|CUBE_DB_IMAGE)=/' "$root/.env.example"
+  awk '!/^(RELEASE_VERSION|DEPLOYMENT_MODE|CYYY_IMAGE|LHYY_IMAGE|DATASYNC_DB_IMAGE|CUBE_DB_IMAGE)=/' "$root/.env.example"
 } > "$stage/.env.example"
-cp "$root/docker-compose.yml" "$root/install.sh" "$root/start.sh" "$root/status.sh" "$root/stop.sh" "$root/README.md" "$root/package-release.sh" "$stage/"
+cp "$root/docker-compose.yml" "$root/docker-compose.fresh-cube.yml" "$root/deployment-mode.sh" "$root/install.sh" "$root/start.sh" "$root/status.sh" "$root/stop.sh" "$root/README.md" "$root/package-release.sh" "$stage/"
 cp "$root/config/cyyy/appsettings.Production.json.example" "$stage/config/cyyy/"
 cp "$root/config/lhyy/appsettings.Production.json.example" "$stage/config/lhyy/"
+cp "$root/config/lhyy/appsettings.Production.fresh-cube.json.example" "$stage/config/lhyy/"
 cp "$root/database/restore-fresh-databases.sh" "$stage/database/"
 cp "$root/database/verify-fresh-databases.sh" "$stage/database/"
 cp "$cube_v2_migration" "$stage/database/20260722-cube-v2.sql"
@@ -180,17 +183,80 @@ while IFS= read -r -d '' script; do
   bash -n "$script"
 done < <(find "$stage" -type f -name '*.sh' -print0)
 
-declare -A saved_images=()
-image_index=0
-for image in "$CYYY_IMAGE" "$LHYY_IMAGE" "$DATASYNC_DB_IMAGE" "$CUBE_DB_IMAGE"; do
-  if [[ -n "${saved_images[$image]:-}" ]]; then
-    continue
-  fi
-  saved_images[$image]=1
-  ((image_index += 1))
-  image_file="$(printf 'image-%02d-%s.tar' "$image_index" "${image//[^A-Za-z0-9._-]/_}")"
-  docker save -o "$stage/images/$image_file" "$image"
-done
+docker save -o "$stage/images/datasync-cyyy-${safe_version}.tar" "$CYYY_IMAGE"
+docker save -o "$stage/images/datasync-lhyy-v2-${safe_version}.tar" "$LHYY_IMAGE"
+docker save -o "$stage/images/datasync-db-${safe_version}.tar" "$DATASYNC_DB_IMAGE"
+docker save -o "$stage/images/cube-db-${safe_version}.tar" "$CUBE_DB_IMAGE"
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '%s' "$value"
+}
+
+csv_field() {
+  local value="$1"
+  value="${value//\"/\"\"}"
+  printf '"%s"' "$value"
+}
+
+artifact_metadata() {
+  local path="$1"
+  required_for="all"
+  purpose="部署文件"
+  install_order="90"
+  case "$path" in
+    docker-compose.yml) required_for="external-cube"; purpose="现有目标数据库模式 Compose（不定义 CubeDb）"; install_order="20" ;;
+    docker-compose.fresh-cube.yml) required_for="fresh-cube"; purpose="全新目标数据库模式 Compose"; install_order="20" ;;
+    deployment-mode.sh|install.sh|start.sh|status.sh|stop.sh) purpose="按 DEPLOYMENT_MODE 执行的部署脚本"; install_order="30" ;;
+    config/cyyy/*) purpose="CYYY 生产配置模板"; install_order="40" ;;
+    config/lhyy/appsettings.Production.fresh-cube.json.example) required_for="fresh-cube"; purpose="LHYY 全新 CubeDb 配置模板"; install_order="40" ;;
+    config/lhyy/*) required_for="external-cube"; purpose="LHYY 现有 CubeDb 配置模板"; install_order="40" ;;
+    secrets/datasync_db_password) required_for="all"; purpose="DataSyncDb 密码占位文件"; install_order="45" ;;
+    images/datasync-cyyy-*) purpose="CYYY 独立服务镜像"; install_order="10" ;;
+    images/datasync-lhyy-v2-*) purpose="LHYY 独立服务镜像"; install_order="10" ;;
+    images/datasync-db-*) purpose="DataSyncDb 独立数据库镜像"; install_order="10" ;;
+    images/cube-db-*) required_for="fresh-cube"; purpose="全新 CubeDb 独立数据库镜像"; install_order="10" ;;
+    database/datasync-base-*) purpose="DataSyncDb schema-only dump"; install_order="50" ;;
+    database/cube-base-*) required_for="fresh-cube"; purpose="全新 CubeDb schema-only dump"; install_order="50" ;;
+    database/restore-fresh-databases.sh) required_for="all"; purpose="DataSyncDb 恢复脚本；全新库模式也用于恢复 CubeDb"; install_order="60" ;;
+    database/verify-fresh-databases.sh|database/20260722-cube-v2.sql) required_for="fresh-cube"; purpose="全新 CubeDb 校验资产"; install_order="60" ;;
+    docs/*|README.md) purpose="实施与验收文档"; install_order="80" ;;
+    package-release.sh|postgres-cube/*) required_for="packager"; purpose="重新出包资产"; install_order="95" ;;
+    .env.example) purpose="部署模式、镜像和端口参数模板"; install_order="35" ;;
+  esac
+}
+
+{
+  printf '{\n'
+  printf '  "release": "%s",\n' "$(json_escape "$RELEASE_VERSION")"
+  printf '  "packageType": "hospital",\n'
+  printf '  "recommendedMode": "external-cube",\n'
+  printf '  "supportedModes": ["external-cube", "fresh-cube"],\n'
+  printf '  "containsProductionSecrets": false,\n'
+  printf '  "images": {"cyyy": "%s", "lhyy": "%s", "datasyncDb": "%s", "freshCubeDb": "%s"},\n' \
+    "$(json_escape "$CYYY_IMAGE")" "$(json_escape "$LHYY_IMAGE")" "$(json_escape "$DATASYNC_DB_IMAGE")" "$(json_escape "$CUBE_DB_IMAGE")"
+  printf '  "catalog": "manifest/FILES.csv"\n'
+  printf '}\n'
+} > "$stage/manifest/package-manifest.json"
+
+{
+  printf 'path,sha256,requiredFor,purpose,order\n'
+  while IFS= read -r -d '' artifact; do
+    relative="${artifact#"$stage"/}"
+    if [[ "$relative" == *','* || "$relative" == *'"'* || "$relative" == *$'\n'* || "$relative" == *$'\r'* ]]; then
+      echo "交付文件路径不能包含逗号、双引号或换行：$relative" >&2
+      exit 1
+    fi
+    artifact_metadata "$relative"
+    csv_field "$relative"; printf ','
+    csv_field "$(sha256sum "$artifact" | awk '{print $1}')"; printf ','
+    csv_field "$required_for"; printf ','
+    csv_field "$purpose"; printf ','
+    csv_field "$install_order"; printf '\n'
+  done < <(find "$stage" -type f ! -path "$stage/manifest/*" -print0 | sort -z)
+} > "$stage/manifest/FILES.csv"
 
 (
   cd "$stage"

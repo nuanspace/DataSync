@@ -3,4 +3,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$root"
-docker compose stop
+# shellcheck disable=SC1091
+source "$root/deployment-mode.sh"
+load_deployment_mode
+s7_compose stop

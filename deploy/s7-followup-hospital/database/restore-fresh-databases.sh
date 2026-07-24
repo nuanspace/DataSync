@@ -16,17 +16,24 @@ set -a
 source .env
 set +a
 
+if [[ "$target" == "cube" && "${DEPLOYMENT_MODE:-external-cube}" != "fresh-cube" ]]; then
+  echo "external-cube 模式禁止创建、恢复或升级现有 CubeDb。" >&2
+  exit 1
+fi
+
 if [[ "$target" == "datasync" ]]; then
   container="s7-followup-datasync-db"
   database="${DATASYNC_DB_NAME:-datasync}"
   user="${DATASYNC_DB_USER:-postgres}"
   password_file="$root/secrets/datasync_db_password"
+  container_password_file="/run/secrets/datasync_db_password"
   dump_pattern="$root/database/datasync-base-*.dump"
 else
   container="s7-followup-cube-db"
   database="${CUBE_DB_NAME:-cube}"
   user="${CUBE_DB_USER:-postgres}"
   password_file="$root/secrets/cube_db_password"
+  container_password_file="/run/secrets/cube_db_password"
   dump_pattern="$root/database/cube-base-*.dump"
 fi
 
@@ -38,8 +45,13 @@ dump_file="${dumps[0]}"
 docker inspect "$container" >/dev/null 2>&1 || { echo "数据库容器不存在：$container" >&2; exit 1; }
 [[ "$(docker inspect -f '{{.State.Health.Status}}' "$container")" == "healthy" ]] || { echo "数据库容器未健康：$container" >&2; exit 1; }
 
-password="$(tr -d '\r\n' < "$password_file")"
-table_count="$(docker exec -e PGPASSWORD="$password" "$container" psql -XAt --username "$user" --dbname "$database" --set ON_ERROR_STOP=on --command "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")"
+db_exec() {
+  docker exec "$container" sh -c \
+    'export PGPASSWORD="$(tr -d "\r\n" < "$1")"; shift; exec "$@"' \
+    sh "$container_password_file" "$@"
+}
+
+table_count="$(db_exec psql -XAt --username "$user" --dbname "$database" --set ON_ERROR_STOP=on --command "SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog','information_schema');")"
 [[ "$table_count" == "0" ]] || { echo "目标数据库不是空库（用户表=$table_count），拒绝覆盖。" >&2; exit 1; }
 
 remote_dump="/tmp/s7-${target}-base.dump"
@@ -47,8 +59,8 @@ cleanup() { docker exec "$container" rm -f "$remote_dump" >/dev/null 2>&1 || tru
 trap cleanup EXIT
 
 docker cp "$dump_file" "$container:$remote_dump"
-docker exec -e PGPASSWORD="$password" "$container" pg_restore --list "$remote_dump" >/dev/null
-docker exec -e PGPASSWORD="$password" "$container" pg_restore \
+db_exec pg_restore --list "$remote_dump" >/dev/null
+db_exec pg_restore \
   --exit-on-error \
   --single-transaction \
   --no-owner \

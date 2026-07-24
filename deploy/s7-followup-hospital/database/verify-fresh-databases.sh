@@ -10,11 +10,17 @@ set -a
 source .env
 set +a
 
+[[ "${DEPLOYMENT_MODE:-external-cube}" == "fresh-cube" ]] || {
+  echo "verify-fresh-databases.sh 只允许在 fresh-cube 模式执行。" >&2
+  exit 1
+}
+
 query() {
-  local container="$1" user="$2" database="$3" password_file="$4" sql="$5"
-  local password
-  password="$(tr -d '\r\n' < "$password_file")"
-  docker exec -e PGPASSWORD="$password" "$container" psql -XAt --username "$user" --dbname "$database" --set ON_ERROR_STOP=on --command "$sql"
+  local container="$1" user="$2" database="$3" container_password_file="$4" sql="$5"
+  docker exec "$container" sh -c \
+    'export PGPASSWORD="$(tr -d "\r\n" < "$1")"; shift; exec "$@"' \
+    sh "$container_password_file" \
+    psql -XAt --username "$user" --dbname "$database" --set ON_ERROR_STOP=on --command "$sql"
 }
 
 check_table() {
@@ -40,12 +46,15 @@ check_columns() {
 ds_container="s7-followup-datasync-db"
 ds_user="${DATASYNC_DB_USER:-postgres}"
 ds_database="${DATASYNC_DB_NAME:-datasync}"
-ds_password="$root/secrets/datasync_db_password"
+ds_password="/run/secrets/datasync_db_password"
 
 cube_container="s7-followup-cube-db"
 cube_user="${CUBE_DB_USER:-postgres}"
 cube_database="${CUBE_DB_NAME:-cube}"
-cube_password="$root/secrets/cube_db_password"
+cube_password="/run/secrets/cube_db_password"
+
+[[ -s "$root/secrets/datasync_db_password" ]] || { echo "DataSyncDb 密码文件为空。" >&2; exit 1; }
+[[ -s "$root/secrets/cube_db_password" ]] || { echo "CubeDb 密码文件为空。" >&2; exit 1; }
 
 for table in \
   cyyy.followup_package_source_config \
