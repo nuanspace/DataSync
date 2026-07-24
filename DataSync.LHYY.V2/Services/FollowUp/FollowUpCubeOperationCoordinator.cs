@@ -38,6 +38,15 @@ public sealed class FollowUpCubeOperationCoordinator
         _persistentStateGate = persistentStateGate;
     }
 
+    public static FollowUpCubeOperationCoordinator Create(
+        IConfiguration configuration,
+        ILoggerFactory loggerFactory) =>
+        new(
+            new PostgreSqlFollowUpCubeAdvisoryLockProvider(
+                configuration,
+                loggerFactory.CreateLogger<PostgreSqlFollowUpCubeAdvisoryLockProvider>()),
+            new PostgreSqlFollowUpCubePersistentStateGate(configuration));
+
     public bool IsMaintenanceActive => Volatile.Read(ref _maintenanceActive) != 0;
 
     internal void InvalidatePersistentStateGate() => _persistentStateGate.Invalidate();

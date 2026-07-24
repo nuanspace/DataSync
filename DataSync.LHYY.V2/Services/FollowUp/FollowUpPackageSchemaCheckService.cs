@@ -1,5 +1,6 @@
 using DataSync.Common.FollowUp;
 using DataSync.LHYY.V2.Models.FollowUp;
+using DataSync.LHYY.V2.Tools;
 using Npgsql;
 using System.Text.RegularExpressions;
 
@@ -19,7 +20,25 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
         var mappedTables = snapshot.Tables.Select(item => FollowUpSchemaDecisionProcessor.MapSchema(item, decision)).ToList();
         var mappedManifest = manifest.Select(item => FollowUpSchemaDecisionProcessor.MapManifest(item, decision)).ToList();
         var target = await LoadTargetSchemasAsync(mappedTables, cancellationToken);
-        return Evaluate(mappedTables, target, mappedManifest, FollowUpSchemaDecisionProcessor.GetDefaultColumns(decision));
+        var result = Evaluate(mappedTables, target, mappedManifest, FollowUpSchemaDecisionProcessor.GetDefaultColumns(decision));
+        if (!result.Compatible || !DeploymentModePolicy.IsExternalCube(configuration))
+            return result;
+
+        var packageTables = mappedManifest
+            .Where(item => item.Enabled && !item.Skipped)
+            .Select(item => new ExternalCubePackageTable(item.Schema, item.TableName, item.ImportPolicy))
+            .ToArray();
+        var accessIssues = await ExternalCubeCompatibilityTool.CheckPackageAccessAsync(
+            _cubeConnectionString,
+            packageTables,
+            cancellationToken);
+        return accessIssues.Count == 0
+            ? result
+            : new FollowUpSchemaCheckResult(
+                "ReviewRequired",
+                "RequiresMapping",
+                false,
+                result.Messages.Concat(accessIssues).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     public static FollowUpSchemaCheckResult Evaluate(

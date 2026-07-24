@@ -1,4 +1,4 @@
-using System.Text.Json;
+using DataSync.Common.FollowUp;
 
 namespace DataSync.CYYY.Models.FollowUp;
 
@@ -14,6 +14,8 @@ public sealed class FollowUpPackageSyncOptions
     public int ListLimit { get; set; } = 100;
     public long MaxPackageBytes { get; set; } = 4L * 1024 * 1024 * 1024;
     public int AckRetrySeconds { get; set; } = 60;
+    public int StorageWarningUsedPercent { get; set; } = 80;
+    public int StorageCriticalUsedPercent { get; set; } = 90;
 }
 
 public sealed class FollowUpPackageSourceConfig
@@ -74,6 +76,7 @@ public sealed class FollowUpPackageSyncOverview
     public List<FollowUpPackageSourceConfig> Sources { get; set; } = [];
     public List<FollowUpPackagePullState> Packages { get; set; } = [];
     public List<FollowUpPackageAckQueueItem> Acks { get; set; } = [];
+    public List<FollowUpStorageStatus> Storage { get; set; } = [];
 
     public IEnumerable<FollowUpPackagePullState> PackagesFor(string? hospitalCode) =>
         string.IsNullOrWhiteSpace(hospitalCode)

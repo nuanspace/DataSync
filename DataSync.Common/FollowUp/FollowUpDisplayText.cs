@@ -26,6 +26,8 @@ public static class FollowUpDisplayText
         "Pending" => "等待拉取",
         "Pulling" => "正在拉取",
         "Pulled" => "已拉取",
+        "Archiving" => "正在清理",
+        "Archived" => "文件已清理",
         "Failed" => "拉取失败",
         _ => "未知状态"
     };
@@ -71,6 +73,7 @@ public static class FollowUpDisplayText
     {
         "Scheduled" => "定时生成",
         "Manual" => "手工生成",
+        "RecoveryBaseline" => "恢复基线",
         _ => "未知方式"
     };
 

@@ -5,6 +5,7 @@
 @inject FollowUpPackageImportService ImportService
 @inject FollowUpPackageRestoreService RestoreService
 @inject FollowUpPackageBackupService BackupService
+@inject FollowUpHospitalStorageService StorageService
 @inject FollowUpHospitalInitializationService InitializationService
 @inject IOptions<FollowUpPackageImportOptions> ImportOptions
 
@@ -63,6 +64,44 @@
             </MudText>
         </section>
 
+        @if (_initializationStatus.Complete)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
+                第 5 步已完成：七项初始化材料已即时生效，无需重启 CYYY 或 LHYY。下一步请到 CYYY 保存或核对医院来源，然后执行“连接诊断”。
+            </MudAlert>
+        }
+
+        <section class="storage-workspace">
+            <div class="section-heading">
+                <div>
+                    <MudText Typo="Typo.subtitle1">存储与人工清理</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">不自动删除。只有成功导入并完成 ACK 转发的恢复基线之前的数据包和备份才能清理，业务附件不会删除。</MudText>
+                </div>
+                <div class="cleanup-confirm">
+                    <MudTextField @bind-Value="_cleanupOperator" Label="清理操作人" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    <MudTextField @bind-Value="_cleanupConfirmText" Label="输入“确认清理”" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                </div>
+            </div>
+            @if (_overview.RecoveryBaselineSequenceNo.HasValue)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">最新可用于清理保护的恢复基线：#@_overview.RecoveryBaselineSequenceNo</MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">尚无已导入且 ACK 已转发的恢复基线，所有历史包和备份均禁止清理。</MudAlert>
+            }
+            <div class="storage-grid">
+                @foreach (var storage in _overview.Storage)
+                {
+                    <MudAlert Severity="@StorageSeverity(storage)" Variant="Variant.Outlined" Dense="true">
+                        <strong>@storage.Name</strong><br />
+                        目录 @FormatBytes(storage.DirectoryBytes)，卷使用率 @storage.UsedPercent%，可用 @FormatBytes(storage.AvailableBytes) / @FormatBytes(storage.TotalBytes)
+                        @if (!storage.Ready) { <span><br />检查失败：@storage.Error</span> }
+                    </MudAlert>
+                }
+            </div>
+        </section>
+
         <section class="import-summary">
             <div><span>待处理</span><strong>@Count("Pending")</strong></div>
             <div><span>等待决定</span><strong>@(_overview.Packages.Count(item => item.ImportStatus.StartsWith("Waiting", StringComparison.Ordinal)))</strong></div>
@@ -93,6 +132,12 @@
                         @if (FollowUpDisplayText.CanRestore(context.ImportStatus))
                         {
                             <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" OnClick="@(() => RestoreAsync(context))" Disabled="@(_busy || _confirmText != "确认")">恢复</MudButton>
+                        }
+                        @if (CanCleanup(context))
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => CleanupStorageAsync(context))"
+                                       Disabled="@(_busy || _cleanupConfirmText != "确认清理" || string.IsNullOrWhiteSpace(_cleanupOperator))">清理文件</MudButton>
                         }
                     </MudTd>
                 </RowTemplate>
@@ -133,6 +178,8 @@
     private FollowUpPackageImportState? _decisionPackage;
     private string _decisionStatus = "WaitingForUpgrade";
     private string? _operatorName;
+    private string? _cleanupOperator;
+    private string? _cleanupConfirmText;
     private string _mappingJson = "{}";
     private bool _busy;
     protected override bool RequiresIntegrationProject => false;
@@ -158,7 +205,11 @@
                 DecryptionKeyReady = File.Exists(options.DecryptionPrivateKeyPath),
                 SigningKeyReady = File.Exists(options.CloudSigningPublicKeyPath),
                 PostgreSqlToolsReady = BackupService.PostgreSqlToolsReady,
-                Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : []
+                Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : [],
+                RecoveryBaselineSequenceNo = missing.Count == 0 && !string.IsNullOrWhiteSpace(options.HospitalCode)
+                    ? await ImportRepository.GetLatestRecoveryBaselineSequenceAsync(options.HospitalCode, CancellationToken)
+                    : null,
+                Storage = StorageService.GetStorageStatus()
             };
             _initializationStatus = InitializationService.GetStatus();
         }
@@ -196,6 +247,21 @@
         var result = await RestoreService.RestoreAsync(state, CancellationToken);
         inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
         _confirmText = null;
+        await LoadAsync();
+    }
+
+    private async Task CleanupStorageAsync(FollowUpPackageImportState state)
+    {
+        if (_cleanupConfirmText != "确认清理" || string.IsNullOrWhiteSpace(_cleanupOperator)) return;
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认清理旧包与备份",
+            $"将清理 #{state.SequenceNo} 的本地加密包和导入前备份，但永久保留包链、ACK、导入状态和审计记录。确认继续？",
+            yesText: "确认清理", cancelText: "取消");
+        if (confirmed != true) return;
+        _busy = true;
+        var result = await StorageService.CleanupAsync(state, _cleanupOperator, CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        _cleanupConfirmText = null;
         await LoadAsync();
     }
 
@@ -256,7 +322,12 @@
             await using var stream = file.OpenReadStream(256 * 1024, CancellationToken);
             using var reader = new StreamReader(stream);
             await InitializationService.ImportDmzResponseAsync(await reader.ReadToEndAsync(CancellationToken), CancellationToken);
-            inj_snackbar.Add("DMZ 回程包已导入。请删除交接介质上的敏感初始化包。", Severity.Success);
+            _initializationStatus = InitializationService.GetStatus();
+            inj_snackbar.Add(
+                _initializationStatus.Complete
+                    ? "DMZ 回程包已导入，七项材料已自动验证并即时生效，无需重启 CYYY/LHYY。请删除交接介质上的敏感初始化包，并到 CYYY 配置医院来源后执行连接诊断。"
+                    : $"DMZ 回程包已导入，但初始化检查尚未全部通过：{InitializationStatusText}",
+                _initializationStatus.Complete ? Severity.Success : Severity.Warning);
         });
     }
 
@@ -290,6 +361,19 @@
     private int Count(string status) => _overview.Packages.Count(item => item.ImportStatus == status);
     private static RenderFragment Preflight(string label, bool ready) => builder => { builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}"); builder.AddContent(2, $"{(ready ? "✓" : "!")} {label}"); builder.CloseElement(); };
     private static Color StatusColor(string status) => status switch { "Imported" => Color.Success, "ImportFailed" or "RestoreFailed" or "RejectedSchemaMismatch" => Color.Error, "Importing" or "BackingUp" or "Validating" or "Restoring" => Color.Info, _ when status.StartsWith("Waiting") => Color.Warning, _ => Color.Default };
+
+    private bool CanCleanup(FollowUpPackageImportState state) =>
+        state.ImportStatus == "Imported"
+        && !string.IsNullOrWhiteSpace(state.LocalPackagePath)
+        && _overview.RecoveryBaselineSequenceNo is { } recoverySequence
+        && state.SequenceNo < recoverySequence;
+
+    private static Severity StorageSeverity(FollowUpStorageStatus status) =>
+        !status.Ready || status.IsCritical ? Severity.Error : status.IsWarning ? Severity.Warning : Severity.Success;
+
+    private static string FormatBytes(long bytes) => bytes >= 1024L * 1024 * 1024
+        ? $"{bytes / 1024d / 1024 / 1024:F2} GB"
+        : bytes >= 1024L * 1024 ? $"{bytes / 1024d / 1024:F1} MB" : bytes > 0 ? $"{bytes / 1024d:F1} KB" : "0 B";
     private static void EnsureDirectory(string path) { if (!string.IsNullOrWhiteSpace(path)) Directory.CreateDirectory(path); }
     private static bool CanWrite(string path) { try { Directory.CreateDirectory(path); var probe = Path.Combine(path, $".probe-{Guid.NewGuid():N}"); File.WriteAllText(probe, "ok"); File.Delete(probe); return true; } catch { return false; } }
 }

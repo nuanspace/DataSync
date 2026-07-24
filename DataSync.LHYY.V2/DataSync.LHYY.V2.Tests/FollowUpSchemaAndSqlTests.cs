@@ -54,6 +54,40 @@ public sealed class FollowUpSchemaAndSqlTests
             FollowUpUpsertSqlBuilder.Build("care;drop", "patient", ["id"], ["id"], "Upsert"));
     }
 
+    [Fact]
+    public void 表单卡片按父记录优先排序()
+    {
+        const string parentId = "11111111-1111-1111-1111-111111111111";
+        const string childId = "22222222-2222-2222-2222-222222222222";
+        var rows = new[]
+        {
+            $$"""{"id":"{{childId}}","parent_id":"{{parentId}}"}""",
+            $$"""{"id":"{{parentId}}","parent_id":null}"""
+        };
+
+        var ordered = FollowUpImportRowOrdering.Order("form", "form_card", rows);
+
+        Assert.Contains(parentId, ordered[0]);
+        Assert.Contains(childId, ordered[1]);
+    }
+
+    [Fact]
+    public void 表单卡片循环父子关系被拒绝()
+    {
+        const string firstId = "11111111-1111-1111-1111-111111111111";
+        const string secondId = "22222222-2222-2222-2222-222222222222";
+        var rows = new[]
+        {
+            $$"""{"id":"{{firstId}}","parent_id":"{{secondId}}"}""",
+            $$"""{"id":"{{secondId}}","parent_id":"{{firstId}}"}"""
+        };
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            FollowUpImportRowOrdering.Order("form", "form_card", rows));
+
+        Assert.Contains("循环父子关系", exception.Message);
+    }
+
     private static FollowUpTableSchema CreateTable(string idType, bool nullable) => new()
     {
         SchemaName = "care",

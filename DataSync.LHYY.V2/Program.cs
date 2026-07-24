@@ -44,6 +44,12 @@ public class Program
                 return;
             }
 
+            if (ExternalCubeCompatibilityTool.IsCommand(args))
+            {
+                Environment.ExitCode = await ExternalCubeCompatibilityTool.RunAsync();
+                return;
+            }
+
             if (MessageArchiveTool.IsCommand(args))
             {
                 Environment.ExitCode = await MessageArchiveTool.RunAsync(args);
@@ -144,6 +150,8 @@ public class Program
             builder.Services.AddScoped<FollowUpPackageBackupService>();
             builder.Services.AddScoped<FollowUpPackageImportService>();
             builder.Services.AddScoped<FollowUpPackageRestoreService>();
+            builder.Services.AddScoped<FollowUpHospitalStorageService>();
+            builder.Services.AddHostedService<FollowUpStorageCleanupReconciliationWorker>();
             builder.Services.AddSingleton<FollowUpRestoreCompletionStore>();
             builder.Services.AddHostedService<FollowUpRestoreReconciliationWorker>();
             builder.Services.AddSingleton<FollowUpPackageImportKeyService>();

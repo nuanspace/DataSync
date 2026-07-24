@@ -17,12 +17,22 @@ public sealed class FollowUpPackageSyncService(
     {
         var missing = await repository.GetMissingTablesAsync(cancellationToken);
         if (missing.Count > 0) return new FollowUpPackageSyncOverview { MissingTables = missing };
+        var sources = await repository.GetSourcesAsync(false, cancellationToken);
         return new FollowUpPackageSyncOverview
         {
             TablesReady = true,
-            Sources = await repository.GetSourcesAsync(false, cancellationToken),
+            Sources = sources,
             Packages = await repository.GetPackagesAsync(cancellationToken: cancellationToken),
-            Acks = await repository.GetAcksAsync(false, cancellationToken: cancellationToken)
+            Acks = await repository.GetAcksAsync(false, cancellationToken: cancellationToken),
+            Storage = sources
+                .Where(source => !string.IsNullOrWhiteSpace(source.PackageRoot))
+                .GroupBy(source => source.PackageRoot.Trim(), PathComparer)
+                .Select(group => FollowUpStorageInspector.Inspect(
+                    $"{group.First().HospitalName} 包仓库",
+                    group.Key,
+                    _options.StorageWarningUsedPercent,
+                    _options.StorageCriticalUsedPercent))
+                .ToList()
         };
     }
 
@@ -66,17 +76,26 @@ public sealed class FollowUpPackageSyncService(
             var successCount = 0;
             foreach (var package in packages)
             {
-                await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Pulling", null, null, null, cancellationToken);
+                await using var packageLease = await repository.TryAcquirePackageLockAsync(
+                    source.HospitalCode, package.PackageId, cancellationToken);
+                if (packageLease is null) continue;
+                if (!await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Pulling",
+                        ["Pending", "Failed", "Pulled"], null, null, null, cancellationToken))
+                    continue;
                 try
                 {
                     var path = await relayClient.PullAsync(source, package, cancellationToken);
-                    await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Pulled", path, null, null, cancellationToken);
+                    ValidateCanonicalPackagePath(source.PackageRoot, package.PackageId, path);
+                    if (!await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Pulled",
+                            ["Pulling"], path, null, null, cancellationToken))
+                        throw new InvalidOperationException("包拉取完成后状态已变化，拒绝覆盖清理状态。");
                     await repository.AddLogAsync(source.HospitalCode, package.PackageId, "relay-pull", "Info", "数据包拉取完成", new { package.SequenceNo, package.SizeBytes }, cancellationToken);
                     successCount++;
                 }
                 catch (Exception ex)
                 {
-                    await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Failed", null, ErrorCode(ex), ex.Message, cancellationToken);
+                    await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Failed",
+                        ["Pulling"], null, ErrorCode(ex), ex.Message, cancellationToken);
                     await repository.AddLogAsync(source.HospitalCode, package.PackageId, "relay-pull", "Error", "数据包拉取失败", new { errorCode = ErrorCode(ex) }, cancellationToken);
                 }
             }
@@ -119,18 +138,27 @@ public sealed class FollowUpPackageSyncService(
             var successCount = 0;
             foreach (var package in packages)
             {
-                await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Pulling", null, null, null, cancellationToken);
+                await using var packageLease = await repository.TryAcquirePackageLockAsync(
+                    source.HospitalCode, package.PackageId, cancellationToken);
+                if (packageLease is null) continue;
+                if (!await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Pulling",
+                        ["Pending", "Failed", "Pulled"], null, null, null, cancellationToken))
+                    continue;
                 try
                 {
                     var path = await relayClient.PullAsync(source, package, cancellationToken);
-                    await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Pulled", path, null, null, cancellationToken);
+                    ValidateCanonicalPackagePath(source.PackageRoot, package.PackageId, path);
+                    if (!await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Pulled",
+                            ["Pulling"], path, null, null, cancellationToken))
+                        throw new InvalidOperationException("包重拉完成后状态已变化，拒绝覆盖清理状态。");
                     await repository.AddLogAsync(source.HospitalCode, package.PackageId, "relay-repull", "Info", "数据包重拉完成",
                         new { package.SequenceNo, package.SizeBytes, packageId, fromWatermark, toWatermark }, cancellationToken);
                     successCount++;
                 }
                 catch (Exception ex)
                 {
-                    await repository.MarkPackageAsync(source.HospitalCode, package.PackageId, "Failed", null, ErrorCode(ex), ex.Message, cancellationToken);
+                    await repository.TryMarkPackageAsync(source.HospitalCode, package.PackageId, "Failed",
+                        ["Pulling"], null, ErrorCode(ex), ex.Message, cancellationToken);
                     await repository.AddLogAsync(source.HospitalCode, package.PackageId, "relay-repull", "Error", "数据包重拉失败",
                         new { errorCode = ErrorCode(ex) }, cancellationToken);
                 }
@@ -192,4 +220,17 @@ public sealed class FollowUpPackageSyncService(
     private static string ErrorCode(Exception ex) => ex is FollowUpPackageException protocol
         ? protocol.ErrorCode
         : FollowUpErrorCodes.InternalError;
+
+    public static void ValidateCanonicalPackagePath(string packageRoot, string packageId, string path)
+    {
+        var expected = Path.GetFullPath(Path.Combine(packageRoot, $"{packageId}.fupkg"));
+        var actual = Path.GetFullPath(path);
+        if (!actual.Equals(expected, OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal))
+            throw new InvalidDataException("拉取结果不是包仓库中的规范 packageId.fupkg 路径。");
+    }
+
+    private static StringComparer PathComparer =>
+        OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 }

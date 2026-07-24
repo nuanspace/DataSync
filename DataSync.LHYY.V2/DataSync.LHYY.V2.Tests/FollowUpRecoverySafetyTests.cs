@@ -56,6 +56,17 @@ public sealed class FollowUpRecoverySafetyTests
     }
 
     [Fact]
+    public void 清理锁竞争失败时释放未持有租约的连接()
+    {
+        var source = ReadRepositorySource();
+        var methodStart = source.IndexOf("TryAcquireStorageCleanupPackageLockAsync", StringComparison.Ordinal);
+        var dispose = source.IndexOf("await connection.DisposeAsync();", methodStart, StringComparison.Ordinal);
+        var nullReturn = source.IndexOf("return null;", dispose, StringComparison.Ordinal);
+
+        Assert.True(methodStart >= 0 && dispose > methodStart && nullReturn > dispose);
+    }
+
+    [Fact]
     public void 离线发布包使用指定环境并强制Bash脚本为LF()
     {
         var releaseScript = ReadSource("deploy", "s7-followup-hospital", "package-release.sh");
@@ -92,17 +103,43 @@ public sealed class FollowUpRecoverySafetyTests
             releaseScript);
         Assert.Contains("docs_source=\"$(cd \"$docs_source\" && pwd -P)\"", releaseScript);
         Assert.Contains("output_parent=\"$(cd \"$output_parent\" && pwd -P)\"", releaseScript);
-        Assert.Contains("image_index=0", releaseScript);
-        Assert.Contains("image-%02d-%s.tar", releaseScript);
+        Assert.Contains("datasync-cyyy-${safe_version}.tar", releaseScript);
+        Assert.Contains("datasync-lhyy-v2-${safe_version}.tar", releaseScript);
+        Assert.Contains("datasync-db-${safe_version}.tar", releaseScript);
+        Assert.Contains("cube-db-${safe_version}.tar", releaseScript);
+        Assert.Contains("manifest/package-manifest.json", releaseScript);
+        Assert.Contains("manifest/FILES.csv", releaseScript);
+        Assert.Contains("requiredFor,purpose,order", releaseScript);
+        Assert.Contains("database/restore-fresh-databases.sh) required_for=\"all\"", releaseScript);
+        Assert.Contains("RELEASE_VERSION|DEPLOYMENT_MODE|CYYY_IMAGE", releaseScript);
+        Assert.Contains("交付文件路径不能包含逗号、双引号或换行", releaseScript);
     }
 
     [Fact]
     public void LHYY部署同时提供AspNetCore和BioCore配置文件名()
     {
-        var compose = ReadSource("deploy", "s7-followup-hospital", "docker-compose.yml");
+        foreach (var composeName in new[] { "docker-compose.yml", "docker-compose.fresh-cube.yml" })
+        {
+            var compose = ReadSource("deploy", "s7-followup-hospital", composeName);
+            Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.Production.json:ro", compose);
+            Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.json:ro", compose);
+        }
+    }
 
-        Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.Production.json:ro", compose);
-        Assert.Contains("./config/lhyy/appsettings.Production.json:/app/appsettings.json:ro", compose);
+    [Fact]
+    public void ExternalCube模式不定义Cube服务或Secret()
+    {
+        var externalCompose = ReadSource("deploy", "s7-followup-hospital", "docker-compose.yml");
+        var freshCompose = ReadSource("deploy", "s7-followup-hospital", "docker-compose.fresh-cube.yml");
+        var externalConfig = ReadSource("deploy", "s7-followup-hospital", "config", "lhyy", "appsettings.Production.json.example");
+        var freshConfig = ReadSource("deploy", "s7-followup-hospital", "config", "lhyy", "appsettings.Production.fresh-cube.json.example");
+
+        Assert.DoesNotContain("  cube-db:", externalCompose);
+        Assert.DoesNotContain("cube_db_password", externalCompose);
+        Assert.Contains("  cube-db:", freshCompose);
+        Assert.Contains("cube_db_password", freshCompose);
+        Assert.Contains("\"Mode\": \"external-cube\"", externalConfig);
+        Assert.Contains("\"Mode\": \"fresh-cube\"", freshConfig);
     }
 
     [Theory]

@@ -2,6 +2,7 @@ using DataSync.Common.FollowUp;
 using DataSync.LHYY.V2.Models.FollowUp;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 
 namespace DataSync.LHYY.V2.Services.FollowUp;
@@ -295,11 +296,12 @@ public sealed class FollowUpPackageImportService(
 
                 var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
                 var count = 0;
-                using var reader = new StreamReader(filePath);
-                string? line;
-                while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+                await foreach (var line in ReadRowsForImportAsync(
+                                   filePath,
+                                   targetTable.Schema,
+                                   targetTable.TableName,
+                                   cancellationToken))
                 {
-                    if (string.IsNullOrWhiteSpace(line)) continue;
                     using var _ = JsonDocument.Parse(line);
                     var mappedLine = FollowUpSchemaDecisionProcessor.MapRow(line, table.Schema, table.TableName, schemaDecision);
                     if (FollowUpTargetAdaptationService.ReadPatientSource(
@@ -353,6 +355,27 @@ public sealed class FollowUpPackageImportService(
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
+    }
+
+    private static async IAsyncEnumerable<string> ReadRowsForImportAsync(
+        string filePath,
+        string schema,
+        string table,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (FollowUpImportRowOrdering.RequiresOrdering(schema, table))
+        {
+            var rows = await File.ReadAllLinesAsync(filePath, cancellationToken);
+            foreach (var row in FollowUpImportRowOrdering.Order(schema, table, rows))
+                yield return row;
+            yield break;
+        }
+
+        using var reader = new StreamReader(filePath);
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+            if (!string.IsNullOrWhiteSpace(line))
+                yield return line;
     }
 
     private static async Task<HashSet<string>> GetWritableColumnsAsync(

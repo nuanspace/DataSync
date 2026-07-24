@@ -17,6 +17,13 @@
         </div>
     </header>
 
+    @if (IsSelectedUpgradeBlocked)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Dense="true">
+            external-cube 模式下，现有 CubeDb 仅允许业务导入和只读兼容性检查；本页面不会对其执行比对同步、内置脚本或 SQL 文件。
+        </MudAlert>
+    }
+
     <section class="database-upgrade-panel">
         <div class="database-upgrade-form">
             <MudSelect T="string" @bind-Value="_upgradeMode" Label="升级方式"
@@ -461,6 +468,8 @@
     private bool IsCompareSourceSqlFileMode => string.Equals(_compareSourceMode, CompareSourceSqlFileMode, StringComparison.Ordinal);
     private bool IsConfirmTextValid => string.Equals(_confirmText, "确认", StringComparison.Ordinal);
     private bool IsTaskRunning => _currentTask is { IsTerminal: false };
+    private bool IsSelectedUpgradeBlocked =>
+        inj_databaseUpgradeService.IsUpgradeExecutionBlocked(_selectedConnectionName);
     private bool ShowBulkExecuteButton => !IsProjectScriptsMode || _projectScriptTabIndex == 0;
     private string ExecuteButtonText => IsSqlFileMode
         ? (_skipBackup ? "执行文件" : "备份并执行文件")
@@ -469,6 +478,7 @@
         : (_skipBackup ? "执行升级" : "备份并升级");
     private bool CanExecute =>
         CanOperate
+        && !IsSelectedUpgradeBlocked
         && IsConfirmTextValid
         && string.Equals(_checkedConnectionName, _selectedConnectionName, StringComparison.OrdinalIgnoreCase)
         && (IsCompareMode

@@ -34,6 +34,10 @@ public sealed class FollowUpHospitalInitializationServiceTests : IDisposable
         using var rsa = RSA.Create(3072);
         var keyService = new FollowUpPackageImportKeyService(Options.Create(options));
         var service = new FollowUpHospitalInitializationService(Options.Create(options), keyService);
+        await File.WriteAllTextAsync(options.CyyyPrivateKeyPath, "PRIVATE");
+        await File.WriteAllTextAsync(options.CyyyPrivateKeyPath + ".pub", "PUBLIC");
+        await File.WriteAllTextAsync(options.DecryptionPrivateKeyPath, "PRIVATE");
+        await File.WriteAllTextAsync(options.DecryptionPrivateKeyPath + ".public.pem", "PUBLIC");
         var package = new FollowUpInitializationPackage
         {
             PackageType = FollowUpInitializationPackageTypes.DmzToHospital,
@@ -50,6 +54,7 @@ public sealed class FollowUpHospitalInitializationServiceTests : IDisposable
         Assert.Contains("dmz.example", await File.ReadAllTextAsync(options.CyyyKnownHostsPath));
         Assert.Equal(new string('i', 64), (await File.ReadAllTextAsync(options.CyyyTokenFilePath)).Trim());
         Assert.DoesNotContain("PRIVATE KEY", await File.ReadAllTextAsync(options.CloudSigningPublicKeyPath));
+        Assert.True(service.GetStatus().Complete);
     }
 
     [Fact]

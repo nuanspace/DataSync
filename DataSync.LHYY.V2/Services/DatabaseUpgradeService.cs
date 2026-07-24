@@ -90,6 +90,14 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
             .OrderBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+    public bool IsUpgradeExecutionBlocked(string? connectionName)
+    {
+        if (!DeploymentModePolicy.IsExternalCube(_configuration) || string.IsNullOrWhiteSpace(connectionName))
+            return false;
+
+        return IsCubeConnection(GetConnection(connectionName));
+    }
+
     public async Task<DatabaseUpgradeCheckResult> CheckAsync(string connectionName, CancellationToken cancellationToken = default)
     {
         var target = GetConnection(connectionName);
@@ -178,6 +186,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
         CancellationToken cancellationToken = default)
     {
         var target = GetConnection(connectionName);
+        EnsureUpgradeExecutionAllowed(target);
         var connectionKey = BuildConnectionFingerprint(target);
         if (HasRunningTask(connectionKey))
             throw new InvalidOperationException("当前目标库已有数据库升级任务正在执行，请等待完成后再操作。");
@@ -518,6 +527,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
     private UpgradeOperationLease BeginExclusiveUpgradeOperation(DatabaseConnectionOption target)
     {
+        EnsureUpgradeExecutionAllowed(target);
         var connectionKey = BuildConnectionFingerprint(target);
         if (HasRunningTask(connectionKey))
             throw new InvalidOperationException("当前目标库已有数据库升级任务正在执行，请等待完成后再操作。");
@@ -536,12 +546,21 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
         DatabaseConnectionOption target,
         CancellationToken cancellationToken)
     {
-        if (!string.Equals(BuildConnectionFingerprint(target), _cubeConnectionKey, StringComparison.Ordinal))
+        if (!IsCubeConnection(target))
             return null;
 
         var lease = await _cubeOperationCoordinator.TryAcquireExclusiveAsync(cancellationToken);
         return lease ?? throw new InvalidOperationException(
             "CubeDb 当前处于 FollowUp 导入、恢复或其他数据库维护操作中，请稍后重试。");
+    }
+
+    private bool IsCubeConnection(DatabaseConnectionOption target) =>
+        string.Equals(BuildConnectionFingerprint(target), _cubeConnectionKey, StringComparison.Ordinal);
+
+    private void EnsureUpgradeExecutionAllowed(DatabaseConnectionOption target)
+    {
+        if (DeploymentModePolicy.IsExternalCube(_configuration) && IsCubeConnection(target))
+            throw new InvalidOperationException(DeploymentModePolicy.ExternalCubeUpgradeBlockedMessage);
     }
 
     private void CleanupTaskSnapshots(Guid preserveTaskId)

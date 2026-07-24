@@ -27,6 +27,8 @@ public sealed class FollowUpPackageImportOptions
     public long MaxPackageBytes { get; set; } = 4L * 1024 * 1024 * 1024;
     public long MaxExpandedBytes { get; set; } = 8L * 1024 * 1024 * 1024;
     public int MaxArchiveEntries { get; set; } = 100000;
+    public int StorageWarningUsedPercent { get; set; } = 80;
+    public int StorageCriticalUsedPercent { get; set; } = 90;
 }
 
 public sealed record FollowUpHospitalInitializationStatus(
@@ -128,5 +130,60 @@ public sealed class FollowUpPackageImportOverview
     public bool DecryptionKeyReady { get; set; }
     public bool SigningKeyReady { get; set; }
     public bool PostgreSqlToolsReady { get; set; }
+    public long? RecoveryBaselineSequenceNo { get; set; }
+    public List<FollowUpStorageStatus> Storage { get; set; } = [];
     public List<FollowUpPackageImportState> Packages { get; set; } = [];
+}
+
+public sealed record FollowUpStorageCleanupBackup(
+    Guid RecordId,
+    string RootPath,
+    string DatabaseBackupPath,
+    string AttachmentBackupPath,
+    string Hash,
+    long SizeBytes);
+
+public sealed record FollowUpStorageCleanupCandidate(
+    string HospitalCode,
+    string PackageId,
+    long SequenceNo,
+    string PackageHash,
+    string PackagePath,
+    IReadOnlyList<FollowUpStorageCleanupBackup> Backups);
+
+public enum FollowUpStorageCleanupDatabaseState
+{
+    Original,
+    Prepared,
+    Archived,
+    Inconsistent
+}
+
+public enum FollowUpStorageCleanupPhase
+{
+    Requested,
+    DatabasePrepared,
+    MovingFiles,
+    FilesQuarantined,
+    DatabaseArchived
+}
+
+public sealed class FollowUpStorageCleanupManifest
+{
+    public int Version { get; set; } = 1;
+    public string OperationId { get; set; } = Guid.NewGuid().ToString("N");
+    public string HospitalCode { get; set; } = string.Empty;
+    public string PackageId { get; set; } = string.Empty;
+    public string OperatorName { get; set; } = string.Empty;
+    public FollowUpStorageCleanupPhase Phase { get; set; }
+    public FollowUpStorageCleanupCandidate? Candidate { get; set; }
+    public List<FollowUpStorageCleanupManifestItem> Items { get; set; } = [];
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class FollowUpStorageCleanupManifestItem
+{
+    public string OriginalPath { get; set; } = string.Empty;
+    public string QuarantinePath { get; set; } = string.Empty;
+    public bool IsDirectory { get; set; }
 }

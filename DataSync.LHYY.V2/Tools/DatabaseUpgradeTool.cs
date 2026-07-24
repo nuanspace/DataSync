@@ -33,6 +33,14 @@ public static class DatabaseUpgradeTool
             if (target is null)
                 return 1;
 
+            if (DeploymentModePolicy.IsExternalCube(configuration)
+                && string.Equals(target.Name, "CubeDb", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine(DeploymentModePolicy.ExternalCubeUpgradeBlockedMessage);
+                Console.WriteLine("如需只读检查，请使用 cube-compat-check 命令。");
+                return 2;
+            }
+
             var scripts = LoadScripts(rootPath);
             if (scripts.Count == 0)
             {
