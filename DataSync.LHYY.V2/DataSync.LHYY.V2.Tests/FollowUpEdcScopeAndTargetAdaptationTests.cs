@@ -53,30 +53,10 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
 
     [Theory]
     [InlineData("随访", "已审核", null)]
-    [InlineData("随访", "已随访", null)]
+    [InlineData("随访", "未到推送时间", null)]
     [InlineData("预问诊", "门诊结束", "2026-07-22T08:00:00")]
-    [InlineData("门诊签到", "办理住院", "2026-07-22T08:00:00")]
-    [InlineData("预问诊", "入组随访", "2026-07-22T08:00:00")]
-    [InlineData("预问诊", "转诊", "2026-07-22T08:00:00")]
-    [InlineData("转诊记录", "已确认", null)]
-    public void 合格事件保留表单链接(string eventType, string status, string? inputTime)
-    {
-        var source = PatientEventJson(eventType, status, inputTime);
-
-        var adapted = FollowUpTargetAdaptationService.AdaptRow("care", "patient_event", source);
-
-        using var document = JsonDocument.Parse(adapted);
-        Assert.Equal("11111111-1111-1111-1111-111111111111", document.RootElement.GetProperty("form_set_id").GetString());
-        Assert.Equal("测试表单", document.RootElement.GetProperty("form_set_name").GetString());
-        Assert.Equal("22222222-2222-2222-2222-222222222222", document.RootElement.GetProperty("event_type_definition_id").GetString());
-    }
-
-    [Theory]
-    [InlineData("随访", "待审核", "2026-07-22T08:00:00")]
-    [InlineData("预问诊", "门诊结束", null)]
-    [InlineData("预问诊", "门诊签到", "2026-07-22T08:00:00")]
     [InlineData("转诊记录", "待确认", "2026-07-22T08:00:00")]
-    public void 不合格事件保留基础信息但清空表单链接(string eventType, string status, string? inputTime)
+    public void 患者事件已由云端筛选且医院端保持原始字段(string eventType, string status, string? inputTime)
     {
         var source = PatientEventJson(eventType, status, inputTime);
 
@@ -85,68 +65,9 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
         using var document = JsonDocument.Parse(adapted);
         Assert.Equal(eventType, document.RootElement.GetProperty("event_type").GetString());
         Assert.Equal(status, document.RootElement.GetProperty("event_status").GetString());
-        Assert.Equal("基础信息", document.RootElement.GetProperty("task_name").GetString());
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_id").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_name").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("event_type_definition_id").ValueKind);
-    }
-
-    [Fact]
-    public void 已作废事件即使状态已审核也清空表单链接()
-    {
-        var source = PatientEventJson("随访", "已审核", null)
-            .Replace("\"is_valid\":true", "\"is_valid\":false");
-
-        var adapted = FollowUpTargetAdaptationService.AdaptRow("care", "patient_event", source);
-
-        using var document = JsonDocument.Parse(adapted);
-        Assert.False(document.RootElement.GetProperty("is_valid").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_id").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_name").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("event_type_definition_id").ValueKind);
-    }
-
-    [Theory]
-    [InlineData("\"is_valid\":true,", "")]
-    [InlineData("\"is_valid\":true", "\"is_valid\":null")]
-    public void 有效标记缺失或为空时即使已审核也清空表单链接(string oldValue, string newValue)
-    {
-        var source = PatientEventJson("随访", "已审核", null).Replace(oldValue, newValue);
-
-        var adapted = FollowUpTargetAdaptationService.AdaptRow("care", "patient_event", source);
-
-        using var document = JsonDocument.Parse(adapted);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_id").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_name").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("event_type_definition_id").ValueKind);
-    }
-
-    [Fact]
-    public void 表单集为空时即使已审核也清空其余表单链接()
-    {
-        var source = PatientEventJson("随访", "已审核", null)
-            .Replace("\"form_set_id\":\"11111111-1111-1111-1111-111111111111\"", "\"form_set_id\":null");
-
-        var adapted = FollowUpTargetAdaptationService.AdaptRow("care", "patient_event", source);
-
-        using var document = JsonDocument.Parse(adapted);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_id").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("form_set_name").ValueKind);
-        Assert.Equal(JsonValueKind.Null, document.RootElement.GetProperty("event_type_definition_id").ValueKind);
-    }
-
-    [Fact]
-    public void 后续合格增量可以恢复事件表单链接()
-    {
-        var pending = FollowUpTargetAdaptationService.AdaptRow(
-            "care", "patient_event", PatientEventJson("随访", "待审核", "2026-07-22T08:00:00"));
-        var completed = FollowUpTargetAdaptationService.AdaptRow(
-            "care", "patient_event", PatientEventJson("随访", "已审核", "2026-07-22T08:00:00"));
-
-        using var pendingDocument = JsonDocument.Parse(pending);
-        using var completedDocument = JsonDocument.Parse(completed);
-        Assert.Equal(JsonValueKind.Null, pendingDocument.RootElement.GetProperty("form_set_id").ValueKind);
-        Assert.Equal("11111111-1111-1111-1111-111111111111", completedDocument.RootElement.GetProperty("form_set_id").GetString());
+        Assert.Equal("11111111-1111-1111-1111-111111111111", document.RootElement.GetProperty("form_set_id").GetString());
+        Assert.Equal("测试表单", document.RootElement.GetProperty("form_set_name").GetString());
+        Assert.Equal("22222222-2222-2222-2222-222222222222", document.RootElement.GetProperty("event_type_definition_id").GetString());
     }
 
     [Fact]
@@ -189,14 +110,82 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
     }
 
     [Fact]
-    public void V2导入契约默认值正确且传输协议保持V1()
+    public void V3导入契约默认值正确且传输协议保持V1()
     {
         var options = new FollowUpPackageImportOptions();
         var request = FollowUpRelayRequest.Create("list", "token", new { });
 
-        Assert.Equal("followup-hospital-sync.v2", options.SupportedContractVersion);
-        Assert.Equal("1.1.0", options.ImporterVersion);
+        Assert.Equal("followup-hospital-sync.v3", options.SupportedContractVersion);
+        Assert.Equal("1.2.0", options.ImporterVersion);
         Assert.Equal("1.0", request.ProtocolVersion);
+    }
+
+    [Fact]
+    public void V3导入器明确拒绝旧V2数据包()
+    {
+        var options = new FollowUpPackageImportOptions();
+        var manifest = new FollowUpPackageManifest
+        {
+            ExportContractVersion = "followup-hospital-sync.v2",
+            MinImporterVersion = "1.1.0"
+        };
+
+        var exception = Assert.Throws<FollowUpPackageException>(
+            () => FollowUpPackageImportService.ValidateVersions(manifest, options));
+
+        Assert.Equal(FollowUpErrorCodes.ContractVersionUnsupported, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void 即使遗留配置声明支持V2也必须拒绝旧V2数据包()
+    {
+        var options = new FollowUpPackageImportOptions
+        {
+            SupportedContractVersion = "followup-hospital-sync.v2",
+            ImporterVersion = "1.1.0"
+        };
+        var manifest = new FollowUpPackageManifest
+        {
+            ExportContractVersion = "followup-hospital-sync.v2",
+            MinImporterVersion = "1.1.0"
+        };
+
+        var exception = Assert.Throws<FollowUpPackageException>(
+            () => FollowUpPackageImportService.ValidateVersions(manifest, options));
+
+        Assert.Equal(FollowUpErrorCodes.ContractVersionUnsupported, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void V3导入器接受V3数据包()
+    {
+        var options = new FollowUpPackageImportOptions();
+        var manifest = new FollowUpPackageManifest
+        {
+            ExportContractVersion = "followup-hospital-sync.v3",
+            MinImporterVersion = "1.2.0"
+        };
+
+        FollowUpPackageImportService.ValidateVersions(manifest, options);
+    }
+
+    [Fact]
+    public void 配置不得冒充高于当前二进制的导入器版本()
+    {
+        var options = new FollowUpPackageImportOptions
+        {
+            ImporterVersion = "1.3.0"
+        };
+        var manifest = new FollowUpPackageManifest
+        {
+            ExportContractVersion = "followup-hospital-sync.v3",
+            MinImporterVersion = "1.3.0"
+        };
+
+        var exception = Assert.Throws<FollowUpPackageException>(
+            () => FollowUpPackageImportService.ValidateVersions(manifest, options));
+
+        Assert.Equal(FollowUpErrorCodes.ContractVersionUnsupported, exception.ErrorCode);
     }
 
     [Fact]

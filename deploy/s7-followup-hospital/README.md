@@ -75,7 +75,7 @@ bash status.sh
 
 全新部署的 Cube schema-only dump 必须已经包含 `20260722-cube-v2.sql` 的结构。`restore-fresh-databases.sh cube` 和 `verify-fresh-databases.sh` 会在 `external-cube` 模式主动拒绝执行。
 
-首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任。DMZ 运行期 SSH 授权与医院端七项材料均由页面即时应用，初始化阶段无需重启 DMZ、CYYY 或 LHYY。随后执行：关闭自动任务 → 检查服务和 v2/1.1.0 → 检查两库及来源映射 → 保存或核对 CYYY 医院来源 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
+首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任。DMZ 运行期 SSH 授权与医院端七项材料均由页面即时应用，初始化阶段无需重启 DMZ、CYYY 或 LHYY。随后执行：关闭自动任务 → 检查服务和 v3/1.2.0（医院端拒绝旧 v2 包）→ 检查两库及来源映射 → 保存或核对 CYYY 医院来源 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
 
 首次启动前必须保持两个业务开关为 `false`：
 

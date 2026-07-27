@@ -5,6 +5,9 @@ namespace DataSync.LHYY.V2.Models.FollowUp;
 
 public sealed class FollowUpPackageImportOptions
 {
+    public const string RequiredContractVersion = "followup-hospital-sync.v3";
+    public const string CurrentImporterVersion = "1.2.0";
+
     public bool Enabled { get; set; }
     public string PackageRoot { get; set; } = "/app/followup/packages";
     public string StagingRoot { get; set; } = "/app/followup/staging";
@@ -13,8 +16,8 @@ public sealed class FollowUpPackageImportOptions
     public string DecryptionPrivateKeyPath { get; set; } = "/app/secrets/followup_decryption_private.pem";
     public string CloudSigningPublicKeyPath { get; set; } = "/app/config/followup_signing_public.pem";
     public string EncryptionKeyId { get; set; } = string.Empty;
-    public string SupportedContractVersion { get; set; } = "followup-hospital-sync.v2";
-    public string ImporterVersion { get; set; } = "1.1.0";
+    public string SupportedContractVersion { get; set; } = RequiredContractVersion;
+    public string ImporterVersion { get; set; } = CurrentImporterVersion;
     public string DeviceId { get; set; } = "datasync-device";
     public string HospitalId { get; set; } = string.Empty;
     public string HospitalCode { get; set; } = string.Empty;

@@ -24,12 +24,12 @@ status: ready
 - 重复拉取、重复导入和重复回执的幂等验证。
 
 > [!important] 首次 v2 部署
-> 首次验收从新的 `Baseline` 开始。Baseline 必须满足 `followup-hospital-sync.v2` 且 `previousPackageId` 为空，但不要求 `sequenceNo=1`。只有 Baseline、NTCare 展示和 ACK 闭环全部通过后，才继续验证 Incremental。
+> 首次验收从新的 `Baseline` 开始。Baseline 必须满足 `followup-hospital-sync.v3` 且 `previousPackageId` 为空，但不要求 `sequenceNo=1`。旧 v2 数据包不得导入。只有 Baseline、NTCare 展示和 ACK 闭环全部通过后，才继续验证 Incremental。
 
 ### 1.1 首次部署后的执行顺序
 
 1. 关闭云端定时生成、CYYY 定时拉取和 LHYY 自动导入。
-2. 检查六个容器、两个管理页面、云端 Web/Gateway 及版本：v2 / 1.1.0。
+2. 检查六个容器、两个管理页面、云端 Web/Gateway 及版本：v3 / 1.2.0，并确认医院端拒绝旧 v2 包。
 3. 恢复 Cube 模拟库，创建 `form.vector`，执行 `20260722.sql`，检查来源映射和患者范围映射。
 4. 保存恢复后初始备份，按四包顺序完成三端统一初始化并执行三端“一键验证”，再在 CYYY 执行连接诊断。
 5. 云端手工生成 Baseline；CYYY 手工拉取；LHYY 人工确认并导入。

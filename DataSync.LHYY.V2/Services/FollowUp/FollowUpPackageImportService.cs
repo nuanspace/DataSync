@@ -65,7 +65,7 @@ public sealed class FollowUpPackageImportService(
                 state.SequenceNo,
                 state.PackageType,
                 cancellationToken);
-            ValidateVersions(package.Manifest);
+            ValidateVersions(package.Manifest, _options);
 
             if (package.Manifest.PackageType == "Baseline" && !allowBaseline)
             {
@@ -244,14 +244,16 @@ public sealed class FollowUpPackageImportService(
         }
     }
 
-    private void ValidateVersions(FollowUpPackageManifest manifest)
+    internal static void ValidateVersions(
+        FollowUpPackageManifest manifest,
+        FollowUpPackageImportOptions options)
     {
-        if (!string.Equals(manifest.ExportContractVersion, _options.SupportedContractVersion, StringComparison.Ordinal))
+        if (!string.Equals(options.SupportedContractVersion, FollowUpPackageImportOptions.RequiredContractVersion, StringComparison.Ordinal)
+            || !string.Equals(manifest.ExportContractVersion, FollowUpPackageImportOptions.RequiredContractVersion, StringComparison.Ordinal))
             throw new FollowUpPackageException(FollowUpErrorCodes.ContractVersionUnsupported, "导出契约版本不受支持。");
-        if (!Version.TryParse(_options.ImporterVersion, out var importer)
-            || !Version.TryParse(manifest.MinImporterVersion, out var minimum)
-            || importer < minimum)
-            throw new FollowUpPackageException(FollowUpErrorCodes.ContractVersionUnsupported, "导入器版本低于数据包要求。");
+        if (!string.Equals(options.ImporterVersion, FollowUpPackageImportOptions.CurrentImporterVersion, StringComparison.Ordinal)
+            || !string.Equals(manifest.MinImporterVersion, FollowUpPackageImportOptions.CurrentImporterVersion, StringComparison.Ordinal))
+            throw new FollowUpPackageException(FollowUpErrorCodes.ContractVersionUnsupported, "导入器版本配置或数据包最低版本与当前 v3 实现不一致。");
     }
 
     private async Task<Dictionary<string, int>> ImportDataAsync(
