@@ -81,7 +81,52 @@ public sealed record FollowUpSchemaCheckResult(
     string Status,
     string DiffLevel,
     bool Compatible,
-    List<string> Messages);
+    List<string> Messages,
+    List<FollowUpTableColumnScope>? TableColumnScopes = null,
+    List<FollowUpIgnoredColumnAudit>? IgnoredNonNullColumns = null);
+
+public sealed class FollowUpTableColumnScope
+{
+    public FollowUpTableColumnScope(
+        string sourceSchema,
+        string sourceTable,
+        string targetSchema,
+        string targetTable,
+        List<string> sourceColumns,
+        List<string> targetColumns,
+        List<string>? arrayToTextSourceColumns = null,
+        List<string>? arrayToTextTargetColumns = null)
+    {
+        SourceSchema = sourceSchema;
+        SourceTable = sourceTable;
+        TargetSchema = targetSchema;
+        TargetTable = targetTable;
+        SourceColumns = sourceColumns;
+        TargetColumns = targetColumns;
+        ArrayToTextSourceColumns = arrayToTextSourceColumns ?? [];
+        ArrayToTextTargetColumns = arrayToTextTargetColumns ?? [];
+    }
+
+    public FollowUpTableColumnScope(string schema, string table, List<string> columns)
+        : this(schema, table, schema, table, columns.ToList(), columns.ToList())
+    {
+    }
+
+    public string SourceSchema { get; }
+    public string SourceTable { get; }
+    public string TargetSchema { get; }
+    public string TargetTable { get; }
+    public List<string> SourceColumns { get; }
+    public List<string> TargetColumns { get; }
+    public List<string> ArrayToTextSourceColumns { get; }
+    public List<string> ArrayToTextTargetColumns { get; }
+}
+
+public sealed record FollowUpIgnoredColumnAudit(
+    string SourceSchema,
+    string SourceTable,
+    string ColumnName,
+    int NonNullRowCount);
 
 public sealed record FollowUpImportOperationResult(bool Success, string Message, string? ErrorCode = null);
 

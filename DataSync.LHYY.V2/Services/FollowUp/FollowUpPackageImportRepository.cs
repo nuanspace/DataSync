@@ -531,6 +531,34 @@ public sealed class FollowUpPackageImportRepository(
         return await command.ExecuteScalarAsync(cancellationToken) as string;
     }
 
+    public async Task<string?> GetTableContentHashAsync(
+        string hospitalCode,
+        string? packageId,
+        string schema,
+        string table,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(packageId))
+            return null;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT item ->> 'contentHash'
+            FROM lhyy.followup_package_import_state state
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(state.table_manifest_json, '[]'::jsonb)) item
+            WHERE state.hospital_code = @hospitalCode
+              AND state.package_id = @packageId
+              AND state.import_status = 'Imported'
+              AND LOWER(item ->> 'schema') = LOWER(@schema)
+              AND LOWER(item ->> 'tableName') = LOWER(@table)
+            LIMIT 1
+            """, connection);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        command.Parameters.AddWithValue("schema", schema);
+        command.Parameters.AddWithValue("table", table);
+        return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
     public async Task<string?> GetCurrentRestorableHeadAsync(string hospitalCode, CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);

@@ -101,6 +101,14 @@ CYYY 总开关默认为 `false`；关闭时拉取 Worker 在创建服务 Scope �
 8. DataSync 不依赖也不调用 NTCare 新接口。数据和附件提交后，导入状态和 ACK 仍为 `Imported`，同时以 `NTCARE_RESTART_REQUIRED` 和警告日志明确提示：重启 NTCare 或执行医院既有缓存刷新运维流程。该提示不回滚已提交数据。
 9. 导入成功后 LHYY 写入 `Imported` ACK，CYYY 使用稳定 `ackId` 重试转发。已成功导入的包不会再次执行，也不会被迟到失败状态降级。后续 `Incremental`、`Supplement` 和 `Replacement` 仍按相同 UUID 幂等增量写入。
 
+动态表导入按当前医院实际关联表单项收敛字段范围：
+
+- `target` 动态宽表只校验和写入 NTCare 的 31 个系统固定字段、主键、当前医院 `form.form_question` 关联字段和已批准的默认值字段。结构校验与实际 upsert 使用同一字段集合；未关联字段不会写入，也不会用包内 `null` 覆盖医院端已有值。
+- 包内携带 `form.form_question` 文件时，系统校验 manifest、文件 hash、内容 hash、记录数和医院身份后使用该快照。增量包因内容未变化而不携带文件时，只有其 `contentHash` 与当前已导入主链头登记的内容 hash 完全一致，才回退读取医院端当前表单项；hash 缺失或不一致、Baseline 省略非空快照时均停止导入并进入结构处理。
+- 未关联但非空的历史字段只记录表名、字段名和影响行数，不记录字段值或患者标识。医院关联字段缺失、不可写或类型不兼容时仍返回 `RequiresMapping` 或 `Breaking`，不得绕过。
+- 仅当表单项类型为“文件”或“选择”、源字段为 `ARRAY`/`text[]` 且目标字段为 `text` 时，允许把仅含字符串或 `null` 的 JSON 数组写成 JSON 数组文本；固定表和其他类型差异继续严格校验。
+- 导入器不会为此创建、删除或修改 CubeDb 表和字段，不执行 `CREATE`、`ALTER`、`DROP`，不新增迁移，也不改变 `followup-hospital-sync.v3`、导入器版本或数据包 hash。修复后的 LHYY 可对原 `RejectedSchemaMismatch` 包重新执行“校验 / 导入”，无需重新生成包。
+
 映射 JSON 示例：
 
 ```json
@@ -144,6 +152,10 @@ CYYY 服务如果在包状态写为 `Pulling` 后异常退出，重启后的普�
 - SSH 严格 host key 校验生效，错误 key、缺 token 和非法 shell 均被拒绝。
 - 正常包可拉取、验签、解密、备份、导入并回传 ACK。
 - 首次完整 Baseline/Replacement 导入后重启 NTCare，患者管理可查看回传表单；后续增量重复导入不产生重复患者或 EDC 权限记录。
+- 动态表只写入当前医院关联表单字段；构造未关联非空历史字段后，确认该字段未进入 SQL 写入列、目标库原值不变且日志只保留脱敏计数。
+- 验证无 `form.form_question` 文件的增量包：内容 hash 与当前主链头一致时可安全回退医院端表单项，不一致、缺失或 Baseline 非空快照缺文件时必须在备份前阻断。
+- 验证“文件/选择”题目的 `ARRAY/text[] → text` 写入 JSON 数组文本；其他动态类型差异和全部固定表类型差异仍按原规则阻断。
+- 确认本次部署没有新增或执行 CubeDb DDL、数据库迁移，也没有改变协议、版本和原包 hash。
 - 修改 envelope、payload、签名或内层文件后均在备份前被拒绝。
 - 验证序号间隙、错误前驱、Supplement、Replacement、重复导入和 ACK 重试。
 - 在隔离测试库完成一次链头恢复及顺序重放，并核对数据库与附件。

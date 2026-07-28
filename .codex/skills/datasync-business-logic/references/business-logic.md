@@ -424,6 +424,14 @@ LHYY 校验与导入顺序：
 9. 导入前用 `pg_dump -Fc` 备份整个 `CubeDb`，并备份本包会覆盖的附件。数据写入事务在附件原子切换完成后提交；任一环节失败都会回滚数据库并恢复附件。附件自动恢复失败时必须写入 `RestoreFailed`，不能降级为普通 `ImportFailed`；每次校验/导入结束后清理本轮 `verify-*` staging 目录并清空失效路径。
 10. 数据提交后写入 `Imported` 状态和 ACK。提交后的审计/ACK 暂时失败不得把成功结果降级为失败，也不得自动重做已成功包。
 
+动态表字段范围补充规则：
+
+- `target` 动态宽表只校验和写入 NTCare 的 31 个系统固定字段、主键、当前医院 `form.form_question` 实际关联字段以及已批准映射中的默认值字段；结构校验与 upsert 必须复用同一字段集合，不能仅放宽校验后仍写入整行。
+- 包内 `form.form_question` 有导出文件时，以通过 manifest、文件 hash、内容 hash、记录数和医院身份校验的包内快照为准。没有导出文件时，只有非 Baseline 包的 `contentHash` 与当前已导入主链头登记的该表内容 hash 一致，才允许按目标库当前医院的 `form_question` 回退；缺少或不匹配 hash、Baseline 省略非空快照等情况均进入结构复核，不猜测字段范围。
+- 未关联动态字段不进入写入列；其中非空字段仅以表名、字段名和非空行数留痕，不记录字段值或患者标识，也不会用 `null` 覆盖医院端已有值。关联字段缺失、不可写或无法兼容时仍按 `RequiresMapping`/`Breaking` 阻断。
+- 只有表单项 `data_type` 为“文件”或“选择”、源结构为 `ARRAY`/`text[]` 且目标字段为 `text` 时，允许 `ARRAY → text`；非空值必须是仅含字符串或 `null` 的 JSON 数组，并按 JSON 数组文本写入。固定表和其他类型差异继续执行原严格规则。
+- 该策略只改变 `DataSync.LHYY.V2` 运行时校验与写入范围，不执行 `CREATE`、`ALTER`、`DROP`，不新增 SQL，也不改变共享协议、包版本或导入器版本。
+
 导入状态与维护门禁补充规则：
 
 - `cyyy.followup_package_pull_state` 再次发现已拉取包时，`lhyy.followup_package_import_state` 只允许新包或 `AwaitingPackage`、`WaitingForPredecessor` 进入 `Pending`；`WaitingForDecision`、`RejectedSchemaMismatch`、`ImportFailed`、`Restored`、`RestoreFailed` 等终态或人工处理状态必须保留。
@@ -467,6 +475,8 @@ LHYY 校验与导入顺序：
 2026-07-20 收紧 FollowUp 恢复启动与重试审计窗口：影响项目为 `DataSync.LHYY.V2`，影响链路仅为单院恢复启动及进程中断后的 DataSync 管理元数据收敛；关键表仍为 `lhyy.followup_package_import_state`、`lhyy.followup_package_restore_record`，未修改数据库结构且不新增 SQL。恢复批次登记后先持久化未完成标记，再进入 `Restoring` 并调用既有数据库与附件恢复；新恢复批次在同一管理库事务内把同包遗留的旧 `Running` 审计标记为进程中断后再登记自身。若持久标记或 `Restoring` 状态写入失败且实际恢复尚未开始，只关闭本次失败审计并保留原包安全状态，不误写 `RestoreFailed`。正常包校验、导入顺序、字段映射、ACK、`pg_restore` 和附件恢复动作不变。验证结果：3 组新增回归约束均先失败后通过，FollowUp 恢复安全聚焦测试通过 29 项；`dotnet test DataSync.sln --no-restore -p:UseAppHost=false` 通过 143 项测试；Release 解决方案构建 0 警告、0 错误。
 
 2026-07-20 修复 FollowUp 恢复完成标记与立即重试竞态：影响项目为 `DataSync.LHYY.V2`，影响链路仅为单院数据库/附件恢复后的管理元数据补写和页面恢复重试；关键表仍为 `lhyy.followup_package_import_state`、`lhyy.followup_package_restore_record`、`lhyy.followup_package_import_log`，并使用既有 `BackupRoot/.restore-reconciliation` 标记，未修改数据库结构且不新增 SQL。恢复入口取得恢复专用独占租约后、登记新恢复批次前，会先同步协调同包已有的完成标记；若确认当前恢复已经完成，则只幂等补写 `Restored`、`Completed` 和恢复日志并返回成功，不把原 `Running` 审计误写为失败，也不重复执行 `pg_restore` 或附件恢复；完成标记与管理记录冲突时阻断重复恢复并要求人工检查。没有完成证明的未知结果和明确失败重试仍保持原处理方式。正常包校验、导入顺序、字段映射、ACK、首次恢复及实际数据库/附件恢复顺序不变。验证结果：2 项新增回归测试均先失败后通过，FollowUp 恢复安全聚焦测试通过 31 项；`dotnet test DataSync.sln --no-restore -p:UseAppHost=false` 通过 145 项测试；Release 解决方案构建 0 警告、0 错误。
+
+2026-07-28 修复 FollowUp 动态宽表按完整源结构校验和写入导致的无关字段误报：影响项目仅为 `DataSync.LHYY.V2`，影响链路为医院回传包的结构校验与 `target` 动态表 upsert；关键表为 `form.form_question`、`form.form_project`、`target.*`，并复用现有结构检查 JSON 和导入日志留痕。医院表单项快照优先取包内可信文件；内容 hash 与当前已导入主链头一致时才安全回退目标库。校验与写入统一限定到系统固定字段、主键和医院关联题目，未关联非空字段仅脱敏计数；限定支持“文件/选择”题目的 `ARRAY/text[] → text`。本次不修改数据库结构、不新增 SQL、不改变协议或版本；最终验证见交付记录。
 
 ## 新增或修改接口的推荐步骤
 
