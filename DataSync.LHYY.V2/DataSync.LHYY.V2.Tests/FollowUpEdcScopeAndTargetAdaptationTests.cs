@@ -71,6 +71,201 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
     }
 
     [Fact]
+    public void 无表单住院基础事件补齐目标库表单链接()
+    {
+        const string source = """
+            {"id":"33333333-3333-3333-3333-333333333333","project_id":"44444444-4444-4444-4444-444444444444","event_type":"住院","form_set_id":null,"form_set_name":null,"event_type_definition_id":null}
+            """;
+        var mapping = new FollowUpPatientEventFormMapping(
+            Guid.Parse("55555555-5555-5555-5555-555555555555"),
+            Guid.Parse("66666666-6666-6666-6666-666666666666"),
+            "住院信息");
+
+        var adapted = FollowUpTargetAdaptationService.ApplyPatientEventFormMapping(source, mapping);
+
+        using var document = JsonDocument.Parse(adapted);
+        Assert.Equal("55555555-5555-5555-5555-555555555555", document.RootElement.GetProperty("event_type_definition_id").GetString());
+        Assert.Equal("66666666-6666-6666-6666-666666666666", document.RootElement.GetProperty("form_set_id").GetString());
+        Assert.Equal("住院信息", document.RootElement.GetProperty("form_set_name").GetString());
+    }
+
+    [Fact]
+    public async Task 已有表单患者事件不查询目标映射且保持原始字段()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
+            })
+            .Build();
+        var service = new FollowUpTargetAdaptationService(configuration);
+        var source = PatientEventJson("随访", "已审核", null);
+
+        var adapted = await service.AdaptRowAsync(
+            null!,
+            null!,
+            "care",
+            "patient_event",
+            source,
+            new Dictionary<Guid, string>(),
+            new Dictionary<(Guid ProjectId, string EventType), IReadOnlyList<FollowUpPatientEventFormMapping>>(),
+            CancellationToken.None);
+
+        Assert.Equal(source, adapted);
+    }
+
+    [Fact]
+    public void 无表单基础事件缺少目标映射时阻断导入()
+    {
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.SelectPatientEventFormMapping(
+                Guid.Parse("44444444-4444-4444-4444-444444444444"),
+                "住院",
+                []));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("住院", exception.Message);
+    }
+
+    [Fact]
+    public void 无表单基础事件存在多个目标映射时阻断导入()
+    {
+        var mappings = new[]
+        {
+            new FollowUpPatientEventFormMapping(Guid.NewGuid(), Guid.NewGuid(), "住院信息一"),
+            new FollowUpPatientEventFormMapping(Guid.NewGuid(), Guid.NewGuid(), "住院信息二")
+        };
+
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.SelectPatientEventFormMapping(
+                Guid.Parse("44444444-4444-4444-4444-444444444444"),
+                "住院",
+                mappings));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("多个", exception.Message);
+    }
+
+    [Theory]
+    [InlineData("住院")]
+    [InlineData("门诊")]
+    public void 仅允许包内有关联明细的住院门诊基础事件(string eventType)
+    {
+        var eventId = Guid.NewGuid();
+
+            FollowUpTargetAdaptationService.EnsureSupportedBasePatientEvent(
+            eventId,
+            eventType,
+            new Dictionary<Guid, string> { [eventId] = eventType });
+    }
+
+    [Fact]
+    public void 无关联明细的无表单事件阻断导入()
+    {
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.EnsureSupportedBasePatientEvent(
+                Guid.NewGuid(),
+                "住院",
+                new Dictionary<Guid, string>()));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("住院/门诊明细", exception.Message);
+    }
+
+    [Fact]
+    public void 非住院门诊无表单事件阻断导入()
+    {
+        var eventId = Guid.NewGuid();
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.EnsureSupportedBasePatientEvent(
+                eventId,
+                "随访",
+                new Dictionary<Guid, string> { [eventId] = "住院" }));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("仅支持住院或门诊", exception.Message);
+    }
+
+    [Fact]
+    public void 住院事件关联门诊明细时阻断导入()
+    {
+        var eventId = Guid.NewGuid();
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.EnsureSupportedBasePatientEvent(
+                eventId,
+                "住院",
+                new Dictionary<Guid, string> { [eventId] = "门诊" }));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("关联类型不一致", exception.Message);
+    }
+
+    [Fact]
+    public void 同一基础事件同时关联住院和门诊明细时阻断导入()
+    {
+        var eventId = Guid.NewGuid();
+        var associations = new Dictionary<Guid, string>();
+        FollowUpPackageImportService.AddBasePatientEventAssociation(associations, eventId, "住院");
+
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpPackageImportService.AddBasePatientEventAssociation(associations, eventId, "门诊"));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("同时关联", exception.Message);
+    }
+
+    [Fact]
+    public void 基础事件关联批量查询同时覆盖住院和门诊目标表()
+    {
+        var sql = FollowUpPackageImportService.BuildExistingBasePatientEventTypesSql();
+
+        Assert.Contains("care.patient_hospitalized", sql);
+        Assert.Contains("care.patient_outpatient", sql);
+        Assert.Contains("ANY(@event_ids)", sql);
+        Assert.Contains("UNION ALL", sql);
+    }
+
+    [Fact]
+    public async Task 同一项目和事件类型在单次导入事务内只查询一次映射()
+    {
+        var projectId = Guid.NewGuid();
+        var calls = 0;
+        var mapping = new FollowUpPatientEventFormMapping(Guid.NewGuid(), Guid.NewGuid(), "住院信息");
+        var cache = new Dictionary<(Guid ProjectId, string EventType), IReadOnlyList<FollowUpPatientEventFormMapping>>();
+
+        async Task<IReadOnlyList<FollowUpPatientEventFormMapping>> LoadAsync()
+        {
+            calls++;
+            await Task.Yield();
+            return [mapping];
+        }
+
+        var first = await FollowUpTargetAdaptationService.GetPatientEventFormMappingsAsync(
+            cache, projectId, "住院", LoadAsync);
+        var second = await FollowUpTargetAdaptationService.GetPatientEventFormMappingsAsync(
+            cache, projectId, "住院", LoadAsync);
+
+        Assert.Same(first, second);
+        Assert.Equal(1, calls);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    public void 非空非法表单标识阻断导入(string formSetId)
+    {
+        var source = $$"""
+            {"id":"33333333-3333-3333-3333-333333333333","project_id":"44444444-4444-4444-4444-444444444444","event_type":"住院","form_set_id":"{{formSetId}}"}
+            """;
+
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.ReadOptionalGuid(source, "form_set_id", "患者事件"));
+
+        Assert.Equal(FollowUpErrorCodes.SchemaReviewRequired, exception.ErrorCode);
+        Assert.Contains("form_set_id", exception.Message);
+    }
+
+    [Fact]
     public void 患者导入目标库时将FollowUp来源适配为Care且保留其他原始字段()
     {
         var patientId = Guid.NewGuid();

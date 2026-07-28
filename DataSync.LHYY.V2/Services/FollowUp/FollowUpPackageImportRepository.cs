@@ -703,6 +703,10 @@ public sealed class FollowUpPackageImportRepository(
         await using var command = new NpgsqlCommand("""
             UPDATE lhyy.followup_package_import_state SET
                 import_status = @status, error_code = @errorCode, error_message = @errorMessage,
+                requires_schema_review = CASE
+                    WHEN @status = 'WaitingForDecision' AND @errorCode = @schemaReviewCode THEN true
+                    ELSE requires_schema_review
+                END,
                 import_summary_json = CASE WHEN @summary IS NULL THEN import_summary_json ELSE @summary::jsonb END,
                 staging_path = CASE WHEN @status IN ('BackingUp','Importing') THEN staging_path ELSE NULL END,
                 started_at = CASE WHEN @status IN ('Validating','BackingUp','Importing','Restoring') THEN COALESCE(started_at, now()) ELSE started_at END,
@@ -716,6 +720,7 @@ public sealed class FollowUpPackageImportRepository(
             """, connection);
         command.Parameters.AddWithValue("status", status);
         command.Parameters.Add(new NpgsqlParameter("errorCode", NpgsqlDbType.Text) { Value = DbValue(errorCode) });
+        command.Parameters.AddWithValue("schemaReviewCode", FollowUpErrorCodes.SchemaReviewRequired);
         command.Parameters.Add(new NpgsqlParameter("errorMessage", NpgsqlDbType.Text) { Value = DbValue(Truncate(errorMessage, 1000)) });
         command.Parameters.Add(new NpgsqlParameter("summary", NpgsqlDbType.Text) { Value = summary is null ? DBNull.Value : JsonSerializer.Serialize(summary, FollowUpJson.Options) });
         command.Parameters.AddWithValue("hospitalCode", hospitalCode);

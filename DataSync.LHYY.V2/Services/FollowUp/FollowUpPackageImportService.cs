@@ -225,12 +225,13 @@ public sealed class FollowUpPackageImportService(
             }
             try
             {
-                var failureStatus = ResolveFailureStatus(attachmentRestoreFailed);
-                await repository.MarkAsync(state.HospitalCode, state.PackageId, failureStatus, ErrorCode(ex), ex.Message, cancellationToken: CancellationToken.None);
+                var errorCode = ErrorCode(ex);
+                var failureStatus = ResolveFailureStatus(ex, attachmentRestoreFailed);
+                await repository.MarkAsync(state.HospitalCode, state.PackageId, failureStatus, errorCode, ex.Message, cancellationToken: CancellationToken.None);
                 if (package is not null)
-                    await EnqueueAckAsync(package, "ImportFailed", startedAt, ErrorCode(ex), ex.Message, CancellationToken.None);
+                    await EnqueueAckAsync(package, "ImportFailed", startedAt, errorCode, ex.Message, CancellationToken.None);
                 await repository.AddLogAsync(state.HospitalCode, state.PackageId, "import", "Error", "FollowUp 数据包导入失败",
-                    new { errorCode = ErrorCode(ex), failureStatus }, CancellationToken.None);
+                    new { errorCode, failureStatus }, CancellationToken.None);
             }
             catch (Exception recordException)
             {
@@ -271,6 +272,13 @@ public sealed class FollowUpPackageImportService(
         try
         {
             var followUpPatients = new Dictionary<Guid, FollowUpPatientSource>();
+            var basePatientEventTypes = await ResolveBasePatientEventTypesAsync(
+                package,
+                connection,
+                transaction,
+                cancellationToken);
+            var patientEventMappingCache =
+                new Dictionary<(Guid ProjectId, string EventType), IReadOnlyList<FollowUpPatientEventFormMapping>>();
             var ordered = package.TableManifest
                 .Where(item => item.Enabled && !item.Skipped && !string.IsNullOrWhiteSpace(item.ExportPath))
                 .OrderBy(item => CategoryOrder(item.DataCategory))
@@ -311,10 +319,15 @@ public sealed class FollowUpPackageImportService(
                             targetTable.TableName,
                             mappedLine) is { } patientSource)
                         followUpPatients[patientSource.PatientId] = patientSource;
-                    var adaptedLine = FollowUpTargetAdaptationService.AdaptRow(
+                    var adaptedLine = await targetAdaptationService.AdaptRowAsync(
+                        connection,
+                        transaction,
                         targetTable.Schema,
                         targetTable.TableName,
-                        mappedLine);
+                        mappedLine,
+                        basePatientEventTypes,
+                        patientEventMappingCache,
+                        cancellationToken);
                     if (table.ImportPolicy is "UseExistingById" or "RejectIfMissing")
                     {
                         if (!await ExistsAsync(connection, transaction, targetTable.Schema, targetTable.TableName, primaryKey, adaptedLine, cancellationToken))
@@ -378,6 +391,143 @@ public sealed class FollowUpPackageImportService(
         while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
             if (!string.IsNullOrWhiteSpace(line))
                 yield return line;
+    }
+
+    private static async Task<IReadOnlyDictionary<Guid, string>> ResolveBasePatientEventTypesAsync(
+        FollowUpVerifiedPackage package,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        var eventIds = await ReadFormlessPatientEventIdsAsync(package, cancellationToken);
+        var result = await LoadExistingBasePatientEventTypesAsync(
+            connection,
+            transaction,
+            eventIds,
+            cancellationToken);
+        var packageTypes = await ReadPackageBasePatientEventTypesAsync(package, eventIds, cancellationToken);
+        foreach (var (eventId, eventType) in packageTypes)
+            AddBasePatientEventAssociation(result, eventId, eventType);
+        return result;
+    }
+
+    private static async Task<HashSet<Guid>> ReadFormlessPatientEventIdsAsync(
+        FollowUpVerifiedPackage package,
+        CancellationToken cancellationToken)
+    {
+        var result = new HashSet<Guid>();
+        var eventTables = package.TableManifest.Where(item =>
+            item.Enabled
+            && !item.Skipped
+            && !string.IsNullOrWhiteSpace(item.ExportPath)
+            && item.Schema.Equals("care", StringComparison.OrdinalIgnoreCase)
+            && item.TableName.Equals("patient_event", StringComparison.OrdinalIgnoreCase));
+        foreach (var table in eventTables)
+        {
+            var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
+            await foreach (var line in ReadRowsForImportAsync(
+                               filePath,
+                               table.Schema,
+                               table.TableName,
+                               cancellationToken))
+            {
+                using var document = JsonDocument.Parse(line);
+                var root = document.RootElement;
+                if (root.TryGetProperty("form_set_id", out var formSetId)
+                    && formSetId.ValueKind != JsonValueKind.Null)
+                    continue;
+                if (!root.TryGetProperty("id", out var id)
+                    || id.ValueKind != JsonValueKind.String
+                    || !Guid.TryParse(id.GetString(), out var eventId)
+                    || eventId == Guid.Empty)
+                    throw new FollowUpPackageException(
+                        FollowUpErrorCodes.SchemaReviewRequired,
+                        "care.patient_event 包含无效的无表单事件 id。已阻止导入。");
+                result.Add(eventId);
+            }
+        }
+        return result;
+    }
+
+    private static async Task<Dictionary<Guid, string>> ReadPackageBasePatientEventTypesAsync(
+        FollowUpVerifiedPackage package,
+        IReadOnlySet<Guid> formlessEventIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, string>();
+        var detailTables = package.TableManifest.Where(item =>
+            item.Enabled
+            && !item.Skipped
+            && !string.IsNullOrWhiteSpace(item.ExportPath)
+            && item.Schema.Equals("care", StringComparison.OrdinalIgnoreCase)
+            && item.TableName is "patient_hospitalized" or "patient_outpatient");
+        foreach (var table in detailTables)
+        {
+            var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
+            await foreach (var line in ReadRowsForImportAsync(
+                               filePath,
+                               table.Schema,
+                               table.TableName,
+                               cancellationToken))
+            {
+                using var document = JsonDocument.Parse(line);
+                if (!document.RootElement.TryGetProperty("patient_event_id", out var value)
+                    || value.ValueKind != JsonValueKind.String
+                    || !Guid.TryParse(value.GetString(), out var eventId)
+                    || eventId == Guid.Empty)
+                    throw new FollowUpPackageException(
+                        FollowUpErrorCodes.SchemaReviewRequired,
+                        $"表 {table.Schema}.{table.TableName} 包含无效的 patient_event_id。已阻止导入。");
+                if (!formlessEventIds.Contains(eventId))
+                    continue;
+                var eventType = table.TableName.Equals("patient_hospitalized", StringComparison.OrdinalIgnoreCase)
+                    ? "住院"
+                    : "门诊";
+                AddBasePatientEventAssociation(result, eventId, eventType);
+            }
+        }
+        return result;
+    }
+
+    private static async Task<Dictionary<Guid, string>> LoadExistingBasePatientEventTypesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlySet<Guid> eventIds,
+        CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<Guid, string>();
+        if (eventIds.Count == 0)
+            return result;
+
+        await using var command = new NpgsqlCommand(BuildExistingBasePatientEventTypesSql(), connection, transaction);
+        command.Parameters.AddWithValue("event_ids", eventIds.ToArray());
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            AddBasePatientEventAssociation(result, reader.GetGuid(0), reader.GetString(1));
+        return result;
+    }
+
+    internal static string BuildExistingBasePatientEventTypesSql() => """
+        SELECT patient_event_id, '住院'
+        FROM care.patient_hospitalized
+        WHERE patient_event_id = ANY(@event_ids)
+        UNION ALL
+        SELECT patient_event_id, '门诊'
+        FROM care.patient_outpatient
+        WHERE patient_event_id = ANY(@event_ids)
+        """;
+
+    internal static void AddBasePatientEventAssociation(
+        IDictionary<Guid, string> associations,
+        Guid eventId,
+        string eventType)
+    {
+        if (associations.TryGetValue(eventId, out var existingType)
+            && !existingType.Equals(eventType, StringComparison.Ordinal))
+            throw new FollowUpPackageException(
+                FollowUpErrorCodes.SchemaReviewRequired,
+                $"患者事件 {eventId} 同时关联住院和门诊明细。已阻止导入。");
+        associations[eventId] = eventType;
     }
 
     private static async Task<HashSet<string>> GetWritableColumnsAsync(
@@ -467,8 +617,14 @@ public sealed class FollowUpPackageImportService(
             throw new InvalidDataException("数据文件路径逃逸 staging 目录。");
         return target;
     }
-    internal static string ResolveFailureStatus(bool attachmentRestoreFailed) =>
-        attachmentRestoreFailed ? "RestoreFailed" : "ImportFailed";
+    internal static string ResolveFailureStatus(Exception exception, bool attachmentRestoreFailed)
+    {
+        if (attachmentRestoreFailed)
+            return "RestoreFailed";
+        return ErrorCode(exception) == FollowUpErrorCodes.SchemaReviewRequired
+            ? "WaitingForDecision"
+            : "ImportFailed";
+    }
 
     internal static async Task<TResult> ExecuteCommitBoundaryAsync<TCommit, TResult>(
         Func<Task<TCommit>> commitAsync,
