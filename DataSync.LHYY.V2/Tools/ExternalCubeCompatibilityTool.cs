@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using DataSync.LHYY.V2.Services.FollowUp;
 using Npgsql;
 using NpgsqlTypes;
 using System.Text;
@@ -171,7 +172,10 @@ public static class ExternalCubeCompatibilityTool
         IReadOnlySet<string> schemasWithUsage)
     {
         var requirements = tables
-            .Select(table => Required(table.FullName, [], PrivilegesForImportPolicy(table.ImportPolicy)))
+            .Select(table => Required(
+                table.FullName,
+                [],
+                FollowUpImportPolicyPermissions.GetRequiredColumnPrivileges(table.ImportPolicy)))
             .ToArray();
         var existingTables = requirements.ToDictionary(
             item => item.Table,
@@ -192,7 +196,10 @@ public static class ExternalCubeCompatibilityTool
         CancellationToken cancellationToken)
     {
         var requirements = tables
-            .Select(table => Required(table.FullName, [], PrivilegesForImportPolicy(table.ImportPolicy)))
+            .Select(table => Required(
+                table.FullName,
+                [],
+                FollowUpImportPolicyPermissions.GetRequiredColumnPrivileges(table.ImportPolicy)))
             .ToArray();
         await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -205,14 +212,6 @@ public static class ExternalCubeCompatibilityTool
         await transaction.RollbackAsync(cancellationToken);
         return EvaluatePackageAccess(tables, privileges, schemasWithUsage);
     }
-
-    private static string[] PrivilegesForImportPolicy(string importPolicy) => importPolicy switch
-    {
-        "UseExistingById" or "RejectIfMissing" => ["SELECT"],
-        "InsertIfMissing" => ["INSERT"],
-        "Upsert" => ["INSERT", "UPDATE"],
-        _ => []
-    };
 
     private static ExternalCubeTableRequirement Required(string table, string[] columns, string[] privileges)
     {

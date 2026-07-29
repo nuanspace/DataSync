@@ -1,5 +1,6 @@
 using DataSync.LHYY.V2.Models.FollowUp;
 using DataSync.LHYY.V2.Services.FollowUp;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace DataSync.LHYY.V2.Tests;
@@ -44,6 +45,47 @@ public sealed class FollowUpStorageCleanupRecoveryTests : IDisposable
     }
 
     [Fact]
+    public async Task ReadAllAsync遇到坏清单时保留坏文件并继续返回好清单()
+    {
+        Directory.CreateDirectory(_root);
+        var store = new FollowUpStorageCleanupManifestStore(_root);
+        var good = new FollowUpStorageCleanupManifest
+        {
+            HospitalCode = "H001",
+            PackageId = "good-package"
+        };
+        await store.WriteAsync(good, CancellationToken.None);
+        var badPath = Path.Combine(_root, ".cleanup-operations", "broken.json");
+        await File.WriteAllTextAsync(badPath, "{broken-json");
+        var nullPath = Path.Combine(_root, ".cleanup-operations", "null.json");
+        await File.WriteAllTextAsync(nullPath, "null");
+
+        var manifests = await store.ReadAllAsync(CancellationToken.None);
+
+        Assert.Equal("good-package", Assert.Single(manifests).PackageId);
+        Assert.Equal("{broken-json", await File.ReadAllTextAsync(badPath));
+        Assert.Equal("null", await File.ReadAllTextAsync(nullPath));
+    }
+
+    [Fact]
+    public async Task ReadAllAsync隔离坏清单时记录包含文件路径的诊断日志()
+    {
+        Directory.CreateDirectory(_root);
+        var logger = new RecordingLogger<FollowUpStorageCleanupManifestStore>();
+        var constructor = typeof(FollowUpStorageCleanupManifestStore).GetConstructor(
+            [typeof(string), typeof(ILogger<FollowUpStorageCleanupManifestStore>)]);
+        Assert.NotNull(constructor);
+        var store = Assert.IsType<FollowUpStorageCleanupManifestStore>(constructor!.Invoke([_root, logger]));
+        var badPath = Path.Combine(_root, ".cleanup-operations", "broken.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(badPath)!);
+        await File.WriteAllTextAsync(badPath, string.Empty);
+
+        Assert.Empty(await store.ReadAllAsync(CancellationToken.None));
+        Assert.Contains(logger.Messages, message => message.Contains(badPath, StringComparison.Ordinal));
+        Assert.True(File.Exists(badPath));
+    }
+
+    [Fact]
     public void Crash_after_file_move_before_commit_restores_original_from_manifest()
     {
         Directory.CreateDirectory(_root);
@@ -78,6 +120,50 @@ public sealed class FollowUpStorageCleanupRecoveryTests : IDisposable
     }
 
     [Fact]
+    public void Archived清理发现隔离项已回到规范原路径时必须保留清单线索并阻断完成()
+    {
+        Directory.CreateDirectory(_root);
+        var original = Path.Combine(_root, "package-1.fupkg");
+        var quarantine = original + ".cleanup-op";
+        File.WriteAllText(original, "unexpected-resurrection");
+        var items = new[] { Item(original, quarantine) };
+
+        var residue = FollowUpStorageCleanupFileRecovery.DeleteQuarantine(items);
+
+        Assert.Equal(original, Assert.Single(residue));
+        Assert.True(File.Exists(original));
+        Assert.False(File.Exists(quarantine));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Archived清理发现隔离路径被替换为相反类型时不得误报删除完成(bool expectedDirectory)
+    {
+        Directory.CreateDirectory(_root);
+        var original = Path.Combine(_root, expectedDirectory ? "backup" : "package-1.fupkg");
+        var quarantine = original + ".cleanup-op";
+        if (expectedDirectory)
+            File.WriteAllText(quarantine, "unexpected-file");
+        else
+            Directory.CreateDirectory(quarantine);
+        var items = new[]
+        {
+            new FollowUpStorageCleanupManifestItem
+            {
+                OriginalPath = original,
+                QuarantinePath = quarantine,
+                IsDirectory = expectedDirectory
+            }
+        };
+
+        var residue = FollowUpStorageCleanupFileRecovery.DeleteQuarantine(items);
+
+        Assert.Equal(quarantine, Assert.Single(residue));
+        Assert.True(File.Exists(quarantine) || Directory.Exists(quarantine));
+    }
+
+    [Fact]
     public void Inconsistent_database_state_stops_instead_of_guessing()
     {
         Assert.Equal(FollowUpStorageCleanupRecoveryAction.StopForManualReview,
@@ -99,6 +185,23 @@ public sealed class FollowUpStorageCleanupRecoveryTests : IDisposable
         QuarantinePath = quarantine,
         IsDirectory = false
     };
+
+    private sealed class RecordingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Add(formatter(state, exception));
+    }
 
     public void Dispose()
     {

@@ -21,6 +21,11 @@ public sealed class FollowUpPackageRestoreService(
     internal static bool ShouldWriteTerminalState(bool restoreStateEntered, bool restoreCompleted) =>
         restoreStateEntered || restoreCompleted;
 
+    internal static bool IsRestoreCompletedException(Exception exception) =>
+        exception is FollowUpRestoreCleanupException
+        || exception is AggregateException aggregate
+        && aggregate.InnerExceptions.Any(IsRestoreCompletedException);
+
     internal static FollowUpImportOperationResult? ResolveCompletedMarkerPreflightResult(
         IReadOnlyCollection<FollowUpRestoreReconciliationResult> results)
     {
@@ -78,8 +83,20 @@ public sealed class FollowUpPackageRestoreService(
         }
         catch (Exception ex)
         {
+            var restoreCleanupFailed = IsRestoreCompletedException(ex);
+            if (!restoreCompleted && restoreCleanupFailed)
+            {
+                restoreCompleted = true;
+                restoredAt = DateTimeOffset.Now;
+                if (reconciliationMarker is not null)
+                    reconciliationMarker = reconciliationMarker with { RestoredAt = restoredAt };
+            }
             if (restoreCompleted)
-                logger.LogError(ex, "FollowUp 数据库和附件已恢复，审计记录写入失败。PackageId={PackageId}", state.PackageId);
+                logger.LogError(ex,
+                    restoreCleanupFailed
+                        ? "FollowUp 数据库和附件已恢复，但临时快照清理失败。PackageId={PackageId}"
+                        : "FollowUp 数据库和附件已恢复，审计记录写入失败。PackageId={PackageId}",
+                    state.PackageId);
             else
                 logger.LogError(ex, "FollowUp 包恢复失败。PackageId={PackageId}", state.PackageId);
             if (restoreId.HasValue)
@@ -110,8 +127,16 @@ public sealed class FollowUpPackageRestoreService(
                     {
                         await repository.MarkAsync(state.HospitalCode, state.PackageId, terminalStatus,
                             restoreCompleted ? null : FollowUpErrorCodes.InternalError,
-                            restoreCompleted ? "数据库和附件已恢复，审计记录补写失败。" : ex.Message,
-                            restoreCompleted ? new { restoredAt, auditError = ex.Message } : null,
+                            restoreCompleted
+                                ? restoreCleanupFailed
+                                    ? "数据库和附件已恢复，但临时快照清理失败，必须人工清理残留；不得重复恢复。"
+                                    : "数据库和附件已恢复，审计记录补写失败。"
+                                : ex.Message,
+                            restoreCompleted
+                                ? restoreCleanupFailed
+                                    ? new { restoredAt, cleanupError = ex.Message }
+                                    : new { restoredAt, auditError = ex.Message }
+                                : null,
                             CancellationToken.None);
                         stateWritten = true;
                     }
@@ -129,7 +154,11 @@ public sealed class FollowUpPackageRestoreService(
                     await repository.FinishRestoreAsync(
                         restoreId.Value,
                         restoreCompleted ? "Completed" : "Failed",
-                        restoreCompleted ? new { restoredAt, auditError = ex.Message } : null,
+                        restoreCompleted
+                            ? restoreCleanupFailed
+                                ? new { restoredAt, cleanupError = ex.Message }
+                                : new { restoredAt, auditError = ex.Message }
+                            : null,
                         restoreCompleted ? null : FollowUpErrorCodes.InternalError,
                         restoreCompleted ? null : ex.Message,
                         CancellationToken.None);
@@ -171,7 +200,9 @@ public sealed class FollowUpPackageRestoreService(
             }
             if (restoreCompleted)
                 return new FollowUpImportOperationResult(true,
-                    "数据库和附件恢复已完成；审计记录写入异常，请检查 DataSync 日志，无需重复恢复。",
+                    restoreCleanupFailed
+                        ? "数据库和附件恢复已完成；临时快照清理异常，请人工清理残留并检查 DataSync 日志，无需重复恢复。"
+                        : "数据库和附件恢复已完成；审计记录写入异常，请检查 DataSync 日志，无需重复恢复。",
                     FollowUpErrorCodes.InternalError);
             return new FollowUpImportOperationResult(false, ex.Message, FollowUpErrorCodes.InternalError);
         }

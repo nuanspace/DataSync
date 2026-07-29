@@ -308,7 +308,14 @@ public sealed class FollowUpPackageImportRepository(
 
         var backups = new List<FollowUpStorageCleanupBackup>();
         await using (var backupCommand = new NpgsqlCommand("""
-            SELECT id, detail_json->>'rootPath', database_backup_path, attachment_backup_path, backup_hash, backup_size_bytes
+            SELECT id,
+                   detail_json->>'rootPath',
+                   database_backup_path,
+                   attachment_backup_path,
+                   backup_hash,
+                   backup_size_bytes,
+                   detail_json->>'attachmentManifestHash',
+                   (detail_json->>'attachmentEntryCount')::integer
             FROM lhyy.followup_package_backup_record
             WHERE hospital_code = @hospitalCode
               AND package_id = @packageId
@@ -329,7 +336,9 @@ public sealed class FollowUpPackageImportRepository(
                     databasePath,
                     reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
                     reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
-                    reader.GetInt64(5)));
+                    reader.GetInt64(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetInt32(7)));
             }
         }
 
@@ -775,7 +784,12 @@ public sealed class FollowUpPackageImportRepository(
         command.Parameters.AddWithValue("attachmentPath", artifact.AttachmentBackupPath);
         command.Parameters.AddWithValue("hash", artifact.Hash);
         command.Parameters.AddWithValue("size", artifact.SizeBytes);
-        command.Parameters.AddWithValue("detail", JsonSerializer.Serialize(new { artifact.RootPath }, FollowUpJson.Options));
+        command.Parameters.AddWithValue("detail", JsonSerializer.Serialize(new
+        {
+            artifact.RootPath,
+            artifact.AttachmentManifestHash,
+            artifact.AttachmentEntryCount
+        }, FollowUpJson.Options));
         return (Guid)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -783,7 +797,14 @@ public sealed class FollowUpPackageImportRepository(
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            SELECT id, database_backup_path, attachment_backup_path, backup_hash, backup_size_bytes, detail_json->>'rootPath'
+            SELECT id,
+                   database_backup_path,
+                   attachment_backup_path,
+                   backup_hash,
+                   backup_size_bytes,
+                   detail_json->>'rootPath',
+                   detail_json->>'attachmentManifestHash',
+                   (detail_json->>'attachmentEntryCount')::integer
             FROM lhyy.followup_package_backup_record
             WHERE hospital_code = @hospitalCode AND package_id = @packageId AND backup_status = 'Completed'
             ORDER BY created_at DESC LIMIT 1
@@ -792,7 +813,15 @@ public sealed class FollowUpPackageImportRepository(
         command.Parameters.AddWithValue("packageId", packageId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        return new FollowUpBackupArtifact(reader.GetGuid(0), ReadString(reader, 5) ?? Path.GetDirectoryName(reader.GetString(1))!, reader.GetString(1), reader.GetString(2), ReadString(reader, 3) ?? "", reader.GetInt64(4));
+        return new FollowUpBackupArtifact(
+            reader.GetGuid(0),
+            ReadString(reader, 5) ?? Path.GetDirectoryName(reader.GetString(1))!,
+            reader.GetString(1),
+            reader.GetString(2),
+            ReadString(reader, 3) ?? "",
+            reader.GetInt64(4),
+            ReadString(reader, 6),
+            reader.IsDBNull(7) ? null : reader.GetInt32(7));
     }
 
     public async Task<Guid> StartRestoreAsync(

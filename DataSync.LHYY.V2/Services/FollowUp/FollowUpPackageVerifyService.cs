@@ -11,6 +11,9 @@ namespace DataSync.LHYY.V2.Services.FollowUp;
 public sealed class FollowUpPackageVerifyService
 {
     private static readonly HashSet<string> OuterEntries = ["envelope.json", "payload.bin", "signature.bin"];
+    private const int MaxChecksumsBytes = 16 * 1024 * 1024;
+    private const int MaxManifestBytes = 4 * 1024 * 1024;
+    private const int MaxSchemaMetadataBytes = 64 * 1024 * 1024;
     private readonly FollowUpPackageImportOptions _options;
 
     public FollowUpPackageVerifyService(IOptions<FollowUpPackageImportOptions> options) : this(options.Value) { }
@@ -100,31 +103,26 @@ public sealed class FollowUpPackageVerifyService
 
             var envelope = FollowUpEnvelopeParser.ParseAndValidate(envelopeBytes);
 
-            await VerifyChecksumsAsync(stagingPath, cancellationToken);
-            var manifest = await ReadJsonAsync<FollowUpPackageManifest>(Path.Combine(stagingPath, "manifest.json"), cancellationToken);
+            var verifiedMetadataFiles = await VerifyChecksumsAndCaptureMetadataAsync(
+                stagingPath,
+                cancellationToken);
+            var metadata = DeserializeVerifiedMetadata(verifiedMetadataFiles);
+            var manifest = metadata.Manifest;
             if (manifest.HospitalCode != expectedHospitalCode
                 || manifest.PackageId != envelope.PackageId
                 || manifest.PackageId != expectedPackageId
                 || expectedSequenceNo.HasValue && manifest.SequenceNo != expectedSequenceNo.Value
                 || expectedPackageType is not null && !string.Equals(manifest.PackageType, expectedPackageType, StringComparison.Ordinal))
                 throw new InvalidDataException("manifest 与待导入记录的医院、包标识、序号或包类型不一致。");
-            var snapshotPath = Path.Combine(stagingPath, "schema", "schema-snapshot.json");
-            var tableManifestPath = Path.Combine(stagingPath, "schema", "table-manifest.json");
-            var diffPath = Path.Combine(stagingPath, "schema", "schema-diff.json");
-            if (await HashFileAsync(snapshotPath, cancellationToken) != manifest.SchemaSnapshotHash
-                || await HashFileAsync(tableManifestPath, cancellationToken) != manifest.TableManifestHash
-                || await HashFileAsync(diffPath, cancellationToken) != manifest.SchemaDiffHash)
-                throw new InvalidDataException("结构文件 hash 与 manifest 不一致。");
-
             return new FollowUpVerifiedPackage(
                 packagePath,
                 actualPackageHash,
                 stagingPath,
                 envelope,
                 manifest,
-                await ReadJsonAsync<List<FollowUpTableManifestItem>>(tableManifestPath, cancellationToken),
-                await ReadJsonAsync<FollowUpSchemaSnapshot>(snapshotPath, cancellationToken),
-                await ReadJsonAsync<FollowUpSchemaDiff>(diffPath, cancellationToken));
+                metadata.TableManifest,
+                metadata.SchemaSnapshot,
+                metadata.SchemaDiff);
         }
         catch
         {
@@ -247,37 +245,104 @@ public sealed class FollowUpPackageVerifyService
         }
     }
 
-    private static async Task VerifyChecksumsAsync(string stagingPath, CancellationToken cancellationToken)
+    internal static async Task<FollowUpVerifiedMetadataFiles> VerifyChecksumsAndCaptureMetadataAsync(
+        string stagingPath,
+        CancellationToken cancellationToken)
     {
         var checksumPath = Path.Combine(stagingPath, "checksums.sha256");
         if (!File.Exists(checksumPath)) throw new InvalidDataException("内层包缺少 checksums.sha256。");
+        var checksumBytes = await ReadBoundedFileAsync(
+            checksumPath,
+            MaxChecksumsBytes,
+            "checksums.sha256",
+            cancellationToken);
+        var checksumText = Encoding.UTF8.GetString(checksumBytes).TrimStart('\uFEFF');
         var declared = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var line in await File.ReadAllLinesAsync(checksumPath, cancellationToken))
+        var metadataFiles = new Dictionary<string, byte[]>(StringComparer.Ordinal);
+        foreach (var line in checksumText.Split('\n').Select(value => value.TrimEnd('\r')))
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
             var separator = line.IndexOf("  ", StringComparison.Ordinal);
             if (separator != 64) throw new InvalidDataException("checksums.sha256 格式无效。");
             var expected = line[..separator];
+            if (expected.Any(value => !Uri.IsHexDigit(value)))
+                throw new InvalidDataException("checksums.sha256 格式无效。");
             var relative = NormalizeChecksumPath(line[(separator + 2)..]);
             if (!declared.Add(relative)) throw new InvalidDataException("checksums.sha256 包含重复文件。");
             var path = SafeStagingFilePath(stagingPath, relative);
-            if (!File.Exists(path) || await HashFileAsync(path, cancellationToken) != expected)
+            if (!File.Exists(path))
                 throw new InvalidDataException($"内层文件校验失败：{relative}");
+            if (TryGetMetadataSizeLimit(relative, out var maxBytes))
+            {
+                var bytes = await ReadBoundedFileAsync(path, maxBytes, relative, cancellationToken);
+                if (!Hash(bytes).Equals(expected, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"内层文件校验失败：{relative}");
+                metadataFiles[relative] = bytes;
+            }
+            else if (!string.Equals(
+                         await HashFileAsync(path, cancellationToken),
+                         expected,
+                         StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"内层文件校验失败：{relative}");
+            }
         }
         var actual = Directory.EnumerateFiles(stagingPath, "*", SearchOption.AllDirectories)
             .Select(path => Path.GetRelativePath(stagingPath, path))
             .Where(path => !string.Equals(path, "checksums.sha256", StringComparison.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
         if (!actual.SetEquals(declared)) throw new InvalidDataException("内层包包含未声明文件或清单缺项。");
+
+        return new FollowUpVerifiedMetadataFiles(
+            GetRequiredMetadata(metadataFiles, "manifest.json"),
+            GetRequiredMetadata(metadataFiles, Path.Combine("schema", "schema-snapshot.json")),
+            GetRequiredMetadata(metadataFiles, Path.Combine("schema", "table-manifest.json")),
+            GetRequiredMetadata(metadataFiles, Path.Combine("schema", "schema-diff.json")));
     }
 
-    private static async Task<T> ReadJsonAsync<T>(string path, CancellationToken cancellationToken)
+    internal static FollowUpVerifiedMetadata DeserializeVerifiedMetadata(
+        FollowUpVerifiedMetadataFiles files)
     {
-        if (!File.Exists(path)) throw new InvalidDataException($"内层包缺少 {Path.GetFileName(path)}。");
-        await using var stream = File.OpenRead(path);
-        return await JsonSerializer.DeserializeAsync<T>(stream, FollowUpJson.Options, cancellationToken)
-            ?? throw new InvalidDataException($"{Path.GetFileName(path)} 内容为空。");
+        var manifest = DeserializeJson<FollowUpPackageManifest>(files.Manifest, "manifest.json");
+        if (!Hash(files.SchemaSnapshot).Equals(manifest.SchemaSnapshotHash, StringComparison.OrdinalIgnoreCase)
+            || !Hash(files.TableManifest).Equals(manifest.TableManifestHash, StringComparison.OrdinalIgnoreCase)
+            || !Hash(files.SchemaDiff).Equals(manifest.SchemaDiffHash, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("结构文件 hash 与 manifest 不一致。");
+        return new FollowUpVerifiedMetadata(
+            manifest,
+            DeserializeJson<List<FollowUpTableManifestItem>>(files.TableManifest, "table-manifest.json"),
+            DeserializeJson<FollowUpSchemaSnapshot>(files.SchemaSnapshot, "schema-snapshot.json"),
+            DeserializeJson<FollowUpSchemaDiff>(files.SchemaDiff, "schema-diff.json"));
     }
+
+    private static T DeserializeJson<T>(byte[] bytes, string fileName) =>
+        JsonSerializer.Deserialize<T>(bytes, FollowUpJson.Options)
+        ?? throw new InvalidDataException($"{fileName} 内容为空。");
+
+    private static bool TryGetMetadataSizeLimit(string relative, out int maxBytes)
+    {
+        if (relative.Equals("manifest.json", StringComparison.Ordinal))
+        {
+            maxBytes = MaxManifestBytes;
+            return true;
+        }
+        if (relative.Equals(Path.Combine("schema", "schema-snapshot.json"), StringComparison.Ordinal)
+            || relative.Equals(Path.Combine("schema", "table-manifest.json"), StringComparison.Ordinal)
+            || relative.Equals(Path.Combine("schema", "schema-diff.json"), StringComparison.Ordinal))
+        {
+            maxBytes = MaxSchemaMetadataBytes;
+            return true;
+        }
+        maxBytes = 0;
+        return false;
+    }
+
+    private static byte[] GetRequiredMetadata(
+        IReadOnlyDictionary<string, byte[]> metadataFiles,
+        string relative) =>
+        metadataFiles.TryGetValue(relative, out var bytes)
+            ? bytes
+            : throw new InvalidDataException($"内层包缺少 {Path.GetFileName(relative)}。");
 
     private static string NormalizeChecksumPath(string relative)
     {
@@ -311,6 +376,36 @@ public sealed class FollowUpPackageVerifyService
         return output.ToArray();
     }
 
+    private static async Task<byte[]> ReadBoundedFileAsync(
+        string path,
+        int maxBytes,
+        string displayName,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        if (stream.Length < 0 || stream.Length > maxBytes)
+            throw new InvalidDataException($"内层元数据文件 {displayName} 超过限制。");
+        using var output = new MemoryStream((int)stream.Length);
+        var buffer = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+        {
+            if (output.Length + read > maxBytes)
+                throw new InvalidDataException($"内层元数据文件 {displayName} 超过限制。");
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+        return output.ToArray();
+    }
+
+    private static string Hash(byte[] value) =>
+        Convert.ToHexString(SHA256.HashData(value)).ToLowerInvariant();
+
     private static async Task<string> HashFileAsync(string path, CancellationToken cancellationToken)
     {
         await using var stream = File.OpenRead(path);
@@ -322,3 +417,15 @@ public sealed class FollowUpPackageVerifyService
         if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 }
+
+internal sealed record FollowUpVerifiedMetadataFiles(
+    byte[] Manifest,
+    byte[] SchemaSnapshot,
+    byte[] TableManifest,
+    byte[] SchemaDiff);
+
+internal sealed record FollowUpVerifiedMetadata(
+    FollowUpPackageManifest Manifest,
+    List<FollowUpTableManifestItem> TableManifest,
+    FollowUpSchemaSnapshot SchemaSnapshot,
+    FollowUpSchemaDiff SchemaDiff);

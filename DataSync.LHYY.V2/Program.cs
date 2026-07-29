@@ -14,6 +14,7 @@ using DataSync.LHYY.V2.Tools;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Options;
 using MudBlazor;
 using MudBlazor.Services;
 using NLog;
@@ -150,6 +151,9 @@ public class Program
             builder.Services.AddScoped<FollowUpPackageBackupService>();
             builder.Services.AddScoped<FollowUpPackageImportService>();
             builder.Services.AddScoped<FollowUpPackageRestoreService>();
+            builder.Services.AddSingleton(sp => new FollowUpStorageCleanupManifestStore(
+                sp.GetRequiredService<IOptions<FollowUpPackageImportOptions>>().Value.PackageRoot,
+                sp.GetRequiredService<ILogger<FollowUpStorageCleanupManifestStore>>()));
             builder.Services.AddScoped<FollowUpHospitalStorageService>();
             builder.Services.AddHostedService<FollowUpStorageCleanupReconciliationWorker>();
             builder.Services.AddSingleton<FollowUpRestoreCompletionStore>();

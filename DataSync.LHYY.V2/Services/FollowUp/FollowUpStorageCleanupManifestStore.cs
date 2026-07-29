@@ -2,16 +2,26 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using DataSync.LHYY.V2.Models.FollowUp;
+using Microsoft.Extensions.Logging;
 
 namespace DataSync.LHYY.V2.Services.FollowUp;
 
 public sealed class FollowUpStorageCleanupManifestStore
 {
     private readonly string _root;
+    private readonly ILogger<FollowUpStorageCleanupManifestStore>? _logger;
 
     public FollowUpStorageCleanupManifestStore(string packageRoot)
+        : this(packageRoot, logger: null)
+    {
+    }
+
+    public FollowUpStorageCleanupManifestStore(
+        string packageRoot,
+        ILogger<FollowUpStorageCleanupManifestStore>? logger)
     {
         _root = Path.Combine(Path.GetFullPath(packageRoot), ".cleanup-operations");
+        _logger = logger;
     }
 
     public string GetPath(string hospitalCode, string packageId)
@@ -63,10 +73,27 @@ public sealed class FollowUpStorageCleanupManifestStore
         var manifests = new List<FollowUpStorageCleanupManifest>();
         foreach (var path in Directory.EnumerateFiles(_root, "*.json", SearchOption.TopDirectoryOnly))
         {
-            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            manifests.Add(await JsonSerializer.DeserializeAsync<FollowUpStorageCleanupManifest>(stream,
-                cancellationToken: cancellationToken)
-                ?? throw new InvalidDataException($"存储清理操作清单为空：{path}"));
+            try
+            {
+                await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                manifests.Add(await JsonSerializer.DeserializeAsync<FollowUpStorageCleanupManifest>(stream,
+                    cancellationToken: cancellationToken)
+                    ?? throw new InvalidDataException($"存储清理操作清单为空：{path}"));
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is JsonException
+                                              or IOException
+                                              or InvalidDataException
+                                              or UnauthorizedAccessException)
+            {
+                _logger?.LogError(
+                    exception,
+                    "存储清理操作清单无法读取，已保留原文件供人工处置并继续扫描其他清单。Path={Path}",
+                    path);
+            }
         }
         return manifests;
     }
@@ -112,14 +139,47 @@ public static class FollowUpStorageCleanupFileRecovery
         {
             try
             {
+                if (PathEntryExists(item.OriginalPath))
+                {
+                    errors.Add(item.OriginalPath);
+                    continue;
+                }
+
                 if (item.IsDirectory && Directory.Exists(item.QuarantinePath))
                     Directory.Delete(item.QuarantinePath, recursive: true);
                 else if (!item.IsDirectory && File.Exists(item.QuarantinePath))
                     File.Delete(item.QuarantinePath);
+
+                if (PathEntryExists(item.OriginalPath))
+                    errors.Add(item.OriginalPath);
+                else if (PathEntryExists(item.QuarantinePath))
+                    errors.Add(item.QuarantinePath);
             }
-            catch { errors.Add(item.QuarantinePath); }
+            catch
+            {
+                errors.Add(PathEntryExists(item.OriginalPath)
+                    ? item.OriginalPath
+                    : item.QuarantinePath);
+            }
         }
         return errors;
+    }
+
+    private static bool PathEntryExists(string path)
+    {
+        FileSystemInfo[] candidates = [new DirectoryInfo(path), new FileInfo(path)];
+        foreach (var candidate in candidates)
+        {
+            try
+            {
+                candidate.Refresh();
+                if (candidate.Exists || candidate.LinkTarget is not null)
+                    return true;
+            }
+            catch (FileNotFoundException) { }
+            catch (DirectoryNotFoundException) { }
+        }
+        return false;
     }
 }
 

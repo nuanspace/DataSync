@@ -121,11 +121,24 @@ public static class FollowUpStorageInspector
         var current = fullPath;
         while (true)
         {
-            if (File.Exists(current) || Directory.Exists(current))
+            FileSystemInfo[] candidates = [new DirectoryInfo(current), new FileInfo(current)];
+            foreach (var candidate in candidates)
             {
-                var attributes = File.GetAttributes(current);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("受控清理路径不允许包含符号链接或重解析点。");
+                try
+                {
+                    candidate.Refresh();
+                    if (candidate.LinkTarget is not null
+                        || candidate.Exists && candidate.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                        throw new InvalidOperationException("受控清理路径不允许包含符号链接或重解析点。");
+                }
+                catch (FileNotFoundException)
+                {
+                    // 尚未创建的普通路径组件允许继续校验其父目录。
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    // 尚未创建的普通路径组件允许继续校验其父目录。
+                }
             }
 
             if (current.Equals(fullRoot, PathComparison)) break;

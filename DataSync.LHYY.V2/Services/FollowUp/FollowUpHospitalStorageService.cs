@@ -8,11 +8,13 @@ namespace DataSync.LHYY.V2.Services.FollowUp;
 public sealed class FollowUpHospitalStorageService(
     FollowUpPackageImportRepository repository,
     FollowUpCubeOperationCoordinator operationCoordinator,
+    FollowUpPackageBackupService backupService,
+    FollowUpStorageCleanupManifestStore manifestStore,
     IOptions<FollowUpPackageImportOptions> options,
     ILogger<FollowUpHospitalStorageService> logger)
 {
     private readonly FollowUpPackageImportOptions _options = options.Value;
-    private readonly FollowUpStorageCleanupManifestStore _manifestStore = new(options.Value.PackageRoot);
+    private readonly FollowUpStorageCleanupManifestStore _manifestStore = manifestStore;
 
     public List<FollowUpStorageStatus> GetStorageStatus() =>
     [
@@ -62,20 +64,20 @@ public sealed class FollowUpHospitalStorageService(
                 state.PackageId,
                 async preparedCandidate =>
                 {
-                    await ValidateCandidateAsync(preparedCandidate, CancellationToken.None);
                     manifest.Candidate = preparedCandidate;
                     manifest.Items = BuildManifestItems(preparedCandidate, manifest.OperationId);
+                    ValidateManifestStructure(manifest);
+                    manifest.Phase = FollowUpStorageCleanupPhase.MovingFiles;
                     await _manifestStore.WriteAsync(manifest, CancellationToken.None);
+                    foreach (var item in manifest.Items) MoveToQuarantine(item);
+                    manifest.Phase = FollowUpStorageCleanupPhase.FilesQuarantined;
+                    await _manifestStore.WriteAsync(manifest, CancellationToken.None);
+                    await ValidateQuarantinedCandidateAsync(
+                        preparedCandidate,
+                        manifest.Items,
+                        CancellationToken.None);
                 },
                 cancellationToken);
-            manifest.Phase = FollowUpStorageCleanupPhase.DatabasePrepared;
-            await _manifestStore.WriteAsync(manifest, CancellationToken.None);
-
-            manifest.Phase = FollowUpStorageCleanupPhase.MovingFiles;
-            await _manifestStore.WriteAsync(manifest, CancellationToken.None);
-            foreach (var item in manifest.Items) MoveToQuarantine(item);
-            manifest.Phase = FollowUpStorageCleanupPhase.FilesQuarantined;
-            await _manifestStore.WriteAsync(manifest, CancellationToken.None);
 
             try
             {
@@ -93,16 +95,26 @@ public sealed class FollowUpHospitalStorageService(
 
             manifest.Phase = FollowUpStorageCleanupPhase.DatabaseArchived;
             await _manifestStore.WriteAsync(manifest, CancellationToken.None);
+            ValidateManifestStructure(manifest);
             var residue = FollowUpStorageCleanupFileRecovery.DeleteQuarantine(manifest.Items);
+            var originalResidue = residue
+                .Where(path => manifest.Items.Any(item => item.OriginalPath.Equals(path, PathComparison)))
+                .ToArray();
             if (residue.Count == 0) _manifestStore.Delete(manifest.HospitalCode, manifest.PackageId);
             else
                 await repository.AddLogAsync(candidate.HospitalCode, candidate.PackageId,
-                    "storage-cleanup-residue", "Error", "业务记录已归档，但隔离文件删除失败",
+                    originalResidue.Length == 0 ? "storage-cleanup-residue" : "storage-cleanup-manual-review",
+                    "Error",
+                    originalResidue.Length == 0
+                        ? "业务记录已归档，但隔离文件删除失败"
+                        : "业务记录已归档，但规范原路径重新出现，必须人工处理",
                     new { residue }, CancellationToken.None);
 
-            return new FollowUpImportOperationResult(true, residue.Count == 0
+            return new FollowUpImportOperationResult(originalResidue.Length == 0, residue.Count == 0
                 ? "旧包文件和对应备份已安全清理，链路与审计记录已保留。"
-                : $"包与备份已归档，但有 {residue.Count} 个隔离项将在后台重试删除。");
+                : originalResidue.Length > 0
+                    ? $"包与备份已归档，但有 {originalResidue.Length} 个规范原路径重新出现；已保留清理清单，必须人工处理。"
+                    : $"包与备份已归档，但有 {residue.Count} 个隔离项将在后台重试删除。");
         }
         catch (Exception ex)
         {
@@ -178,6 +190,9 @@ public sealed class FollowUpHospitalStorageService(
 
         var restoreErrors = FollowUpStorageCleanupFileRecovery.Restore(manifest.Items);
         if (restoreErrors.Count > 0) return false;
+        // 隔离项可能在进程中断后被替换成链接；移动完成后必须再次确认规范原路径仍受控。
+        ValidateManifestStructure(manifest);
+        await ValidateRestoredCandidateAsync(manifest, cancellationToken);
         if (recoveryAction == FollowUpStorageCleanupRecoveryAction.RestoreFilesAndCancelDatabase)
         {
             if (manifest.Candidate is null) return false;
@@ -226,42 +241,137 @@ public sealed class FollowUpHospitalStorageService(
         {
             throw new InvalidDataException("存储清理操作清单中的隔离路径与候选记录不一致。");
         }
+
+        foreach (var item in manifest.Items)
+            ValidateQuarantinePath(item);
     }
 
-    private async Task ValidateCandidateAsync(
+    private void ValidateQuarantinePath(FollowUpStorageCleanupManifestItem item)
+    {
+        if (item.IsDirectory)
+        {
+            FollowUpStorageInspector.ValidateManagedDirectory(_options.BackupRoot, item.QuarantinePath);
+            return;
+        }
+
+        FollowUpStorageInspector.ValidateManagedFile(
+            _options.PackageRoot,
+            item.QuarantinePath,
+            Path.GetExtension(item.QuarantinePath));
+    }
+
+    private async Task ValidateQuarantinedCandidateAsync(
         FollowUpStorageCleanupCandidate candidate,
+        IReadOnlyList<FollowUpStorageCleanupManifestItem> items,
         CancellationToken cancellationToken)
     {
-        var packagePath = FollowUpStorageInspector.ValidateManagedFile(
-            _options.PackageRoot, candidate.PackagePath, ".fupkg");
-        var canonicalPath = Path.GetFullPath(Path.Combine(_options.PackageRoot, $"{candidate.PackageId}.fupkg"));
-        if (!packagePath.Equals(canonicalPath, PathComparison))
-            throw new InvalidDataException("待清理的数据包不是医院包仓库中的规范 packageId.fupkg 路径。");
-        if (!File.Exists(packagePath)) throw new FileNotFoundException("待清理的数据包文件不存在。", packagePath);
-        if (!string.Equals(await HashFileAsync(packagePath, cancellationToken), candidate.PackageHash,
+        if (items.Count != candidate.Backups.Count + 1)
+            throw new InvalidDataException("隔离项数量与清理候选记录不一致。");
+        foreach (var item in items)
+            ValidateQuarantinePath(item);
+        await ValidateCandidateAtPathsAsync(
+            candidate,
+            items[0].QuarantinePath,
+            items.Skip(1).Select(item => item.QuarantinePath).ToArray(),
+            cancellationToken);
+    }
+
+    private async Task ValidateRestoredCandidateAsync(
+        FollowUpStorageCleanupManifest manifest,
+        CancellationToken cancellationToken)
+    {
+        var candidate = manifest.Candidate
+                        ?? throw new InvalidDataException("存储清理操作清单缺少候选记录。");
+        foreach (var item in manifest.Items)
+        {
+            var originalExists = item.IsDirectory
+                ? Directory.Exists(item.OriginalPath)
+                : File.Exists(item.OriginalPath);
+            if (!originalExists || File.Exists(item.QuarantinePath) || Directory.Exists(item.QuarantinePath))
+                throw new InvalidDataException("清理对象没有完整恢复到规范原路径，拒绝取消数据库准备态。");
+        }
+
+        await ValidateCandidateAtPathsAsync(
+            candidate,
+            manifest.Items[0].OriginalPath,
+            manifest.Items.Skip(1).Select(item => item.OriginalPath).ToArray(),
+            cancellationToken);
+    }
+
+    private async Task ValidateCandidateAtPathsAsync(
+        FollowUpStorageCleanupCandidate candidate,
+        string packagePath,
+        IReadOnlyList<string> backupRootPaths,
+        CancellationToken cancellationToken)
+    {
+        if (backupRootPaths.Count != candidate.Backups.Count)
+            throw new InvalidDataException("备份路径数量与清理候选记录不一致。");
+        if (!File.Exists(packagePath))
+            throw new FileNotFoundException("待校验的数据包文件不存在。", packagePath);
+        if (!string.Equals(
+                await HashFileAsync(packagePath, cancellationToken),
+                candidate.PackageHash,
                 StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("待清理的数据包 hash 与导入记录不一致。");
-        foreach (var backup in candidate.Backups) await ValidateBackupAsync(candidate, backup, cancellationToken);
+            throw new InvalidDataException("待校验的数据包 hash 与导入记录不一致。");
+
+        for (var index = 0; index < candidate.Backups.Count; index++)
+            await ValidateBackupAtRootAsync(
+                candidate.Backups[index],
+                backupRootPaths[index],
+                cancellationToken);
     }
 
-    private async Task ValidateBackupAsync(
-        FollowUpStorageCleanupCandidate candidate,
+    private async Task ValidateBackupAtRootAsync(
         FollowUpStorageCleanupBackup backup,
+        string backupRootPath,
         CancellationToken cancellationToken)
     {
-        var expectedRoot = Path.Combine(Path.GetFullPath(_options.BackupRoot), candidate.HospitalCode,
-            candidate.PackageId, backup.RecordId.ToString("N"));
-        var root = FollowUpStorageInspector.ValidateManagedDirectory(_options.BackupRoot, backup.RootPath);
-        if (!root.Equals(Path.GetFullPath(expectedRoot), PathComparison))
-            throw new InvalidDataException("备份目录与备份记录不一致。");
-        if (!Directory.Exists(root)) throw new DirectoryNotFoundException($"备份目录不存在：{root}");
-        var databasePath = FollowUpStorageInspector.ValidateManagedFile(root, backup.DatabaseBackupPath, ".dump");
-        var attachmentPath = FollowUpStorageInspector.ValidateManagedDirectory(root, backup.AttachmentBackupPath);
-        if (!File.Exists(databasePath) || !File.Exists(Path.Combine(attachmentPath, "attachment-backup.json")))
-            throw new InvalidDataException("备份数据库或附件备份清单缺失，拒绝静默清理。");
+        var originalRoot = Path.GetFullPath(backup.RootPath);
+        var root = FollowUpStorageInspector.ValidateManagedDirectory(
+            _options.BackupRoot,
+            backupRootPath);
+        if (!Directory.Exists(root))
+            throw new DirectoryNotFoundException($"待校验的备份目录不存在：{root}");
+        var databasePath = FollowUpStorageInspector.ValidateManagedFile(
+            root,
+            RebaseQuarantinedPath(originalRoot, root, backup.DatabaseBackupPath),
+            ".dump");
+        var attachmentPath = FollowUpStorageInspector.ValidateManagedDirectory(
+            root,
+            RebaseQuarantinedPath(originalRoot, root, backup.AttachmentBackupPath));
+        if (!File.Exists(databasePath))
+            throw new InvalidDataException("待校验的备份数据库缺失，拒绝静默清理。");
         if (!string.Equals(await HashFileAsync(databasePath, cancellationToken), backup.Hash,
                 StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("备份数据库 hash 校验失败，拒绝清理。");
+            throw new InvalidDataException("待校验的备份数据库 hash 校验失败，拒绝清理。");
+        await backupService.ValidateRegisteredAttachmentBackupAsync(
+            new FollowUpBackupArtifact(
+                backup.RecordId,
+                root,
+                databasePath,
+                attachmentPath,
+                backup.Hash,
+                backup.SizeBytes,
+                backup.AttachmentManifestHash,
+                backup.AttachmentEntryCount),
+            afterManifestRead: null,
+            cancellationToken);
+    }
+
+    private static string RebaseQuarantinedPath(
+        string originalRoot,
+        string quarantineRoot,
+        string originalPath)
+    {
+        var relativePath = Path.GetRelativePath(
+            Path.GetFullPath(originalRoot),
+            Path.GetFullPath(originalPath));
+        if (Path.IsPathRooted(relativePath)
+            || relativePath.Equals("..", StringComparison.Ordinal)
+            || relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            || relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal))
+            throw new InvalidDataException("备份子路径无法安全映射到隔离目录。");
+        return Path.GetFullPath(Path.Combine(quarantineRoot, relativePath));
     }
 
     private static List<FollowUpStorageCleanupManifestItem> BuildManifestItems(

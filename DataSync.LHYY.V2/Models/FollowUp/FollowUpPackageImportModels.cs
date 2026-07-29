@@ -165,7 +165,9 @@ public sealed record FollowUpBackupArtifact(
     string DatabaseBackupPath,
     string AttachmentBackupPath,
     string Hash,
-    long SizeBytes);
+    long SizeBytes,
+    string? AttachmentManifestHash = null,
+    int? AttachmentEntryCount = null);
 
 public sealed class FollowUpPackageImportOverview
 {
@@ -189,7 +191,9 @@ public sealed record FollowUpStorageCleanupBackup(
     string DatabaseBackupPath,
     string AttachmentBackupPath,
     string Hash,
-    long SizeBytes);
+    long SizeBytes,
+    string? AttachmentManifestHash = null,
+    int? AttachmentEntryCount = null);
 
 public sealed record FollowUpStorageCleanupCandidate(
     string HospitalCode,

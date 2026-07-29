@@ -1,3 +1,4 @@
+using DataSync.Common.FollowUp;
 using DataSync.LHYY.V2.Models.FollowUp;
 using DataSync.LHYY.V2.Services.FollowUp;
 using System.IO.Compression;
@@ -122,6 +123,28 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
         Assert.Contains("路径", exception.Message);
     }
 
+    [Fact]
+    public async Task 元数据路径在校验后被替换时仍反序列化已校验字节()
+    {
+        var stagingPath = Path.Combine(_root, "metadata-snapshot");
+        var original = CreateMetadataFiles("pkg-original");
+        await WriteMetadataFilesAsync(stagingPath, original);
+
+        var verifiedFiles = await FollowUpPackageVerifyService.VerifyChecksumsAndCaptureMetadataAsync(
+            stagingPath,
+            CancellationToken.None);
+
+        var replacement = CreateMetadataFiles("pkg-replacement");
+        await ReplaceMetadataFilesAsync(stagingPath, replacement);
+        var metadata = FollowUpPackageVerifyService.DeserializeVerifiedMetadata(verifiedFiles);
+
+        Assert.Equal("pkg-original", metadata.Manifest.PackageId);
+        var replacementManifest = JsonSerializer.Deserialize<FollowUpPackageManifest>(
+            await File.ReadAllBytesAsync(Path.Combine(stagingPath, "manifest.json")),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal("pkg-replacement", replacementManifest!.PackageId);
+    }
+
     private async Task<PackageFixture> CreatePackageAsync(
         bool tamperSignature,
         bool addTraversalEntry,
@@ -231,6 +254,87 @@ public sealed class FollowUpPackageVerifyServiceTests : IDisposable
 
     private static string ComputeKeyId(RSA rsa)
         => $"rsa-sha256-{Convert.ToHexString(SHA256.HashData(rsa.ExportSubjectPublicKeyInfo()))[..16].ToLowerInvariant()}";
+
+    private static Dictionary<string, byte[]> CreateMetadataFiles(string packageId)
+    {
+        var schemaSnapshot = JsonSerializer.SerializeToUtf8Bytes(
+            new FollowUpSchemaSnapshot
+            {
+                ExportContractVersion = "1.0",
+                SourceDbFingerprint = packageId,
+                GeneratedAt = DateTimeOffset.Parse("2026-07-14T10:00:00+08:00")
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var tableManifest = JsonSerializer.SerializeToUtf8Bytes(
+            new List<FollowUpTableManifestItem>(),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var schemaDiff = JsonSerializer.SerializeToUtf8Bytes(
+            new FollowUpSchemaDiff
+            {
+                DiffLevel = "Compatible",
+                Recommendation = "direct-import",
+                SnapshotHash = packageId
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var manifest = JsonSerializer.SerializeToUtf8Bytes(
+            new FollowUpPackageManifest
+            {
+                HospitalCode = "H1",
+                HospitalId = Guid.NewGuid(),
+                PackageId = packageId,
+                SequenceNo = 1,
+                PackageType = "Baseline",
+                ToWatermark = new DateTime(2026, 7, 14, 10, 0, 0),
+                GeneratedAt = DateTimeOffset.Parse("2026-07-14T10:00:00+08:00"),
+                ExportContractVersion = "1.0",
+                MinImporterVersion = "1.0.0",
+                SourceDbFingerprint = packageId,
+                SchemaSnapshotHash = Hash(schemaSnapshot),
+                TableManifestHash = Hash(tableManifest),
+                SchemaDiffHash = Hash(schemaDiff)
+            },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        return new Dictionary<string, byte[]>
+        {
+            ["manifest.json"] = manifest,
+            ["schema/schema-snapshot.json"] = schemaSnapshot,
+            ["schema/table-manifest.json"] = tableManifest,
+            ["schema/schema-diff.json"] = schemaDiff
+        };
+    }
+
+    private static async Task WriteMetadataFilesAsync(
+        string stagingPath,
+        IReadOnlyDictionary<string, byte[]> files)
+    {
+        Directory.CreateDirectory(stagingPath);
+        foreach (var file in files)
+        {
+            var path = Path.Combine(stagingPath, file.Key.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            await File.WriteAllBytesAsync(path, file.Value);
+        }
+        var checksums = string.Join(
+            "\n",
+            files.OrderBy(item => item.Key).Select(item => $"{Hash(item.Value)}  {item.Key}")) + "\n";
+        await File.WriteAllTextAsync(
+            Path.Combine(stagingPath, "checksums.sha256"),
+            checksums,
+            new UTF8Encoding(false));
+    }
+
+    private static async Task ReplaceMetadataFilesAsync(
+        string stagingPath,
+        IReadOnlyDictionary<string, byte[]> files)
+    {
+        foreach (var file in files)
+        {
+            var path = Path.Combine(stagingPath, file.Key.Replace('/', Path.DirectorySeparatorChar));
+            var replacementPath = path + ".replacement";
+            await File.WriteAllBytesAsync(replacementPath, file.Value);
+            File.Move(replacementPath, path, overwrite: true);
+        }
+    }
 
     public void Dispose()
     {

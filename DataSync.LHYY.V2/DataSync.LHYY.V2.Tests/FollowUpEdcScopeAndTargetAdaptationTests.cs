@@ -3,6 +3,8 @@ using DataSync.LHYY.V2.Models.FollowUp;
 using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Xunit;
 
@@ -421,6 +423,61 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
     }
 
     [Fact]
+    public async Task EDC范围读取在数据文件hash不符时阻断()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"followup-edc-hash-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string relativePath = "data/public_patient.jsonl";
+            var filePath = Path.Combine(root, "data", "public_patient.jsonl");
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            await File.WriteAllTextAsync(filePath, "{}\n", new UTF8Encoding(false));
+            var package = CreateVerifiedPackage(root, relativePath, new string('0', 64));
+            var service = CreateEdcScopeService();
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                service.PrepareAsync(package, null, CancellationToken.None));
+
+            Assert.Contains("hash", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task EDC范围读取在清单生成后路径被替换时阻断()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"followup-edc-replace-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            const string relativePath = "data/public_patient.jsonl";
+            var filePath = Path.Combine(root, "data", "public_patient.jsonl");
+            Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
+            var original = Encoding.UTF8.GetBytes("{}\n");
+            await File.WriteAllBytesAsync(filePath, original);
+            var expectedHash = Convert.ToHexString(SHA256.HashData(original)).ToLowerInvariant();
+            var package = CreateVerifiedPackage(root, relativePath, expectedHash);
+
+            var replacementPath = Path.Combine(root, "replacement.jsonl");
+            await File.WriteAllTextAsync(replacementPath, "{\"name\":\"replacement\"}\n", new UTF8Encoding(false));
+            File.Move(replacementPath, filePath, overwrite: true);
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                CreateEdcScopeService().PrepareAsync(package, null, CancellationToken.None));
+
+            Assert.Contains("hash", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void 仅含小写EDC表单集的增量也生成项目级权限计划()
     {
         var projectId = Guid.NewGuid();
@@ -542,5 +599,40 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
             {"id":"33333333-3333-3333-3333-333333333333","event_type":"{{eventType}}","event_status":"{{status}}","input_time":{{inputTimeJson}},"is_valid":true,"task_name":"基础信息","form_set_id":"11111111-1111-1111-1111-111111111111","form_set_name":"测试表单","event_type_definition_id":"22222222-2222-2222-2222-222222222222"}
             """;
     }
+
+    private static FollowUpEdcScopeService CreateEdcScopeService()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
+            })
+            .Build();
+        return new FollowUpEdcScopeService(configuration);
+    }
+
+    private static FollowUpVerifiedPackage CreateVerifiedPackage(
+        string stagingPath,
+        string exportPath,
+        string fileHash) =>
+        new(
+            "package.fupkg",
+            new string('0', 64),
+            stagingPath,
+            new FollowUpEncryptedEnvelope(),
+            new FollowUpPackageManifest(),
+            [
+                new FollowUpTableManifestItem
+                {
+                    Schema = "public",
+                    TableName = "patient",
+                    Enabled = true,
+                    ExportPath = exportPath,
+                    FileHash = fileHash,
+                    RecordCount = 1
+                }
+            ],
+            new FollowUpSchemaSnapshot(),
+            new FollowUpSchemaDiff());
 
 }

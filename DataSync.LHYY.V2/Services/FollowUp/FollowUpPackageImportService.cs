@@ -3,6 +3,7 @@ using DataSync.LHYY.V2.Models.FollowUp;
 using Microsoft.Extensions.Options;
 using Npgsql;
 using System.Runtime.CompilerServices;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace DataSync.LHYY.V2.Services.FollowUp;
@@ -53,6 +54,9 @@ public sealed class FollowUpPackageImportService(
         FollowUpVerifiedPackage? package = null;
         FollowUpBackupArtifact? backup = null;
         var importCommitted = false;
+        var commitAttempted = false;
+        var commitOutcomeUnknown = false;
+        var installedAttachments = new List<FollowUpAttachmentMutation>();
         var attachmentRestoreFailed = false;
         try
         {
@@ -123,6 +127,48 @@ public sealed class FollowUpPackageImportService(
                 return new FollowUpImportOperationResult(false, $"结构校验结果：{schemaCheck.DiffLevel}", FollowUpErrorCodes.SchemaReviewRequired);
             }
 
+            TargetQuestionScopeGuard? targetQuestionScopeGuard = null;
+            var packageProjectScope = await FollowUpPackageSchemaCheckService.ReadPackageProjectScopeAsync(
+                package,
+                cancellationToken);
+            PackageQuestionProjectGuard? packageQuestionProjectGuard =
+                CreatePackageProjectGuard(packageProjectScope);
+            var hasDynamicScopes = schemaCheck.TableColumnScopes is { Count: > 0 };
+            var hasPackageQuestionPayload = package.TableManifest.Any(item =>
+                item.Enabled
+                && !item.Skipped
+                && !string.IsNullOrWhiteSpace(item.ExportPath)
+                && item.Schema.Equals("form", StringComparison.OrdinalIgnoreCase)
+                && item.TableName.Equals("form_question", StringComparison.OrdinalIgnoreCase));
+            if (hasDynamicScopes || hasPackageQuestionPayload)
+            {
+                var questionItem = package.TableManifest.Single(item =>
+                    item.Schema.Equals("form", StringComparison.OrdinalIgnoreCase)
+                    && item.TableName.Equals("form_question", StringComparison.OrdinalIgnoreCase));
+                var questionScopeSource = FollowUpPackageSchemaCheckService.ResolveQuestionScopeSource(
+                    package.Manifest.PackageType,
+                    questionItem,
+                    importedFormQuestionContentHash);
+                if (questionScopeSource == FollowUpQuestionScopeSource.Package)
+                {
+                    var packageQuestionScope = await FollowUpPackageSchemaCheckService.ReadPackageQuestionScopeAsync(
+                        package,
+                        questionItem,
+                        cancellationToken);
+                    packageQuestionProjectGuard = CreatePackageQuestionProjectGuard(packageQuestionScope);
+                }
+                else if (hasDynamicScopes)
+                {
+                    var questionSchema = package.SchemaSnapshot.Tables.Single(item =>
+                        item.SchemaName.Equals("form", StringComparison.OrdinalIgnoreCase)
+                        && item.TableName.Equals("form_question", StringComparison.OrdinalIgnoreCase));
+                    targetQuestionScopeGuard = CreateTargetQuestionScopeGuard(
+                        questionScopeSource,
+                        questionItem.ContentHash!,
+                        questionSchema.Columns.Select(item => item.Name).ToList());
+                }
+            }
+
             FollowUpEdcScopePlan edcScopePlan;
             try
             {
@@ -144,29 +190,72 @@ public sealed class FollowUpPackageImportService(
             await repository.MarkAsync(state.HospitalCode, state.PackageId, "BackingUp", null, null, cancellationToken: cancellationToken);
             backup = await backupService.CreateAsync(package, cancellationToken);
             await repository.AddBackupAsync(state.HospitalCode, state.PackageId, backup, cancellationToken);
-
-            await repository.MarkAsync(state.HospitalCode, state.PackageId, "Importing", null, null, cancellationToken: cancellationToken);
-            return await ExecuteCommitBoundaryAsync(
+            var attachmentBackupSnapshot =
+                await backupService.CreateValidatedAttachmentSnapshotAsync(backup, cancellationToken);
+            Exception? attachmentSnapshotOperationException = null;
+            try
+            {
+                await repository.MarkAsync(state.HospitalCode, state.PackageId, "Importing", null, null, cancellationToken: cancellationToken);
+                return await ExecuteCommitBoundaryAsync(
                 async () =>
                 {
                     var counts = await ImportDataAsync(
                         package,
                         approvedDecision,
                         schemaCheck.TableColumnScopes ?? [],
+                        targetQuestionScopeGuard,
+                        packageQuestionProjectGuard,
                         edcScopePlan,
-                        () => backupService.InstallAttachmentsAsync(package, cancellationToken),
+                        async () =>
+                        {
+                            try
+                            {
+                                installedAttachments.AddRange(await backupService.InstallAttachmentsAsync(
+                                    package,
+                                    attachmentBackupSnapshot,
+                                    cancellationToken));
+                            }
+                            catch (FollowUpAttachmentInstallException installException)
+                            {
+                                installedAttachments.AddRange(installException.Mutations);
+                                attachmentRestoreFailed |= installException.RequiresFullRestore;
+                                throw;
+                            }
+                        },
+                        () => commitAttempted = true,
                         () => importCommitted = true,
                         cancellationToken);
                     return counts;
                 },
                 async importException =>
                 {
-                    if (importCommitted)
+                    if (!importCommitted && commitAttempted)
+                    {
+                        commitOutcomeUnknown = true;
+                        logger.LogCritical(importException,
+                            "FollowUp CubeDb 提交结果不确定，已禁止自动恢复附件；必须使用导入前完整备份恢复。PackageId={PackageId}",
+                            state.PackageId);
+                        throw new InvalidOperationException(
+                            "CubeDb 提交结果不确定，已禁止自动恢复附件；必须使用本包导入前完整备份恢复数据库和附件后再继续。",
+                            importException);
+                    }
+
+                    if (!ShouldRestoreAttachments(importCommitted, installedAttachments.Count > 0, commitAttempted))
                         return;
 
                     try
                     {
-                        await backupService.RestoreAttachmentsAsync(backup.AttachmentBackupPath, CancellationToken.None);
+                        var skipped = await backupService.RestoreInstalledAttachmentsAsync(
+                            attachmentBackupSnapshot,
+                            installedAttachments,
+                            CancellationToken.None);
+                        if (skipped.Count > 0)
+                        {
+                            logger.LogWarning(
+                                "FollowUp 导入失败后有 {Count} 个附件已被外部修改，未自动恢复。PackageId={PackageId}",
+                                skipped.Count,
+                                state.PackageId);
+                        }
                     }
                     catch (Exception restoreException)
                     {
@@ -214,6 +303,28 @@ public sealed class FollowUpPackageImportService(
                         $"数据导入完成，共 {counts.Values.Sum()} 条记录；请重启 NTCare 或执行既有缓存刷新流程。",
                         NTCareRestartRequiredCode);
                 });
+            }
+            catch (Exception exception)
+            {
+                attachmentSnapshotOperationException = exception;
+                throw;
+            }
+            finally
+            {
+                try
+                {
+                    await attachmentBackupSnapshot.DisposeAsync();
+                }
+                catch (Exception cleanupException)
+                {
+                    var cleanupFailure = new IOException(
+                        "导入附件冻结快照无法清理，必须人工处置。",
+                        cleanupException);
+                    if (attachmentSnapshotOperationException is not null)
+                        throw new AggregateException(attachmentSnapshotOperationException, cleanupFailure);
+                    throw cleanupFailure;
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -244,7 +355,24 @@ public sealed class FollowUpPackageImportService(
             try
             {
                 var errorCode = ErrorCode(ex);
-                var failureStatus = ResolveFailureStatus(ex, attachmentRestoreFailed);
+                var failureStatus = ResolveFailureStatus(ex, attachmentRestoreFailed, commitOutcomeUnknown);
+                if (package is not null && errorCode == FollowUpErrorCodes.SchemaReviewRequired)
+                {
+                    try
+                    {
+                        await repository.SaveVerifiedAsync(
+                            package,
+                            CreateSchemaReviewFailureResult(ex),
+                            CancellationToken.None);
+                    }
+                    catch (Exception schemaRecordException)
+                    {
+                        logger.LogError(
+                            schemaRecordException,
+                            "保存事务内结构复验失败结果时再次失败。PackageId={PackageId}",
+                            state.PackageId);
+                    }
+                }
                 await repository.MarkAsync(state.HospitalCode, state.PackageId, failureStatus, errorCode, ex.Message, cancellationToken: CancellationToken.None);
                 var failureAckStatus = ResolveFailureAckStatus(failureStatus);
                 if (package is not null && failureAckStatus is not null)
@@ -290,6 +418,63 @@ public sealed class FollowUpPackageImportService(
                 "数据包医院标识与 LHYY 当前医院配置不一致。");
     }
 
+    internal static TargetQuestionScopeGuard? CreateTargetQuestionScopeGuard(
+        FollowUpQuestionScopeSource source,
+        string expectedContentHash,
+        IReadOnlyCollection<string> sourceColumns)
+    {
+        if (source == FollowUpQuestionScopeSource.Package)
+            return null;
+        if (string.IsNullOrWhiteSpace(expectedContentHash) || sourceColumns.Count == 0)
+            throw new FollowUpPackageException(
+                FollowUpErrorCodes.SchemaReviewRequired,
+                "form.form_question 缺少事务内内容复验所需的 hash 或源字段结构。");
+        return new TargetQuestionScopeGuard(expectedContentHash, sourceColumns.ToArray());
+    }
+
+    internal static PackageQuestionProjectGuard? CreatePackageQuestionProjectGuard(
+        PackageQuestionScopeSnapshot snapshot) =>
+        snapshot.QuestionIds.Count == 0 && snapshot.ProjectIds.Count == 0
+            ? null
+            : new PackageQuestionProjectGuard(
+                snapshot.QuestionIds.Order().ToArray(),
+                snapshot.ProjectIds.Order().ToArray(),
+                snapshot.PackageProjectIds.Order().ToArray());
+
+    internal static PackageQuestionProjectGuard? CreatePackageProjectGuard(
+        PackageProjectScopeSnapshot snapshot) =>
+        snapshot.ProjectIds.Count == 0
+            ? null
+            : new PackageQuestionProjectGuard(
+                [],
+                snapshot.ProjectIds.Order().ToArray(),
+                snapshot.ProjectIds.Order().ToArray());
+
+    internal static bool ShouldVerifyPackageQuestionProjectScope(
+        bool alreadyVerified,
+        string sourceSchema,
+        string sourceTable,
+        bool isDynamic) =>
+        !alreadyVerified
+        && (isDynamic
+            || sourceSchema.Equals("form", StringComparison.OrdinalIgnoreCase)
+            && sourceTable.Equals("form_question", StringComparison.OrdinalIgnoreCase));
+
+    internal static bool ShouldRestoreAttachments(
+        bool importCommitted,
+        bool attachmentMutationStarted,
+        bool commitAttempted = false) =>
+        !importCommitted && !commitAttempted && attachmentMutationStarted;
+
+    internal static FollowUpSchemaCheckResult CreateSchemaReviewFailureResult(Exception exception) =>
+        new(
+            "ReviewRequired",
+            "RequiresMapping",
+            false,
+            [exception.Message],
+            [],
+            []);
+
     internal static List<string> ResolveWriteColumns(
         FollowUpTableSchema scopedSource,
         IReadOnlySet<string> writableColumns,
@@ -305,6 +490,20 @@ public sealed class FollowUpPackageImportService(
                 FollowUpErrorCodes.SchemaReviewRequired,
                 $"目标表 {scopedSource.SchemaName}.{scopedSource.TableName} 存在不可写字段：{string.Join("、", unavailable)}。");
         return expected;
+    }
+
+    internal static void EnsureProtectedQuestionProjectWritableColumns(
+        FollowUpTableManifestItem targetTable,
+        IReadOnlySet<string> writableColumns)
+    {
+        var required = FollowUpPackageSchemaCheckService.GetProtectedQuestionProjectRequiredColumns(
+            targetTable.Schema,
+            targetTable.TableName);
+        var unavailable = required.Where(column => !writableColumns.Contains(column)).ToList();
+        if (unavailable.Count > 0)
+            throw new FollowUpPackageException(
+                FollowUpErrorCodes.SchemaReviewRequired,
+                $"目标安全表 {targetTable.Schema}.{targetTable.TableName} 存在不可写字段：{string.Join("、", unavailable)}。");
     }
 
     internal static string FormatSchemaCheckSummary(IReadOnlyCollection<string> messages)
@@ -328,8 +527,11 @@ public sealed class FollowUpPackageImportService(
         FollowUpVerifiedPackage package,
         FollowUpSchemaDecision? schemaDecision,
         IReadOnlyCollection<FollowUpTableColumnScope> columnScopes,
+        TargetQuestionScopeGuard? targetQuestionScopeGuard,
+        PackageQuestionProjectGuard? packageQuestionProjectGuard,
         FollowUpEdcScopePlan edcScopePlan,
         Func<Task> beforeCommit,
+        Action onCommitAttempted,
         Action onCommitted,
         CancellationToken cancellationToken)
     {
@@ -339,6 +541,16 @@ public sealed class FollowUpPackageImportService(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
+            if (targetQuestionScopeGuard is not null)
+                await FollowUpPackageSchemaCheckService.LockTargetQuestionScopeAsync(
+                    connection,
+                    transaction,
+                    cancellationToken);
+            else if (packageQuestionProjectGuard is not null)
+                await FollowUpPackageSchemaCheckService.LockPackageQuestionProjectScopeAsync(
+                    connection,
+                    transaction,
+                    cancellationToken);
             var followUpPatients = new Dictionary<Guid, FollowUpPatientSource>();
             var basePatientEventTypes = await ResolveBasePatientEventTypesAsync(
                 package,
@@ -347,34 +559,102 @@ public sealed class FollowUpPackageImportService(
                 cancellationToken);
             var patientEventMappingCache =
                 new Dictionary<(Guid ProjectId, string EventType), IReadOnlyList<FollowUpPatientEventFormMapping>>();
-            var ordered = package.TableManifest
-                .Where(item => item.Enabled && !item.Skipped && !string.IsNullOrWhiteSpace(item.ExportPath))
-                .OrderBy(item => CategoryOrder(item.DataCategory))
-                .ThenBy(item => package.TableManifest.IndexOf(item));
+            var targetQuestionScopeVerified = false;
+            var packageQuestionProjectScopeVerified = false;
+            var packageProjectScopeVerifiedBeforeWrite = false;
+            var ordered = OrderImportTables(package.TableManifest);
             foreach (var table in ordered)
             {
                 var targetTable = FollowUpSchemaDecisionProcessor.MapManifest(table, schemaDecision);
+                FollowUpPackageSchemaCheckService.ValidateProtectedQuestionProjectMapping(table, targetTable);
+                FollowUpPackageSchemaCheckService.ValidateProtectedQuestionProjectColumnMappings(table, schemaDecision);
                 FollowUpPackageSchemaCheckService.EnsureIdentifier(targetTable.Schema);
                 FollowUpPackageSchemaCheckService.EnsureIdentifier(targetTable.TableName);
+                var isDynamic = FollowUpPackageSchemaCheckService.IsMappedDynamicFormTable(table, targetTable);
+                if (packageQuestionProjectGuard is not null
+                    && !packageProjectScopeVerifiedBeforeWrite
+                    && RequiresPackageProjectPrewriteValidation(table))
+                {
+                    await FollowUpPackageSchemaCheckService.EnsureExistingProjectHospitalScopeAsync(
+                        connection,
+                        transaction,
+                        package.Manifest.HospitalId,
+                        packageQuestionProjectGuard.PackageProjectIds,
+                        cancellationToken);
+                    packageProjectScopeVerifiedBeforeWrite = true;
+                }
+                if (packageQuestionProjectGuard is not null
+                    && ShouldVerifyPackageQuestionProjectScope(
+                        packageQuestionProjectScopeVerified,
+                        table.Schema,
+                        table.TableName,
+                        isDynamic))
+                {
+                    await FollowUpPackageSchemaCheckService.EnsureExistingQuestionHospitalScopeAsync(
+                        connection,
+                        transaction,
+                        package.Manifest.HospitalId,
+                        packageQuestionProjectGuard.QuestionIds,
+                        cancellationToken);
+                    await FollowUpPackageSchemaCheckService.EnsureQuestionProjectScopeAsync(
+                        connection,
+                        transaction,
+                        package.Manifest.HospitalId,
+                        packageQuestionProjectGuard.ProjectIds,
+                        cancellationToken);
+                    packageQuestionProjectScopeVerified = true;
+                }
+                var identifierComparison = isDynamic ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
                 var originalSourceSchema = package.SchemaSnapshot.Tables.First(item =>
-                    item.SchemaName.Equals(table.Schema, StringComparison.OrdinalIgnoreCase)
-                    && item.TableName.Equals(table.TableName, StringComparison.OrdinalIgnoreCase));
-                var isDynamic = FollowUpPackageSchemaCheckService.IsDynamicFormTable(table);
+                    item.SchemaName.Equals(table.Schema, identifierComparison)
+                    && item.TableName.Equals(table.TableName, identifierComparison));
+                if (isDynamic && !targetQuestionScopeVerified)
+                {
+                    if (targetQuestionScopeGuard is not null)
+                        await schemaCheckService.EnsureTargetQuestionContentHashAsync(
+                            connection,
+                            transaction,
+                            package.Manifest.HospitalId,
+                            targetQuestionScopeGuard.ExpectedContentHash,
+                            targetQuestionScopeGuard.SourceColumns,
+                            cancellationToken);
+                    targetQuestionScopeVerified = true;
+                }
                 var columnScope = isDynamic
                     ? columnScopes.SingleOrDefault(item =>
-                        item.SourceSchema.Equals(table.Schema, StringComparison.OrdinalIgnoreCase)
-                        && item.SourceTable.Equals(table.TableName, StringComparison.OrdinalIgnoreCase))
+                        item.SourceSchema.Equals(table.Schema, StringComparison.Ordinal)
+                        && item.SourceTable.Equals(table.TableName, StringComparison.Ordinal))
                       ?? throw new FollowUpPackageException(
                           FollowUpErrorCodes.SchemaReviewRequired,
                           $"动态表 {table.Schema}.{table.TableName} 缺少已校验的导入字段范围。")
                     : null;
+                var arrayToTextSourceColumns = columnScope?.ArrayToTextSourceColumns
+                    .ToHashSet(StringComparer.Ordinal)
+                    ?? new HashSet<string>(StringComparer.Ordinal);
                 var sourceSchema = columnScope is null
                     ? FollowUpSchemaDecisionProcessor.MapSchema(originalSourceSchema, schemaDecision)
                     : FollowUpPackageSchemaCheckService.MapAndApplySourceTable(
                         originalSourceSchema,
                         schemaDecision,
                         columnScope);
-                var writableColumns = await GetWritableColumnsAsync(connection, transaction, targetTable.Schema, targetTable.TableName, cancellationToken);
+                FollowUpPackageSchemaCheckService.ValidateProtectedQuestionProjectImportContract(
+                    originalSourceSchema,
+                    table,
+                    sourceSchema,
+                    targetTable);
+                var isProtectedQuestionProjectTable =
+                    FollowUpPackageSchemaCheckService.GetProtectedQuestionProjectRequiredColumns(
+                        targetTable.Schema,
+                        targetTable.TableName).Count > 0;
+                var writableColumns = await GetWritableColumnsAsync(
+                    connection,
+                    transaction,
+                    targetTable.Schema,
+                    targetTable.TableName,
+                    targetTable.ImportPolicy,
+                    identifiersAreCaseSensitive: isDynamic || isProtectedQuestionProjectTable,
+                    cancellationToken);
+                EnsureProtectedQuestionProjectWritableColumns(targetTable, writableColumns);
                 var mapping = FollowUpSchemaDecisionProcessor.FindMapping(table.Schema, table.TableName, schemaDecision);
                 var defaultColumns = mapping?.DefaultValues.Keys.ToList() ?? [];
                 var columns = columnScope is null
@@ -385,24 +665,26 @@ public sealed class FollowUpPackageImportService(
                         .ToList()
                     : ResolveWriteColumns(sourceSchema, writableColumns, defaultColumns);
                 var primaryKey = targetTable.PrimaryKey.Count > 0 ? targetTable.PrimaryKey : sourceSchema.PrimaryKey;
-                if (primaryKey.Count == 0 || primaryKey.Any(column => !columns.Contains(column, StringComparer.OrdinalIgnoreCase)))
+                var identifierComparer = isDynamic ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+                if (primaryKey.Count == 0 || primaryKey.Any(column => !columns.Contains(column, identifierComparer)))
                     throw new InvalidOperationException($"表 {targetTable.Schema}.{targetTable.TableName} 缺少可用主键，不能幂等导入。");
 
                 var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
                 var count = 0;
                 await foreach (var line in ReadRowsForImportAsync(
                                    filePath,
+                                   table.FileHash,
                                    targetTable.Schema,
                                    targetTable.TableName,
                                    cancellationToken))
                 {
-                    using var _ = JsonDocument.Parse(line);
+                    FollowUpPackageSchemaCheckService.ValidateImportRow(line, arrayToTextSourceColumns);
                     var mappedLine = FollowUpSchemaDecisionProcessor.MapRow(
                         line,
                         table.Schema,
                         table.TableName,
                         schemaDecision,
-                        columnScope?.SourceColumns.ToHashSet(StringComparer.OrdinalIgnoreCase));
+                        columnScope?.SourceColumns.ToHashSet(StringComparer.Ordinal));
                     if (FollowUpTargetAdaptationService.ReadPatientSource(
                             targetTable.Schema,
                             targetTable.TableName,
@@ -447,39 +729,98 @@ public sealed class FollowUpPackageImportService(
             var scopeMapCount = await edcScopeService.ApplyAsync(connection, transaction, edcScopePlan, cancellationToken);
             if (scopeMapCount > 0)
                 result["public.patient_data_scope_map"] = scopeMapCount;
-            // 附件先原子替换，随后提交数据库；任一环节失败都会回滚数据库并由上层恢复附件。
+            // 附件先原子替换，随后提交数据库；提交开始前失败时由上层按已安装路径恢复附件。
             await beforeCommit();
+            // CommitAsync 一旦开始，客户端就无法可靠判断服务端是否已经提交，禁止再自动恢复附件。
+            onCommitAttempted();
             await transaction.CommitAsync(cancellationToken);
             // 必须在 CommitAsync 成功的瞬间标记；之后即使事务/连接释放失败，也不能恢复旧附件。
             onCommitted();
             return result;
         }
-        catch
+        catch (Exception importException)
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            try
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+            }
+            catch (Exception rollbackException)
+            {
+                throw new AggregateException(importException, rollbackException);
+            }
             throw;
         }
     }
 
     private static async IAsyncEnumerable<string> ReadRowsForImportAsync(
         string filePath,
+        string? expectedFileHash,
         string schema,
         string table,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(expectedFileHash))
+            throw new InvalidDataException($"表 {schema}.{table} 缺少导入文件 hash。");
+        await using var snapshot = await OpenVerifiedImportSnapshotAsync(
+            filePath,
+            expectedFileHash,
+            cancellationToken);
+        using var reader = new StreamReader(snapshot, leaveOpen: true);
         if (FollowUpImportRowOrdering.RequiresOrdering(schema, table))
         {
-            var rows = await File.ReadAllLinesAsync(filePath, cancellationToken);
+            var rows = new List<string>();
+            string? orderedLine;
+            while ((orderedLine = await reader.ReadLineAsync(cancellationToken)) is not null)
+                rows.Add(orderedLine);
             foreach (var row in FollowUpImportRowOrdering.Order(schema, table, rows))
                 yield return row;
             yield break;
         }
 
-        using var reader = new StreamReader(filePath);
         string? line;
         while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
             if (!string.IsNullOrWhiteSpace(line))
                 yield return line;
+    }
+
+    internal static async Task<FileStream> OpenVerifiedImportSnapshotAsync(
+        string filePath,
+        string expectedFileHash,
+        CancellationToken cancellationToken)
+    {
+        if (expectedFileHash.Length != 64 || expectedFileHash.Any(value => !Uri.IsHexDigit(value)))
+            throw new InvalidDataException("导入文件 hash 必须是 64 位十六进制 SHA-256。");
+        var stream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read | FileShare.Delete,
+            bufferSize: 81920,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        try
+        {
+            var actualHash = Convert.ToHexString(
+                    await SHA256.HashDataAsync(stream, cancellationToken))
+                .ToLowerInvariant();
+            if (!actualHash.Equals(expectedFileHash, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException($"导入文件实际 hash 与表清单不一致：{Path.GetFileName(filePath)}。");
+            stream.Position = 0;
+            return stream;
+        }
+        catch (Exception snapshotException)
+        {
+            try
+            {
+                await stream.DisposeAsync();
+            }
+            catch (Exception cleanupException)
+            {
+                throw new AggregateException(
+                    snapshotException,
+                    new IOException("导入文件校验失败且只读句柄无法释放。", cleanupException));
+            }
+            throw;
+        }
     }
 
     private static async Task<IReadOnlyDictionary<Guid, string>> ResolveBasePatientEventTypesAsync(
@@ -516,6 +857,7 @@ public sealed class FollowUpPackageImportService(
             var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
             await foreach (var line in ReadRowsForImportAsync(
                                filePath,
+                               table.FileHash,
                                table.Schema,
                                table.TableName,
                                cancellationToken))
@@ -555,6 +897,7 @@ public sealed class FollowUpPackageImportService(
             var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
             await foreach (var line in ReadRowsForImportAsync(
                                filePath,
+                               table.FileHash,
                                table.Schema,
                                table.TableName,
                                cancellationToken))
@@ -624,17 +967,22 @@ public sealed class FollowUpPackageImportService(
         NpgsqlTransaction transaction,
         string schema,
         string table,
+        string importPolicy,
+        bool identifiersAreCaseSensitive,
         CancellationToken cancellationToken)
     {
-        await using var command = new NpgsqlCommand("""
+        var privilegePredicate = FollowUpImportPolicyPermissions.BuildColumnPrivilegePredicate(importPolicy);
+        await using var command = new NpgsqlCommand($"""
             SELECT column_name FROM information_schema.columns
             WHERE table_schema = @schema AND table_name = @table
               AND is_generated = 'NEVER'
               AND (is_identity = 'NO' OR identity_generation IS DISTINCT FROM 'ALWAYS')
+              {privilegePredicate}
             """, connection, transaction);
         command.Parameters.AddWithValue("schema", schema);
         command.Parameters.AddWithValue("table", table);
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new HashSet<string>(
+            identifiersAreCaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken)) result.Add(reader.GetString(0));
         return result;
@@ -706,9 +1054,12 @@ public sealed class FollowUpPackageImportService(
             throw new InvalidDataException("数据文件路径逃逸 staging 目录。");
         return target;
     }
-    internal static string ResolveFailureStatus(Exception exception, bool attachmentRestoreFailed)
+    internal static string ResolveFailureStatus(
+        Exception exception,
+        bool attachmentRestoreFailed,
+        bool commitOutcomeUnknown = false)
     {
-        if (attachmentRestoreFailed)
+        if (attachmentRestoreFailed || commitOutcomeUnknown)
             return "RestoreFailed";
         return ErrorCode(exception) == FollowUpErrorCodes.SchemaReviewRequired
             ? "WaitingForDecision"
@@ -748,6 +1099,45 @@ public sealed class FollowUpPackageImportService(
             logger.LogWarning(ex, "清理 FollowUp staging 目录失败。StagingPath={StagingPath}", stagingPath);
         }
     }
+
+    internal static bool RequiresPackageProjectPrewriteValidation(FollowUpTableManifestItem source) =>
+        source.Schema.Equals("form", StringComparison.OrdinalIgnoreCase)
+        && source.TableName.Equals("form_project", StringComparison.OrdinalIgnoreCase);
+
+    internal static IReadOnlyList<FollowUpTableManifestItem> OrderImportTables(
+        IReadOnlyList<FollowUpTableManifestItem> manifest)
+    {
+        var ordered = manifest
+            .Select((item, index) => (Item: item, Index: index))
+            .Where(entry => entry.Item.Enabled
+                            && !entry.Item.Skipped
+                            && !string.IsNullOrWhiteSpace(entry.Item.ExportPath))
+            .OrderBy(entry => CategoryOrder(entry.Item.DataCategory))
+            .ThenBy(entry => entry.Index)
+            .Select(entry => entry.Item)
+            .ToList();
+        var projectIndex = ordered.FindIndex(RequiresPackageProjectPrewriteValidation);
+        if (projectIndex >= 0)
+        {
+            var earlyConsumers = ordered
+                .Take(projectIndex)
+                .Where(IsPackageQuestionConsumer)
+                .ToList();
+            if (earlyConsumers.Count > 0)
+            {
+                foreach (var consumer in earlyConsumers)
+                    ordered.Remove(consumer);
+                projectIndex = ordered.FindIndex(RequiresPackageProjectPrewriteValidation);
+                ordered.InsertRange(projectIndex + 1, earlyConsumers);
+            }
+        }
+        return ordered;
+    }
+
+    private static bool IsPackageQuestionConsumer(FollowUpTableManifestItem item) =>
+        (item.Schema.Equals("form", StringComparison.OrdinalIgnoreCase)
+         && item.TableName.Equals("form_question", StringComparison.OrdinalIgnoreCase))
+        || FollowUpPackageSchemaCheckService.IsDynamicFormTable(item);
 
     private static int CategoryOrder(string category) => category switch { "ReferenceMaster" => 0, "Relationship" => 1, "BusinessData" => 2, _ => 3 };
     private static string ErrorCode(Exception exception) => exception is FollowUpPackageException package ? package.ErrorCode : FollowUpErrorCodes.InternalError;

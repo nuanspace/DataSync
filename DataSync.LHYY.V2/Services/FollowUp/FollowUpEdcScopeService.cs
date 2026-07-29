@@ -184,7 +184,13 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
                 continue;
 
             var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
-            using var reader = new StreamReader(filePath);
+            if (string.IsNullOrWhiteSpace(table.FileHash))
+                throw new InvalidDataException($"表 {table.Schema}.{table.TableName} 缺少导入文件 hash。");
+            await using var snapshot = await FollowUpPackageImportService.OpenVerifiedImportSnapshotAsync(
+                filePath,
+                table.FileHash,
+                cancellationToken);
+            using var reader = new StreamReader(snapshot, leaveOpen: true);
             string? line;
             while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
             {
