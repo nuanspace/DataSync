@@ -389,6 +389,8 @@ public sealed class FollowUpSchemaAndSqlTests
         Assert.Contains("ordinary_question", scope.SourceColumns);
         Assert.Equal(["choice_question", "file_question"], scope.ArrayToTextSourceColumns);
         Assert.Equal(["choice_question", "file_question"], scope.ArrayToTextTargetColumns);
+        Assert.Equal(["file_question"], scope.FileQuestionSourceColumns);
+        Assert.Equal(["file_question"], scope.FileQuestionTargetColumns);
     }
 
     [Fact]

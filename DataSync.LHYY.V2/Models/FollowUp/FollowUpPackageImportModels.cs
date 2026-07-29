@@ -95,7 +95,9 @@ public sealed class FollowUpTableColumnScope
         List<string> sourceColumns,
         List<string> targetColumns,
         List<string>? arrayToTextSourceColumns = null,
-        List<string>? arrayToTextTargetColumns = null)
+        List<string>? arrayToTextTargetColumns = null,
+        List<string>? fileQuestionSourceColumns = null,
+        List<string>? fileQuestionTargetColumns = null)
     {
         SourceSchema = sourceSchema;
         SourceTable = sourceTable;
@@ -105,6 +107,8 @@ public sealed class FollowUpTableColumnScope
         TargetColumns = targetColumns;
         ArrayToTextSourceColumns = arrayToTextSourceColumns ?? [];
         ArrayToTextTargetColumns = arrayToTextTargetColumns ?? [];
+        FileQuestionSourceColumns = fileQuestionSourceColumns ?? [];
+        FileQuestionTargetColumns = fileQuestionTargetColumns ?? [];
     }
 
     public FollowUpTableColumnScope(string schema, string table, List<string> columns)
@@ -120,6 +124,8 @@ public sealed class FollowUpTableColumnScope
     public List<string> TargetColumns { get; }
     public List<string> ArrayToTextSourceColumns { get; }
     public List<string> ArrayToTextTargetColumns { get; }
+    public List<string> FileQuestionSourceColumns { get; }
+    public List<string> FileQuestionTargetColumns { get; }
 }
 
 public sealed record FollowUpIgnoredColumnAudit(

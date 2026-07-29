@@ -95,6 +95,144 @@ public sealed class FollowUpTargetAdaptationService(IConfiguration configuration
         return row;
     }
 
+    internal static string NormalizeFileQuestionValues(
+        string row,
+        IReadOnlyCollection<string> fileQuestionColumns,
+        IReadOnlySet<string> packageAttachmentPaths)
+    {
+        try
+        {
+            return NormalizeFileQuestionValuesCore(row, fileQuestionColumns, packageAttachmentPaths);
+        }
+        catch (FollowUpPackageException)
+        {
+            throw;
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new FollowUpPackageException(
+                FollowUpErrorCodes.PackageIntegrityFailed,
+                ex.Message,
+                ex);
+        }
+    }
+
+    private static string NormalizeFileQuestionValuesCore(
+        string row,
+        IReadOnlyCollection<string> fileQuestionColumns,
+        IReadOnlySet<string> packageAttachmentPaths)
+    {
+        if (fileQuestionColumns.Count == 0)
+            return row;
+
+        var document = ParseObject(row, "动态表文件题");
+        foreach (var column in fileQuestionColumns)
+        {
+            if (!document.TryGetPropertyValue(column, out var value) || value is null)
+                continue;
+
+            if (value is JsonArray array)
+            {
+                document[column] = NormalizeFileArray(array, packageAttachmentPaths);
+                continue;
+            }
+
+            if (value is not JsonValue jsonValue || !jsonValue.TryGetValue<string>(out var storedValue))
+                throw new InvalidDataException($"文件题字段 {column} 不是字符串或字符串数组。");
+            if (string.IsNullOrWhiteSpace(storedValue))
+                continue;
+
+            if (storedValue.TrimStart().StartsWith("[", StringComparison.Ordinal))
+            {
+                JsonNode? nested;
+                try
+                {
+                    nested = JsonNode.Parse(storedValue);
+                }
+                catch (JsonException ex)
+                {
+                    throw new InvalidDataException($"文件题字段 {column} 的 JSON 数组无效。", ex);
+                }
+                if (nested is not JsonArray nestedArray)
+                    throw new InvalidDataException($"文件题字段 {column} 的 JSON 值不是数组。");
+                document[column] = NormalizeFileArray(nestedArray, packageAttachmentPaths)
+                    .ToJsonString(FollowUpJson.Options);
+                continue;
+            }
+
+            document[column] = NormalizeFileReference(storedValue, packageAttachmentPaths);
+        }
+        return document.ToJsonString(FollowUpJson.Options);
+    }
+
+    private static JsonArray NormalizeFileArray(
+        JsonArray array,
+        IReadOnlySet<string> packageAttachmentPaths)
+    {
+        var normalized = new JsonArray();
+        foreach (var item in array)
+        {
+            if (item is null)
+                continue;
+            if (item is not JsonValue value || !value.TryGetValue<string>(out var storedValue))
+                throw new InvalidDataException("文件题数组只能包含字符串或 null。");
+            if (string.IsNullOrWhiteSpace(storedValue))
+                continue;
+            normalized.Add(NormalizeFileReference(storedValue, packageAttachmentPaths));
+        }
+        return normalized;
+    }
+
+    private static string NormalizeFileReference(
+        string storedValue,
+        IReadOnlySet<string> packageAttachmentPaths)
+    {
+        var value = storedValue.Trim();
+        if (value.Contains('\\'))
+            throw new InvalidDataException("文件题附件路径不安全。");
+
+        var hasUploadPrefix = value.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+                              || value.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase);
+        if (!hasUploadPrefix && value.StartsWith('/'))
+            throw new InvalidDataException("文件题附件路径不属于上传目录。");
+        if (!hasUploadPrefix && Uri.TryCreate(value, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.Scheme is not ("http" or "https")
+                || !absoluteUri.AbsolutePath.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("文件题附件路径不属于上传目录。");
+            value = absoluteUri.AbsolutePath;
+        }
+        else
+        {
+            value = value.Split(['?', '#'], 2)[0];
+        }
+
+        try
+        {
+            value = Uri.UnescapeDataString(value);
+        }
+        catch (UriFormatException ex)
+        {
+            throw new InvalidDataException("文件题附件路径编码无效。", ex);
+        }
+        if (value.Contains('\\'))
+            throw new InvalidDataException("文件题附件路径不安全。");
+
+        var relative = value.StartsWith("/uploads/", StringComparison.OrdinalIgnoreCase)
+            ? value["/uploads/".Length..]
+            : value.StartsWith("uploads/", StringComparison.OrdinalIgnoreCase)
+                ? value["uploads/".Length..]
+                : value;
+        var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0
+            || segments.Any(segment => segment is "." or ".." || segment.Contains(':')))
+            throw new InvalidDataException("文件题附件路径不安全。");
+        var normalized = string.Join('/', segments);
+        if (!packageAttachmentPaths.Contains(normalized))
+            throw new InvalidDataException($"文件题附件未包含在数据包中：{normalized}");
+        return normalized;
+    }
+
     internal async Task<string> AdaptRowAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,

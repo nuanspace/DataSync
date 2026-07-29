@@ -37,6 +37,9 @@ bash package-release.sh \
 ```bash
 cp .env.example .env
 
+# external-cube 必须填写现有 NTCare 实际 uploads 目录；若 NTCare 在另一台机器，先挂载同一共享存储
+sed -i 's|^NTCARE_UPLOADS_PATH=.*|NTCARE_UPLOADS_PATH=/srv/ntcare/wwwroot/uploads|' .env
+
 # 推荐；连接现场已有目标库
 sed -i 's/^DEPLOYMENT_MODE=.*/DEPLOYMENT_MODE=external-cube/' .env
 
@@ -76,6 +79,10 @@ bash status.sh
 全新部署的 Cube schema-only dump 必须已经包含 `20260722-cube-v2.sql` 的结构。`restore-fresh-databases.sh cube` 和 `verify-fresh-databases.sh` 会在 `external-cube` 模式主动拒绝执行。
 
 首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任。DMZ 运行期 SSH 授权与医院端七项材料均由页面即时应用，初始化阶段无需重启 DMZ、CYYY 或 LHYY。随后执行：关闭自动任务 → 检查服务和 v3/1.2.0（医院端拒绝旧 v2 包）→ 检查两库及来源映射 → 保存或核对 CYYY 医院来源 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
+
+LHYY 必须保留 Compose 中 `${NTCARE_UPLOADS_PATH}:/app/uploads` 的绑定，并保持 `FollowUpPackageImport.AttachmentRoot=/app/uploads`。`NTCARE_UPLOADS_PATH` 必须是已存在、非符号链接、可读写的绝对路径，并指向现有 NTCare 实际使用的 uploads 目录；若 NTCare 位于另一主机，则填写双方同一共享存储在 DataSync 宿主机上的挂载点，该存储必须支持同目录硬链接和原子重命名，不能使用禁用硬链接的 SMB/CIFS 配置。安装和启动脚本都会通过 LHYY 容器实际探测文件创建、同目录硬链接、原子发布与清理能力，但不会创建附件根、递归改属主或放宽其权限。导入器会将包内 `files/uploads` 原子安装到此目录，并仅对已授权的“文件”题把 `/uploads/...`、`uploads/...` 和历史 HTTP(S) 上传 URL 统一保存为 NTCare 既有的相对文件名；引用未进入附件清单时会以包完整性错误在备份前拒绝导入。NTCare 页面继续由 NTCare 自身 origin 和权限体系读取同一物理目录，LHYY 不对外提供附件静态目录。不得把附件根指向未挂载的容器临时目录；基线及增量导入后应分别从真实 NTCare 表单验证图片和非图片附件。
+
+从修复前版本升级时，先关闭云端生成、CYYY 拉取和 LHYY 导入自动任务，再升级云端导出器并重新生成 `RecoveryBaseline`，确认新包的 manifest 含完整 `attachmentFiles` 后升级医院端导入器并导入该恢复基线，验收 NTCare 附件可见后再恢复增量链路。修复前已生成且缺少附件清单的旧 v3 包不得重复导入，也不能用于附件恢复。
 
 首次启动前必须保持两个业务开关为 `false`：
 

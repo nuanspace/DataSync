@@ -11,6 +11,7 @@ cd "$root"
 # shellcheck disable=SC1091
 source "$root/deployment-mode.sh"
 load_deployment_mode
+validate_ntcare_uploads_path
 if [[ "${DEPLOYMENT_MODE:-external-cube}" == "fresh-cube" ]]; then
   [[ -s secrets/cube_db_password ]] || { echo "fresh-cube 模式下 cube_db_password 未填写。" >&2; exit 1; }
 fi
@@ -21,6 +22,7 @@ if grep -R -n '<填写' config/cyyy/appsettings.Production.json config/lhyy/apps
 fi
 
 s7_compose config --quiet
+validate_ntcare_uploads_container_contract
 if [[ "${DEPLOYMENT_MODE:-external-cube}" == "external-cube" ]]; then
   echo "正在对现有 CubeDb 执行只读兼容性检查……"
   s7_compose run --rm --no-deps datasync-lhyy-v2 cube-compat-check

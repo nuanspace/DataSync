@@ -536,6 +536,11 @@ public sealed class FollowUpPackageImportService(
         CancellationToken cancellationToken)
     {
         var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        const string attachmentPrefix = "files/uploads/";
+        var fileQuestionAttachmentPaths = package.Manifest.AttachmentFiles
+            .Where(item => item.Path.StartsWith(attachmentPrefix, StringComparison.Ordinal))
+            .Select(item => item.Path[attachmentPrefix.Length..])
+            .ToHashSet(StringComparer.Ordinal);
         await using var connection = new NpgsqlConnection(_cubeConnectionString);
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -685,6 +690,10 @@ public sealed class FollowUpPackageImportService(
                         table.TableName,
                         schemaDecision,
                         columnScope?.SourceColumns.ToHashSet(StringComparer.Ordinal));
+                    mappedLine = FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+                        mappedLine,
+                        columnScope?.FileQuestionTargetColumns ?? [],
+                        fileQuestionAttachmentPaths);
                     if (FollowUpTargetAdaptationService.ReadPatientSource(
                             targetTable.Schema,
                             targetTable.TableName,

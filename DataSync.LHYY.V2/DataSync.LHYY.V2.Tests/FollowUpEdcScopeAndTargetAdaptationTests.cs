@@ -13,6 +13,79 @@ namespace DataSync.LHYY.V2.Tests;
 public sealed class FollowUpEdcScopeAndTargetAdaptationTests
 {
     [Fact]
+    public void 文件题值统一为NTCare相对文件名且不改其他字段()
+    {
+        const string source = """
+            {"report_image":["/uploads/images/first.png",null," ","uploads/docs/second.pdf","https://old.example.test/uploads/third.webp?token=expired","folder/fourth.jpg"],"description":"/uploads/ignored.jpg"}
+            """;
+
+        var adapted = FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+            source,
+            ["report_image"],
+            new HashSet<string>(
+                ["images/first.png", "docs/second.pdf", "third.webp", "folder/fourth.jpg"],
+                StringComparer.Ordinal));
+
+        using var document = JsonDocument.Parse(adapted);
+        Assert.Equal(
+            ["images/first.png", "docs/second.pdf", "third.webp", "folder/fourth.jpg"],
+            document.RootElement.GetProperty("report_image")
+                .EnumerateArray()
+                .Select(value => value.GetString()!)
+                .ToArray());
+        Assert.Equal("/uploads/ignored.jpg", document.RootElement.GetProperty("description").GetString());
+    }
+
+    [Fact]
+    public void 文本列中的文件题Json数组保持文本形态并规范化内容()
+    {
+        const string source = """{"report_image":"[\"/uploads/first.png\",\"https://old.example.test/uploads/second.pdf\"]"}""";
+
+        var adapted = FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+            source,
+            ["report_image"],
+            new HashSet<string>(["first.png", "second.pdf"], StringComparer.Ordinal));
+
+        using var document = JsonDocument.Parse(adapted);
+        var storedValue = document.RootElement.GetProperty("report_image").GetString();
+        var files = JsonSerializer.Deserialize<string[]>(storedValue!);
+        Assert.NotNull(files);
+        Assert.Equal(["first.png", "second.pdf"], files);
+    }
+
+    [Theory]
+    [InlineData("../outside.jpg")]
+    [InlineData("/etc/passwd")]
+    [InlineData("https://old.example.test/not-uploads/outside.jpg")]
+    [InlineData("/uploads/%5c..%5coutside.jpg")]
+    public void 文件题非法路径在写入NTCare前被拒绝(string value)
+    {
+        var source = JsonSerializer.Serialize(new { report_image = new[] { value } });
+
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+                source,
+                ["report_image"],
+                new HashSet<string>(StringComparer.Ordinal)));
+        Assert.Equal(FollowUpErrorCodes.PackageIntegrityFailed, exception.ErrorCode);
+    }
+
+    [Fact]
+    public void 文件题引用未进入附件清单时拒绝写入NTCare()
+    {
+        const string source = """{"report_image":["missing.jpg"]}""";
+
+        var exception = Assert.Throws<FollowUpPackageException>(() =>
+            FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+                source,
+                ["report_image"],
+                new HashSet<string>(StringComparer.Ordinal)));
+
+        Assert.Equal(FollowUpErrorCodes.PackageIntegrityFailed, exception.ErrorCode);
+        Assert.Contains("未包含在数据包", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EDC权限映射SQL限定本包患者且保持幂等()
     {
         var sql = FollowUpEdcScopeService.BuildUpsertSql();

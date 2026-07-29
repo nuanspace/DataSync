@@ -42,13 +42,14 @@ sha256sum --ignore-missing -c manifest/SHA256SUMS.txt
 # shellcheck disable=SC1091
 source "$root/deployment-mode.sh"
 load_deployment_mode
+validate_ntcare_uploads_path
 
 data_root="${DATA_ROOT:-/data/s7-followup}"
 cyyy_uid="${CYYY_CONTAINER_UID:-1654}"
 
 install -d -m 0750 "$data_root"
 install -d -m 0750 "$data_root/packages" "$data_root/logs" "$data_root/logs/cyyy" "$data_root/logs/lhyy"
-install -d -m 0700 "$data_root/datasync-db" "$data_root/staging" "$data_root/backups" "$data_root/uploads"
+install -d -m 0700 "$data_root/datasync-db" "$data_root/staging" "$data_root/backups"
 install -d -m 0700 "$data_root/secrets" "$data_root/secrets/cyyy" "$data_root/secrets/lhyy"
 if [[ "${DEPLOYMENT_MODE:-external-cube}" == "fresh-cube" ]]; then
   install -d -m 0700 "$data_root/cube-db"
@@ -84,6 +85,7 @@ for image_tar in images/*.tar; do
   [[ -f "$image_tar" ]] || { echo "没有找到镜像 tar。" >&2; exit 1; }
   docker load -i "$image_tar"
 done
+validate_ntcare_uploads_container_contract
 
 echo "医院端安装文件和镜像已准备完成（模式：${DEPLOYMENT_MODE:-external-cube}）。"
 if [[ "${DEPLOYMENT_MODE:-external-cube}" == "fresh-cube" ]]; then

@@ -787,6 +787,8 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
 
             var arraySourceColumns = new HashSet<string>(StringComparer.Ordinal);
             var arrayTargetColumns = new HashSet<string>(StringComparer.Ordinal);
+            var fileSourceColumns = new HashSet<string>(StringComparer.Ordinal);
+            var fileTargetColumns = new HashSet<string>(StringComparer.Ordinal);
             if (sourceMode == FollowUpQuestionScopeSource.Package)
             {
                 foreach (var reference in questionReferences.Where(item =>
@@ -813,6 +815,11 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
                     {
                         arraySourceColumns.Add(sourceColumn.Name);
                         arrayTargetColumns.Add(mappedColumn);
+                    }
+                    if (reference.DataType.Equals("文件", StringComparison.Ordinal))
+                    {
+                        fileSourceColumns.Add(sourceColumn.Name);
+                        fileTargetColumns.Add(mappedColumn);
                     }
                 }
             }
@@ -841,6 +848,11 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
                     {
                         arraySourceColumns.Add(matches[0].Original.Name);
                         arrayTargetColumns.Add(matches[0].Target.Name);
+                    }
+                    if (reference.DataType.Equals("文件", StringComparison.Ordinal))
+                    {
+                        fileSourceColumns.Add(matches[0].Original.Name);
+                        fileTargetColumns.Add(matches[0].Target.Name);
                     }
                 }
             }
@@ -873,7 +885,9 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
                 selectedPairs.Select(item => item.Original.Name).ToList(),
                 selectedPairs.Select(item => item.Target.Name).ToList(),
                 arraySourceColumns.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
-                arrayTargetColumns.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList()));
+                arrayTargetColumns.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+                fileSourceColumns.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+                fileTargetColumns.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList()));
         }
 
         foreach (var collision in scopes
@@ -1019,6 +1033,11 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
         var allowedColumns = scope.SourceColumns.ToHashSet(StringComparer.Ordinal);
         var sourceColumns = source.Columns.Select(item => item.Name).ToHashSet(StringComparer.Ordinal);
         var arrayColumns = scope.ArrayToTextSourceColumns.ToHashSet(StringComparer.Ordinal);
+        const string attachmentPrefix = "files/uploads/";
+        var attachmentPaths = package.Manifest.AttachmentFiles
+            .Where(item => item.Path.StartsWith(attachmentPrefix, StringComparison.Ordinal))
+            .Select(item => item.Path[attachmentPrefix.Length..])
+            .ToHashSet(StringComparer.Ordinal);
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         var filePath = SafeStagingPath(package.StagingPath, table.ExportPath!);
         var rowCount = 0;
@@ -1036,6 +1055,10 @@ public sealed partial class FollowUpPackageSchemaCheckService(IConfiguration con
                 sourceColumns,
                 arrayColumns,
                 counts);
+            _ = FollowUpTargetAdaptationService.NormalizeFileQuestionValues(
+                line,
+                scope.FileQuestionSourceColumns,
+                attachmentPaths);
             rowCount++;
         }
         if (rowCount != table.RecordCount)
