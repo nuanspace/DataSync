@@ -26,6 +26,16 @@ public class SyncTask
     public string TriggerServerCode { get; set; } = "";
 
     /// <summary>
+    /// 附加触发采集源编码，逗号分隔
+    /// </summary>
+    [Column("additional_trigger_server_codes")]
+    public string AdditionalTriggerServerCodes { get; set; } = "";
+
+    [NotMapped]
+    public string[] AdditionalTriggerServerCodeArray => AdditionalTriggerServerCodes
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
     /// 推送方式：Api / Database
     /// </summary>
     [Column("push_type")]

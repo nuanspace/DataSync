@@ -8,7 +8,7 @@
     <div class="backfill-header">
         <div>
             <MudText Typo="Typo.h5" Class="backfill-title">数据补录</MudText>
-            <div class="backfill-subtitle">按时间、患者 ID 或就诊号定位对象</div>
+            <div class="backfill-subtitle">按时间或患者、就诊信息定位对象</div>
         </div>
         <div class="backfill-header-meta">
             <span>目标 @_tasks.Count</span>
@@ -55,40 +55,26 @@
 
     </MudTabPanel>
 
-    <!-- 按患者ID -->
-    <MudTabPanel Text="按患者ID" Icon="@Icons.Material.Filled.Person">
-        <MudTextField @bind-Value="_patientIds" Label="HIS_PAT_ID" Placeholder="多个用逗号分隔"
-                      Variant="Variant.Outlined" Lines="3" Class="backfill-wide-input" />
+    <!-- 按患者/就诊信息 -->
+    <MudTabPanel Text="按患者/就诊信息" Icon="@Icons.Material.Filled.PersonSearch">
+        <MudGrid Class="backfill-input-grid">
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_patientIds" Label="HIS_PAT_ID"
+                              Placeholder="多个用逗号分隔" Variant="Variant.Outlined" Lines="3" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_visitSns" Label="就诊号"
+                              Placeholder="多个用逗号分隔" Variant="Variant.Outlined" Lines="3" />
+            </MudItem>
+        </MudGrid>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            可只填一项；两项都填写时按输入顺序一一对应。DynamicApi 采集源必须同时填写。
+        </MudText>
         @TaskSelector
         @SkipSyncedSwitch
         <div class="backfill-actions">
             <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                       OnClick="ExecuteByPatientId" Disabled="_executing">
-                @if (_executing)
-                {
-                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                }
-                执行补数据
-            </MudButton>
-            @if (_executing)
-            {
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="CancelExecution">
-                    <MudIcon Icon="@Icons.Material.Filled.Cancel" Size="Size.Small" Class="mr-1" />
-                    取消
-                </MudButton>
-            }
-        </div>
-    </MudTabPanel>
-
-    <!-- 按就诊号 -->
-    <MudTabPanel Text="按就诊号" Icon="@Icons.Material.Filled.Badge">
-        <MudTextField @bind-Value="_visitSns" Label="就诊号" Placeholder="多个用逗号分隔"
-                      Variant="Variant.Outlined" Lines="3" Class="backfill-wide-input" />
-        @TaskSelector
-        @SkipSyncedSwitch
-        <div class="backfill-actions">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                       OnClick="ExecuteByVisitSn" Disabled="_executing">
+                       OnClick="ExecuteByPatientVisit" Disabled="_executing">
                 @if (_executing)
                 {
                     <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
@@ -369,11 +355,20 @@
     {
         var logService = new SyncLogService(ContextFactory);
         var enabledTasks = await logService.GetEnabledTasksAsync(CancellationToken);
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var sourceTypes = (await db.IngestionSources
+                .AsNoTracking()
+                .Select(s => new { s.ServerCode, s.SourceType })
+                .ToListAsync(CancellationToken))
+            .ToDictionary(s => s.ServerCode, s => s.SourceType, StringComparer.OrdinalIgnoreCase);
+
         _tasks = enabledTasks.Select(t => new TaskSelection
         {
             Task = t,
             Selected = true,
             TriggerRecordSelected = t.EnableTriggerRecordPush,
+            IsDynamicApiSource = sourceTypes.TryGetValue(t.TriggerServerCode, out var sourceType) &&
+                                 IngestionService.IsDynamicApiSourceType(sourceType),
             Interfaces = t.Interfaces
                 .Where(i => string.IsNullOrWhiteSpace(i.ParentInterfaceKey))
                 .OrderBy(i => i.SortOrder)
@@ -444,7 +439,6 @@
     private static List<string> SplitCommaValues(string value)
         => value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(v => !string.IsNullOrWhiteSpace(v))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
     private int GetTopLevelInterfaceCount()
@@ -517,89 +511,45 @@
         }
     }
 
-    private async Task ExecuteByPatientId()
+    private async Task ExecuteByPatientVisit()
     {
-        if (string.IsNullOrWhiteSpace(_patientIds))
+        var patientIds = SplitCommaValues(_patientIds);
+        var visitSns = SplitCommaValues(_visitSns);
+        if (patientIds.Count == 0 && visitSns.Count == 0)
         {
-            inj_snackbar.Add("请输入患者ID", Severity.Warning);
+            inj_snackbar.Add("请输入患者ID或就诊号", Severity.Warning);
             return;
         }
 
         if (!TryBuildExecutionSelection(out var codes, out var selectedInterfaceIdsByTask, out var includeTriggerRecordByTask))
             return;
 
-        var ids = SplitCommaValues(_patientIds);
-        if (ids.Count == 0)
+        if (patientIds.Count > 0 && visitSns.Count > 0 && patientIds.Count != visitSns.Count)
         {
-            inj_snackbar.Add("请输入有效患者ID", Severity.Warning);
+            inj_snackbar.Add($"患者ID共 {patientIds.Count} 个，就诊号共 {visitSns.Count} 个，数量必须一致", Severity.Warning);
             return;
         }
 
-        _executing = true;
-        _result = null;
-        _progressList = [];
-        _allDone = false;
-        _cancelled = false;
-        _cts = new CancellationTokenSource();
-        _globalStartTime = DateTime.Now;
-        StateHasChanged();
-
-        try
+        if (visitSns.Count > 0)
         {
-            _result = await inj_orchestrator.BackfillByPatientIdAsync(
-                ids, codes, _excludeSynced, _cts.Token,
-                onProgress: async evt =>
-                {
-                    HandleProgress(evt);
-                    await InvokeAsync(StateHasChanged);
-                },
-                selectedInterfaceIdsByTask: selectedInterfaceIdsByTask,
-                includeTriggerRecordByTask: includeTriggerRecordByTask);
-            inj_snackbar.Add("补数据执行完成", Severity.Success);
-        }
-        catch (OperationCanceledException)
-        {
-            _cancelled = true;
-            _result ??= new SyncResult();
-            inj_snackbar.Add("补数据已取消", Severity.Warning);
-        }
-        catch (Exception ex)
-        {
-            inj_snackbar.Add($"执行出错: {ex.Message}", Severity.Error);
-        }
-        finally
-        {
-            _executing = false;
-            _cts?.Dispose();
-            _cts = null;
-        }
-    }
-
-    private async Task ExecuteByVisitSn()
-    {
-        if (string.IsNullOrWhiteSpace(_visitSns))
-        {
-            inj_snackbar.Add("请输入就诊号", Severity.Warning);
-            return;
+            var invalidTasks = _tasks
+                .Where(t => t.Selected && string.IsNullOrWhiteSpace(t.Task.VisitSnField))
+                .Select(t => t.Task.Name)
+                .ToList();
+            if (invalidTasks.Count > 0)
+            {
+                inj_snackbar.Add($"以下目标未配置就诊号字段：{string.Join("、", invalidTasks)}", Severity.Warning);
+                return;
+            }
         }
 
-        if (!TryBuildExecutionSelection(out var codes, out var selectedInterfaceIdsByTask, out var includeTriggerRecordByTask))
-            return;
-
-        var invalidTasks = _tasks
-            .Where(t => t.Selected && string.IsNullOrWhiteSpace(t.Task.VisitSnField))
+        var invalidDynamicTasks = _tasks
+            .Where(t => t.Selected && t.IsDynamicApiSource && (patientIds.Count == 0 || visitSns.Count == 0))
             .Select(t => t.Task.Name)
             .ToList();
-        if (invalidTasks.Count > 0)
+        if (invalidDynamicTasks.Count > 0)
         {
-            inj_snackbar.Add($"以下目标未配置就诊号字段：{string.Join("、", invalidTasks)}", Severity.Warning);
-            return;
-        }
-
-        var visitSns = SplitCommaValues(_visitSns);
-        if (visitSns.Count == 0)
-        {
-            inj_snackbar.Add("请输入有效就诊号", Severity.Warning);
+            inj_snackbar.Add($"以下 DynamicApi 目标必须同时填写患者ID和就诊号：{string.Join("、", invalidDynamicTasks)}", Severity.Warning);
             return;
         }
 
@@ -614,8 +564,8 @@
 
         try
         {
-            _result = await inj_orchestrator.BackfillByVisitSnAsync(
-                visitSns, codes, _excludeSynced, _cts.Token,
+            _result = await inj_orchestrator.BackfillByPatientVisitAsync(
+                patientIds, visitSns, codes, _excludeSynced, _cts.Token,
                 onProgress: async evt =>
                 {
                     HandleProgress(evt);
@@ -838,6 +788,7 @@
         public SyncTask Task { get; set; } = default!;
         public bool Selected { get; set; }
         public bool TriggerRecordSelected { get; set; }
+        public bool IsDynamicApiSource { get; set; }
         public List<InterfaceSelection> Interfaces { get; set; } = [];
     }
 

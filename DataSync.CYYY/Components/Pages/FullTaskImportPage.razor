@@ -1,0 +1,469 @@
+﻿@page "/tasks/import"
+@inherits BasePage
+@inject TaskManagementService inj_taskManagementService
+@rendermode InteractiveServer
+
+<PageTitle>导入完整同步任务</PageTitle>
+
+<div class="full-import-page">
+    <div class="full-import-toolbar">
+        <div>
+            <MudText Typo="Typo.h5">导入完整同步任务</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                一次创建或更新 DynamicApi 采集源、同步任务和全部关联接口。
+            </MudText>
+        </div>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
+                   OnClick="@(() => inj_navigationManager.NavigateTo("/tasks"))">
+            返回列表
+        </MudButton>
+    </div>
+
+    <MudPaper Class="pa-4 mt-4 full-import-panel" Elevation="1">
+        <MudGrid>
+            <MudItem xs="12" sm="4">
+                <MudSelect T="string" Value="_mode" ValueChanged="OnModeChanged"
+                           Label="导入方式" Variant="Variant.Outlined">
+                    <MudSelectItem Value="@ModeCreate">创建新任务</MudSelectItem>
+                    <MudSelectItem Value="@ModeUpdate">更新已有任务</MudSelectItem>
+                </MudSelect>
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField T="string" Value="_json" ValueChanged="OnJsonChanged"
+                              Label="完整任务 JSON"
+                              Variant="Variant.Outlined"
+                              Lines="20"
+                              Immediate="true"
+                              HelperText="更新方式按 source.serverCode 和 task.code 定位；JSON 未列出的已有接口会保留。" />
+            </MudItem>
+        </MudGrid>
+
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" Class="mt-3"
+                   StartIcon="@Icons.Material.Filled.Preview" OnClick="PreviewImport">
+            生成导入预览
+        </MudButton>
+
+        @if (!string.IsNullOrWhiteSpace(_error))
+        {
+            <MudAlert Severity="Severity.Error" Class="mt-3">@_error</MudAlert>
+        }
+        else if (_preview != null)
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-3">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">请重点确认 Codex 推断的字段映射</MudText>
+                <div class="field-preview-grid">
+                    <div><span>采集时间字段</span><strong>@_preview.Source!.TimeField</strong></div>
+                    <div><span>采集主键</span><strong>@string.Join("、", _preview.Source.PrimaryKeys)</strong></div>
+                    <div><span>患者 ID 字段</span><strong>@_preview.Task!.PatientIdField</strong></div>
+                    <div><span>住院次数字段</span><strong>@_preview.Task.VisitSnField</strong></div>
+                </div>
+                <ul class="preview-list">
+                    @foreach (var item in _previewItems)
+                    {
+                        <li>@item</li>
+                    }
+                </ul>
+            </MudAlert>
+
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3"
+                       StartIcon="@Icons.Material.Filled.Save"
+                       Disabled="_saving" OnClick="ApplyImport">
+                @(_saving ? "保存中..." : "确认并保存")
+            </MudButton>
+        }
+    </MudPaper>
+</div>
+
+@code {
+    private const string ModeCreate = "Create";
+    private const string ModeUpdate = "Update";
+
+    private string _mode = ModeCreate;
+    private string _json = "";
+    private string? _error;
+    private FullSyncTaskImport? _preview;
+    private List<string> _previewItems = [];
+    private int _previewTaskId;
+    private bool _saving;
+
+    private readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
+    };
+
+    private void OnModeChanged(string mode)
+    {
+        _mode = mode;
+        ResetPreview();
+    }
+
+    private void OnJsonChanged(string json)
+    {
+        _json = json;
+        ResetPreview();
+    }
+
+    private async Task PreviewImport()
+    {
+        ResetPreview();
+        try
+        {
+            var import = ParseAndValidate();
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var sourceExists = await db.IngestionSources
+                .AsNoTracking()
+                .AnyAsync(source => source.ServerCode == import.Source!.ServerCode, CancellationToken);
+            var task = await db.SyncTasks
+                .AsNoTracking()
+                .Include(item => item.Interfaces)
+                .FirstOrDefaultAsync(item => item.Code == import.Task!.Code, CancellationToken);
+
+            ValidateMode(sourceExists, task);
+            ValidateExistingInterfaces(task, import.Interfaces!);
+
+            _previewItems = BuildPreviewItems(import, task);
+            _previewTaskId = task?.Id ?? 0;
+            _preview = import;
+        }
+        catch (JsonException ex)
+        {
+            _error = $"JSON 格式错误：{ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task ApplyImport()
+    {
+        if (_preview == null)
+            return;
+
+        _saving = true;
+        try
+        {
+            var import = _preview;
+            var sourceImport = import.Source!;
+            var taskImport = import.Task!;
+            var interfaceImports = import.Interfaces!;
+            var conflictCandidate = CreateTaskCandidate(import, _previewTaskId);
+            var conflicts = taskImport.Enabled
+                ? await inj_taskManagementService.GetEnabledConflictsAsync(conflictCandidate, CancellationToken)
+                : new List<TaskManagementService.TaskConflictInfo>();
+            if (conflicts.Count > 0)
+            {
+                var confirmed = await inj_dialogService.ShowMessageBox(
+                    "重复同步风险提示",
+                    TaskManagementService.BuildEnableConflictMessage(conflictCandidate, conflicts),
+                    yesText: "继续保存",
+                    cancelText: "取消");
+                if (confirmed != true)
+                    return;
+            }
+
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            await using var transaction = await db.Database.BeginTransactionAsync(CancellationToken);
+
+            var source = await db.IngestionSources
+                .FirstOrDefaultAsync(item => item.ServerCode == sourceImport.ServerCode, CancellationToken);
+            var task = await db.SyncTasks
+                .Include(item => item.Interfaces)
+                .FirstOrDefaultAsync(item => item.Code == taskImport.Code, CancellationToken);
+
+            ValidateMode(source != null, task);
+            ValidateExistingInterfaces(task, interfaceImports);
+
+            if (source == null)
+            {
+                source = new IngestionSource();
+                db.IngestionSources.Add(source);
+            }
+            ApplySource(source, sourceImport);
+
+            if (task == null)
+            {
+                task = new SyncTask();
+                db.SyncTasks.Add(task);
+            }
+            ApplyTask(task, taskImport, sourceImport.ServerCode);
+
+            foreach (var interfaceImport in interfaceImports)
+            {
+                var iface = task.Interfaces.FirstOrDefault(item =>
+                    string.Equals(item.InterfaceKey, interfaceImport.InterfaceKey, StringComparison.OrdinalIgnoreCase));
+                if (iface == null)
+                {
+                    iface = new SyncTaskInterface();
+                    task.Interfaces.Add(iface);
+                }
+                ApplyInterface(iface, interfaceImport);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            await transaction.CommitAsync(CancellationToken);
+
+            inj_snackbar.Add(_mode == ModeCreate ? "完整同步任务创建成功" : "完整同步任务更新成功", Severity.Success);
+            inj_navigationManager.NavigateTo($"/tasks/edit/{task.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = $"保存失败：{ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private FullSyncTaskImport ParseAndValidate()
+    {
+        var import = JsonSerializer.Deserialize<FullSyncTaskImport>(_json, _jsonOptions)
+            ?? throw new InvalidOperationException("JSON 内容不能为空");
+        var source = import.Source ?? throw new InvalidOperationException("source 不能为空");
+        var task = import.Task ?? throw new InvalidOperationException("task 不能为空");
+        var interfaces = import.Interfaces ?? throw new InvalidOperationException("interfaces 不能为空");
+
+        source.Name = (source.Name ?? "").Trim();
+        source.ServerCode = (source.ServerCode ?? "").Trim();
+        source.QueryPath = NormalizePath(source.QueryPath);
+        source.TimeField = (source.TimeField ?? "").Trim();
+        source.PrimaryKeys = (source.PrimaryKeys ?? [])
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        task.Name = (task.Name ?? "").Trim();
+        task.Code = (task.Code ?? "").Trim();
+        task.PushType = (task.PushType ?? "").Trim();
+        task.PushTarget = (task.PushTarget ?? "").Trim();
+        task.PatientIdField = (task.PatientIdField ?? "").Trim();
+        task.VisitSnField = (task.VisitSnField ?? "").Trim();
+
+        if (string.IsNullOrWhiteSpace(source.Name) || string.IsNullOrWhiteSpace(source.ServerCode) ||
+            string.IsNullOrWhiteSpace(source.QueryPath) || string.IsNullOrWhiteSpace(source.TimeField))
+            throw new InvalidOperationException("source 的 name、serverCode、queryPath、timeField 均不能为空");
+        if (source.PrimaryKeys.Count == 0)
+            throw new InvalidOperationException("source.primaryKeys 至少包含一个字段");
+        if (source.PollingIntervalSeconds < 10)
+            throw new InvalidOperationException("source.pollingIntervalSeconds 不能小于 10");
+        if (source.LookbackMinutes < 0 || source.StartOffsetMinutes <= source.EndOffsetMinutes || source.EndOffsetMinutes < 0)
+            throw new InvalidOperationException("source 的时间窗口配置无效，开始偏移必须大于结束偏移且不能为负数");
+
+        if (string.IsNullOrWhiteSpace(task.Name) || string.IsNullOrWhiteSpace(task.Code) ||
+            string.IsNullOrWhiteSpace(task.PushTarget) || string.IsNullOrWhiteSpace(task.PatientIdField) ||
+            string.IsNullOrWhiteSpace(task.VisitSnField))
+            throw new InvalidOperationException("task 的 name、code、pushTarget、patientIdField、visitSnField 均不能为空");
+        if (task.PushType is not "Api" and not "Database")
+            throw new InvalidOperationException("task.pushType 只支持 Api 或 Database");
+        if (task.PollingIntervalSeconds < 10 || task.PatientConcurrency < 1 || task.ApiConcurrency < 1)
+            throw new InvalidOperationException("task 的轮询间隔或并发数配置无效");
+        if (task.EnableTriggerRecordPush && string.IsNullOrWhiteSpace(task.TriggerPushTarget))
+            throw new InvalidOperationException("启用触发记录单独推送后，triggerPushTarget 不能为空");
+        if (interfaces.Count == 0)
+            throw new InvalidOperationException("interfaces 至少包含一个关联接口");
+
+        foreach (var iface in interfaces)
+        {
+            iface.InterfaceKey = (iface.InterfaceKey ?? "").Trim();
+            iface.ServerCode = (iface.ServerCode ?? "").Trim();
+            iface.DisplayName = (iface.DisplayName ?? "").Trim();
+            iface.QueryPath = NormalizePath(iface.QueryPath);
+            iface.AccessWindowStart = iface.AccessWindowStart?.Trim();
+            iface.AccessWindowEnd = iface.AccessWindowEnd?.Trim();
+            if (string.IsNullOrWhiteSpace(iface.InterfaceKey) || string.IsNullOrWhiteSpace(iface.ServerCode) ||
+                string.IsNullOrWhiteSpace(iface.DisplayName) || string.IsNullOrWhiteSpace(iface.QueryPath))
+                throw new InvalidOperationException("每个接口的 interfaceKey、serverCode、displayName、queryPath 均不能为空");
+            if (iface.InterfaceKey.Length > 100 || iface.InterfaceKey.Any(value =>
+                    !char.IsLetterOrDigit(value) && value is not '-' and not '_'))
+                throw new InvalidOperationException($"interfaceKey「{iface.InterfaceKey}」格式无效");
+            if (iface.SortOrder < 1)
+                throw new InvalidOperationException($"接口「{iface.InterfaceKey}」的 sortOrder 必须大于 0");
+
+            InterfaceAccessWindow.Validate(new SyncTaskInterface
+            {
+                DisplayName = iface.DisplayName,
+                AccessWindowEnabled = iface.AccessWindowEnabled,
+                AccessWindowStart = iface.AccessWindowStart,
+                AccessWindowEnd = iface.AccessWindowEnd
+            });
+        }
+
+        var duplicateKey = interfaces
+            .GroupBy(item => item.InterfaceKey, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1)?.Key;
+        if (duplicateKey != null)
+            throw new InvalidOperationException($"interfaces 存在重复的 interfaceKey：{duplicateKey}");
+        if (task.Enabled && interfaces.All(item => !item.Enabled))
+            throw new InvalidOperationException("启用任务时至少需要一个启用的关联接口");
+
+        return import;
+    }
+
+    private void ValidateMode(bool sourceExists, SyncTask? task)
+    {
+        if (_mode == ModeCreate && (sourceExists || task != null))
+            throw new InvalidOperationException("创建方式要求 source.serverCode 和 task.code 均不存在");
+        if (_mode == ModeUpdate && (!sourceExists || task == null))
+            throw new InvalidOperationException("更新方式要求采集源和同步任务均已存在");
+    }
+
+    private static void ValidateExistingInterfaces(SyncTask? task, IEnumerable<DynamicApiTaskInterfaceImport> imports)
+    {
+        if (task == null)
+            return;
+
+        foreach (var import in imports)
+        {
+            var existing = task.Interfaces.FirstOrDefault(item =>
+                string.Equals(item.InterfaceKey, import.InterfaceKey, StringComparison.OrdinalIgnoreCase));
+            if (existing != null && !IngestionService.IsDynamicApiSourceType(existing.SourceType))
+                throw new InvalidOperationException($"interfaceKey「{import.InterfaceKey}」已用于非 DynamicApi 接口，不能覆盖");
+        }
+    }
+
+    private List<string> BuildPreviewItems(FullSyncTaskImport import, SyncTask? existingTask)
+    {
+        var interfaces = import.Interfaces!;
+        var existingKeys = existingTask?.Interfaces
+            .Select(item => item.InterfaceKey)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+        var addCount = interfaces.Count(item => !existingKeys.Contains(item.InterfaceKey));
+        var updateCount = interfaces.Count - addCount;
+        var items = new List<string>
+        {
+            $"操作：{(_mode == ModeCreate ? "创建" : "更新")}采集源「{import.Source!.Name}」与任务「{import.Task!.Name}」",
+            $"采集接口：{import.Source.QueryPath}；请求参数仅 startTime、endTime",
+            $"关联接口：共 {interfaces.Count} 个，新增 {addCount} 个，更新 {updateCount} 个"
+        };
+        items.AddRange(interfaces
+            .OrderBy(item => item.SortOrder)
+            .Select(item => $"第 {item.SortOrder} 步：{item.DisplayName}（{item.InterfaceKey}）→ {item.QueryPath}"));
+        if (_mode == ModeUpdate)
+            items.Add("JSON 未列出的已有接口将保留，不会删除");
+        return items;
+    }
+
+    private static SyncTask CreateTaskCandidate(FullSyncTaskImport import, int taskId) => new()
+    {
+        Id = taskId,
+        Name = import.Task!.Name,
+        Code = import.Task.Code,
+        TriggerServerCode = import.Source!.ServerCode,
+        PushType = import.Task.PushType,
+        PushTarget = import.Task.PushTarget,
+        Enabled = import.Task.Enabled
+    };
+
+    private static void ApplySource(IngestionSource target, DynamicApiIngestionImport source)
+    {
+        target.Name = source.Name;
+        target.ServerCode = source.ServerCode;
+        target.SourceType = IngestionService.SourceTypeDynamicApi;
+        target.QueryPath = source.QueryPath;
+        target.TimeField = source.TimeField;
+        target.PrimaryKeys = string.Join(",", source.PrimaryKeys);
+        target.LookbackMinutes = source.LookbackMinutes;
+        target.PollingIntervalSeconds = source.PollingIntervalSeconds;
+        target.StartOffsetMinutes = source.StartOffsetMinutes;
+        target.StartOffsetUnit = "minutes";
+        target.EndOffsetMinutes = source.EndOffsetMinutes;
+        target.EndOffsetUnit = "minutes";
+        target.Enabled = source.Enabled;
+        target.Conditions = null;
+        target.DatabaseResourceId = null;
+        target.DatabaseType = IngestionService.DatabaseTypeSqlServer;
+        target.ConnectionStringName = null;
+        target.SqlServerHost = null;
+        target.SqlServerDatabase = null;
+        target.SqlServerUsername = null;
+        target.SqlServerPassword = null;
+        target.SqlServerTrustCertificate = true;
+        target.QuerySql = null;
+    }
+
+    private static void ApplyTask(SyncTask target, SyncTaskImport task, string triggerServerCode)
+    {
+        target.Name = task.Name;
+        target.Code = task.Code;
+        target.TriggerServerCode = triggerServerCode;
+        target.PushType = task.PushType;
+        target.PushTarget = task.PushTarget;
+        target.PatientIdField = task.PatientIdField;
+        target.VisitSnField = task.VisitSnField;
+        target.PollingIntervalSeconds = task.PollingIntervalSeconds;
+        target.PatientConcurrency = task.PatientConcurrency;
+        target.ApiConcurrency = task.ApiConcurrency;
+        target.Enabled = task.Enabled;
+        target.EnableTriggerRecordPush = task.EnableTriggerRecordPush;
+        target.TriggerPushTarget = task.EnableTriggerRecordPush ? task.TriggerPushTarget?.Trim() : null;
+        target.TriggerPushParams = task.EnableTriggerRecordPush && task.TriggerPushParams?.Count > 0
+            ? JsonSerializer.Serialize(task.TriggerPushParams)
+            : null;
+    }
+
+    private static void ApplyInterface(SyncTaskInterface target, DynamicApiTaskInterfaceImport iface)
+    {
+        target.InterfaceKey = iface.InterfaceKey;
+        target.ServerCode = iface.ServerCode;
+        target.DisplayName = iface.DisplayName;
+        target.SourceType = IngestionService.SourceTypeDynamicApi;
+        target.QueryPath = iface.QueryPath;
+        target.UseTodayTimeRange = iface.UseTodayTimeRange;
+        target.AccessWindowEnabled = iface.AccessWindowEnabled;
+        target.AccessWindowStart = iface.AccessWindowStart?.Trim();
+        target.AccessWindowEnd = iface.AccessWindowEnd?.Trim();
+        target.IsRequired = iface.IsRequired;
+        target.SortOrder = iface.SortOrder;
+        target.Enabled = iface.Enabled;
+        target.PushParams = iface.PushParams?.Count > 0 ? JsonSerializer.Serialize(iface.PushParams) : null;
+        target.InjectFields = iface.InjectFields?.Count > 0
+            ? JsonSerializer.Serialize(iface.InjectFields
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            : null;
+        target.OutputFields = string.Join(",", (iface.OutputFields ?? "")
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(target.OutputFields))
+            target.OutputFields = null;
+
+        target.DatabaseResourceId = null;
+        target.DatabaseType = IngestionService.DatabaseTypeSqlServer;
+        target.ConnectionStringName = null;
+        target.SqlServerHost = null;
+        target.SqlServerDatabase = null;
+        target.SqlServerUsername = null;
+        target.SqlServerPassword = null;
+        target.SqlServerTrustCertificate = true;
+        target.QuerySql = null;
+        target.QueryField = "";
+        target.QueryValueField = null;
+        target.FilterConditions = null;
+        target.ParentInterfaceKey = null;
+        target.ParentResultField = null;
+        target.LinkMappings = null;
+        target.MountField = null;
+        target.RouteField = null;
+        target.RouteOperator = "eq";
+        target.RouteValue = null;
+    }
+
+    private static string NormalizePath(string? path)
+    {
+        path = (path ?? "").Trim();
+        if (Uri.TryCreate(path, UriKind.Absolute, out _))
+            throw new InvalidOperationException("queryPath 只能填写查询端点前缀后的相对路径");
+        return path.Trim('/');
+    }
+
+    private void ResetPreview()
+    {
+        _error = null;
+        _preview = null;
+        _previewItems = [];
+        _previewTaskId = 0;
+    }
+}

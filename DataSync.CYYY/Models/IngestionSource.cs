@@ -20,7 +20,7 @@ public class IngestionSource
     public string ServerCode { get; set; } = "";
 
     /// <summary>
-    /// 来源类型：DataLake / Database
+    /// 来源类型：DataLake / DynamicApi / Database
     /// </summary>
     [Column("source_type")]
     public string SourceType { get; set; } = "DataLake";
@@ -75,6 +75,12 @@ public class IngestionSource
     /// </summary>
     [Column("query_sql")]
     public string? QuerySql { get; set; }
+
+    /// <summary>
+    /// 动态接口采集查询路径，填写查询端点前缀后的相对路径。
+    /// </summary>
+    [Column("query_path")]
+    public string? QueryPath { get; set; }
 
     [Column("time_field")]
     public string TimeField { get; set; } = "";

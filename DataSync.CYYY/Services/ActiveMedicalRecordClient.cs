@@ -19,25 +19,27 @@ public class ActiveMedicalRecordClient
         _logger = logger;
     }
 
-    public async Task<List<ActiveMedicalRecordInfo>> GetActiveRecordsAsync(
+    public async Task<ActiveMedicalRecordBatch> GetActiveRecordsAsync(
         ActiveSyncTask task,
+        long? cursor,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(task.ActiveRecordsUrl))
             throw new InvalidOperationException("Active 病历来源地址不能为空");
 
-        var url = BuildUrl(task);
+        var url = BuildUrl(task, cursor);
         var client = _httpClientFactory.CreateClient();
         using var response = await client.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-        var items = ResolveItemsElement(doc.RootElement);
+        var container = ResolveDataElement(doc.RootElement);
+        var items = ResolveItemsElement(container);
         if (items.ValueKind != JsonValueKind.Array)
         {
             _logger.LogWarning("Active 病历接口返回格式不正确，地址 {Url}", url);
-            return [];
+            return new ActiveMedicalRecordBatch();
         }
 
         var result = new List<ActiveMedicalRecordInfo>();
@@ -59,10 +61,14 @@ public class ActiveMedicalRecordClient
             });
         }
 
-        return result;
+        return new ActiveMedicalRecordBatch
+        {
+            Items = result,
+            NextCursor = ReadNullableLong(container, "nextCursor", "next_cursor")
+        };
     }
 
-    private static string BuildUrl(ActiveSyncTask task)
+    private static string BuildUrl(ActiveSyncTask task, long? cursor)
     {
         var parameters = new List<string>
         {
@@ -71,26 +77,27 @@ public class ActiveMedicalRecordClient
 
         if (!string.IsNullOrWhiteSpace(task.IntegrationProjectCode))
             parameters.Add($"integrationProjectCode={Uri.EscapeDataString(task.IntegrationProjectCode)}");
+        if (cursor.HasValue)
+            parameters.Add($"cursor={cursor.Value}");
 
         var separator = task.ActiveRecordsUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
         return $"{task.ActiveRecordsUrl}{separator}{string.Join("&", parameters)}";
     }
 
-    private static JsonElement ResolveItemsElement(JsonElement root)
+    private static JsonElement ResolveDataElement(JsonElement root)
     {
-        if (root.ValueKind == JsonValueKind.Array)
-            return root;
-
         if (TryGetProperty(root, out var data, "data"))
-        {
-            if (data.ValueKind == JsonValueKind.Array)
-                return data;
+            return data;
 
-            if (TryGetProperty(data, out var items, "items", "records"))
-                return items;
-        }
+        return root;
+    }
 
-        return TryGetProperty(root, out var rootItems, "items", "records") ? rootItems : default;
+    private static JsonElement ResolveItemsElement(JsonElement container)
+    {
+        if (container.ValueKind == JsonValueKind.Array)
+            return container;
+
+        return TryGetProperty(container, out var items, "items", "records") ? items : default;
     }
 
     private static string ReadString(JsonElement element, params string[] names)
@@ -108,6 +115,12 @@ public class ActiveMedicalRecordClient
     {
         var text = ReadNullableString(element, names);
         return long.TryParse(text, out var value) ? value : 0;
+    }
+
+    private static long? ReadNullableLong(JsonElement element, params string[] names)
+    {
+        var text = ReadNullableString(element, names);
+        return long.TryParse(text, out var value) ? value : null;
     }
 
     private static DateTime? ReadNullableDateTime(JsonElement element, params string[] names)

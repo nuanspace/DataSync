@@ -7,10 +7,16 @@
 
 <div class="task-list-toolbar">
     <MudText Typo="Typo.h5">任务管理</MudText>
-    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
-               OnClick="@(() => inj_navigationManager.NavigateTo("/tasks/create"))">
-        新增任务
-    </MudButton>
+    <div class="task-list-actions">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.UploadFile"
+                   OnClick="@(() => inj_navigationManager.NavigateTo("/tasks/import"))">
+            导入完整任务
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="@(() => inj_navigationManager.NavigateTo("/tasks/create"))">
+            新增任务
+        </MudButton>
+    </div>
 </div>
 
 <MudTable Items="_tasks" Hover="true" Striped="true" Loading="_loading" LoadingProgressColor="Color.Primary"
@@ -18,7 +24,7 @@
     <HeaderContent>
         <MudTh>名称</MudTh>
         <MudTh>编码</MudTh>
-        <MudTh>患者来源接口</MudTh>
+        <MudTh>触发采集源</MudTh>
         <MudTh>推送方式</MudTh>
         <MudTh>接口数</MudTh>
         <MudTh>启用</MudTh>
@@ -29,7 +35,7 @@
         <MudTd DataLabel="编码">
             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@context.Code</MudChip>
         </MudTd>
-        <MudTd DataLabel="触发源">@context.TriggerServerCode</MudTd>
+        <MudTd DataLabel="触发采集源">@GetTriggerSourcesText(context)</MudTd>
         <MudTd DataLabel="推送方式">@context.PushType</MudTd>
         <MudTd DataLabel="接口数">@context.Interfaces.Count</MudTd>
         <MudTd DataLabel="启用">
@@ -53,6 +59,14 @@
 @code {
     private List<SyncTask> _tasks = [];
     private bool _loading = true;
+
+    private static string GetTriggerSourcesText(SyncTask task)
+    {
+        var additionalCount = task.AdditionalTriggerServerCodeArray.Length;
+        return additionalCount == 0
+            ? task.TriggerServerCode
+            : $"{task.TriggerServerCode}（另 {additionalCount} 个）";
+    }
 
     protected override async Task OnPageInitializedAsync()
     {

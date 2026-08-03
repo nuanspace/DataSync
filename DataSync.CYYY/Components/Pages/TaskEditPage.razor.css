@@ -112,6 +112,52 @@
     line-height: 1.5;
 }
 
+::deep .task-config-tabs {
+    width: 100%;
+}
+
+::deep .task-config-tabs .mud-tabs-tabbar {
+    padding: 6px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+
+::deep .task-config-tabs .mud-tab {
+    min-height: 48px;
+    border-radius: 13px;
+    color: var(--mud-palette-text-secondary);
+    font-weight: 650;
+    transition: color 140ms ease, background-color 140ms ease;
+}
+
+::deep .task-config-tabs .mud-tab.mud-tab-active {
+    color: var(--mud-palette-primary);
+    background: rgba(var(--mud-palette-primary-rgb), 0.08);
+}
+
+::deep .task-config-tabs .mud-tabs-slider {
+    height: 2px;
+    border-radius: 999px;
+}
+
+::deep .task-config-tab-panel {
+    padding: 20px 0 0 !important;
+    animation: task-tab-enter 160ms ease-out;
+}
+
+@keyframes task-tab-enter {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .task-panel-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

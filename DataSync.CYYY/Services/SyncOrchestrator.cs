@@ -18,6 +18,7 @@ public class SyncOrchestrator
     private const string StageFailed = "失败";
 
     private readonly DataLakeClient _dataLakeClient;
+    private readonly DynamicApiClient _dynamicApiClient;
     private readonly DatabaseQueryService _databaseQueryService;
     private readonly PushServiceFactory _pushServiceFactory;
     private readonly ApiPushService _apiPushService;
@@ -29,6 +30,7 @@ public class SyncOrchestrator
 
     public SyncOrchestrator(
         DataLakeClient dataLakeClient,
+        DynamicApiClient dynamicApiClient,
         DatabaseQueryService databaseQueryService,
         PushServiceFactory pushServiceFactory,
         ApiPushService apiPushService,
@@ -39,6 +41,7 @@ public class SyncOrchestrator
         ILogger<SyncOrchestrator> logger)
     {
         _dataLakeClient = dataLakeClient;
+        _dynamicApiClient = dynamicApiClient;
         _databaseQueryService = databaseQueryService;
         _pushServiceFactory = pushServiceFactory;
         _apiPushService = apiPushService;
@@ -74,6 +77,14 @@ public class SyncOrchestrator
             .OrderBy(i => i.SortOrder)
             .ToList();
         var interfaces = FilterSelectedInterfaces(enabledInterfaces, selectedInterfaceIds);
+        var now = DateTime.Now;
+        var blockedInterface = interfaces.FirstOrDefault(iface => !InterfaceAccessWindow.IsOpen(iface, now));
+        if (blockedInterface != null)
+        {
+            var nextOpen = InterfaceAccessWindow.GetNextOpen(blockedInterface, now);
+            throw new InvalidOperationException(
+                $"接口 [{blockedInterface.DisplayName}] 当前不在允许访问时段，下次可访问时间 {nextOpen:yyyy-MM-dd HH:mm}");
+        }
 
         // 按患者ID分组：同一患者的多条记录串行处理，避免接口推送顺序交叉
         var patientGroups = triggerRecords
@@ -102,6 +113,22 @@ public class SyncOrchestrator
 
         await Task.WhenAll(patientTasks);
         return result;
+    }
+
+    /// <summary>
+    /// 复用同步任务接口配置查询 Active 病例数据，不执行推送。
+    /// </summary>
+    public Task<List<Dictionary<string, object>>> QueryInterfaceForActiveAsync(
+        SyncTaskInterface iface,
+        SyncTask task,
+        Dictionary<string, object> triggerRecord,
+        CancellationToken ct)
+    {
+        var hisPatId = GetStringValue(triggerRecord, task.PatientIdField);
+        var visitSn = string.IsNullOrWhiteSpace(task.VisitSnField)
+            ? null
+            : GetStringValue(triggerRecord, task.VisitSnField);
+        return QueryInterfaceFromTriggerAsync(iface, task, triggerRecord, hisPatId, visitSn, ct);
     }
 
     public async Task PushTriggerRecordAsync(
@@ -160,107 +187,10 @@ public class SyncOrchestrator
     }
 
     /// <summary>
-    /// 按患者ID补数据：采集 → 本地表过滤 → 推送
+    /// 按患者ID、就诊号或两者配对补数据：采集 → 本地表过滤 → 推送
     /// </summary>
-    public async Task<SyncResult> BackfillByPatientIdAsync(
+    public async Task<SyncResult> BackfillByPatientVisitAsync(
         List<string> hisPatIds,
-        List<string> taskCodes,
-        bool excludeSynced,
-        CancellationToken ct,
-        Func<BackfillProgressEvent, Task>? onProgress = null,
-        Dictionary<string, List<int>>? selectedInterfaceIdsByTask = null,
-        Dictionary<string, bool>? includeTriggerRecordByTask = null)
-    {
-        var result = new SyncResult();
-
-        foreach (var taskCode in taskCodes)
-        {
-            var task = await _logService.GetTaskByCodeAsync(taskCode, ct);
-            if (task == null)
-            {
-                _logger.LogWarning("未找到任务: {TaskCode}", taskCode);
-                continue;
-            }
-
-            // 报告任务开始（按患者ID补录时标记跳过过滤步骤）
-            if (onProgress != null)
-                await onProgress(new BackfillProgressEvent
-                { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.TaskStart, SkipFilter = true });
-
-            var source = await _ingestionService.GetSourceByServerCodeAsync(task.TriggerServerCode, ct);
-            if (source == null)
-            {
-                _logger.LogWarning("未找到触发源 {ServerCode} 对应的采集源配置", task.TriggerServerCode);
-                continue;
-            }
-
-            // 1. 采集到本地：用患者ID构建数据湖查询条件
-            var conditions = new List<DataLakeCondition>
-            {
-                new() { Column = task.PatientIdField, Type = "in", Value = string.Join(",", hisPatIds) }
-            };
-            await _ingestionService.IngestForBackfillAsync(source, conditions, ct);
-
-            // 2. 从本地表查询（跳过过滤规则，用户已明确指定患者）
-            var records = await _localQueryService.QueryCandidatesAsync(
-                task, ct,
-                scopeField: task.PatientIdField,
-                scopeValues: hisPatIds,
-                scopeOperator: "in",
-                excludeSyncedOverride: excludeSynced,
-                skipRules: true);
-
-            // 报告采集完成（按患者ID无需过滤）
-            if (onProgress != null)
-                await onProgress(new BackfillProgressEvent
-                { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.Ingested, Count = records.Count, SkipFilter = true });
-
-            if (records.Count == 0)
-            {
-                _logger.LogInformation("补录按患者ID未查到候选记录: {TaskCode}", taskCode);
-                if (onProgress != null)
-                    await onProgress(new BackfillProgressEvent
-                    { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.TaskDone });
-                continue;
-            }
-
-            // 报告开始同步
-            if (onProgress != null)
-                await onProgress(new BackfillProgressEvent
-                { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.SyncStart, Total = records.Count });
-
-            // 3. 推送
-            var subResult = await ExecuteSyncAsync(
-                task,
-                records,
-                "Backfill",
-                ct,
-                onProgress,
-                selectedInterfaceIds: GetSelectedInterfaceIds(selectedInterfaceIdsByTask, taskCode),
-                executeTriggerRecordPush: ShouldIncludeTriggerRecord(includeTriggerRecordByTask, taskCode),
-                reportNoDataAsSkipped: true);
-            result.SuccessCount += subResult.SuccessCount;
-            result.FailCount += subResult.FailCount;
-            result.SkipCount += subResult.SkipCount;
-            result.FailDetails.AddRange(subResult.FailDetails);
-
-            // 报告任务完成
-            if (onProgress != null)
-                await onProgress(new BackfillProgressEvent
-                { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.TaskDone });
-        }
-
-        // 报告全部完成
-        if (onProgress != null)
-            await onProgress(new BackfillProgressEvent { Phase = BackfillPhase.AllDone });
-
-        return result;
-    }
-
-    /// <summary>
-    /// 按就诊号补数据：采集 → 本地表过滤 → 推送
-    /// </summary>
-    public async Task<SyncResult> BackfillByVisitSnAsync(
         List<string> visitSns,
         List<string> taskCodes,
         bool excludeSynced,
@@ -269,6 +199,23 @@ public class SyncOrchestrator
         Dictionary<string, List<int>>? selectedInterfaceIdsByTask = null,
         Dictionary<string, bool>? includeTriggerRecordByTask = null)
     {
+        var hasPatientIds = hisPatIds.Count > 0;
+        var hasVisitSns = visitSns.Count > 0;
+        if (!hasPatientIds && !hasVisitSns)
+            throw new InvalidOperationException("患者ID和就诊号不能同时为空");
+        if (hasPatientIds && hasVisitSns && hisPatIds.Count != visitSns.Count)
+            throw new InvalidOperationException("患者ID和就诊号数量必须一致");
+
+        var patientVisits = hasPatientIds && hasVisitSns
+            ? hisPatIds.Zip(visitSns, (patientId, visitId) => (PatientId: patientId, VisitId: visitId))
+                .DistinctBy(item => $"{item.PatientId}\u001f{item.VisitId}", StringComparer.OrdinalIgnoreCase)
+                .ToList()
+            : [];
+        hisPatIds = hisPatIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        visitSns = visitSns.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var modeName = patientVisits.Count > 0
+            ? "患者ID+就诊号"
+            : hasPatientIds ? "患者ID" : "就诊号";
         var result = new SyncResult();
 
         foreach (var taskCode in taskCodes)
@@ -284,7 +231,7 @@ public class SyncOrchestrator
                 await onProgress(new BackfillProgressEvent
                 { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.TaskStart, SkipFilter = true });
 
-            if (string.IsNullOrWhiteSpace(task.VisitSnField))
+            if (hasVisitSns && string.IsNullOrWhiteSpace(task.VisitSnField))
             {
                 var errorMessage = "当前任务未配置就诊号字段";
                 result.FailCount++;
@@ -293,7 +240,7 @@ public class SyncOrchestrator
                     TaskName = task.Name,
                     ErrorMessage = errorMessage
                 });
-                _logger.LogWarning("任务 {TaskCode} 未配置就诊号字段，无法按就诊号补录", taskCode);
+                _logger.LogWarning("任务 {TaskCode} 未配置就诊号字段，无法按{ModeName}补录", taskCode, modeName);
 
                 if (onProgress != null)
                     await onProgress(new BackfillProgressEvent
@@ -308,19 +255,56 @@ public class SyncOrchestrator
                 continue;
             }
 
-            var conditions = new List<DataLakeCondition>
-            {
-                new() { Column = task.VisitSnField, Type = "in", Value = string.Join(",", visitSns) }
-            };
-            await _ingestionService.IngestForBackfillAsync(source, conditions, ct);
+            if (IngestionService.IsDynamicApiSource(source) && patientVisits.Count == 0)
+                throw new InvalidOperationException($"DynamicApi 目标 [{task.Name}] 必须同时提供患者ID和就诊号");
 
-            var records = await _localQueryService.QueryCandidatesAsync(
-                task, ct,
-                scopeField: task.VisitSnField,
-                scopeValues: visitSns,
-                scopeOperator: "in",
-                excludeSyncedOverride: excludeSynced,
-                skipRules: true);
+            var conditions = new List<DataLakeCondition>();
+            if (hasPatientIds)
+            {
+                conditions.Add(new DataLakeCondition
+                { Column = task.PatientIdField, Type = "in", Value = string.Join(",", hisPatIds) });
+            }
+            if (hasVisitSns)
+            {
+                conditions.Add(new DataLakeCondition
+                { Column = task.VisitSnField!, Type = "in", Value = string.Join(",", visitSns) });
+            }
+
+            await _ingestionService.IngestForBackfillAsync(
+                source,
+                conditions,
+                ct,
+                patientVisits.Count > 0 ? patientVisits : null);
+
+            List<Dictionary<string, object>> records;
+            if (patientVisits.Count > 0)
+            {
+                records = [];
+                foreach (var (patientId, visitId) in patientVisits)
+                {
+                    records.AddRange(await _localQueryService.QueryCandidatesAsync(
+                        task, ct,
+                        scopeField: task.PatientIdField,
+                        scopeValues: [patientId],
+                        scopeOperator: "in",
+                        excludeSyncedOverride: excludeSynced,
+                        skipRules: true,
+                        mainEqualsFilters: new Dictionary<string, string>
+                        {
+                            [task.VisitSnField!] = visitId
+                        }));
+                }
+            }
+            else
+            {
+                records = await _localQueryService.QueryCandidatesAsync(
+                    task, ct,
+                    scopeField: hasPatientIds ? task.PatientIdField : task.VisitSnField,
+                    scopeValues: hasPatientIds ? hisPatIds : visitSns,
+                    scopeOperator: "in",
+                    excludeSyncedOverride: excludeSynced,
+                    skipRules: true);
+            }
 
             if (onProgress != null)
                 await onProgress(new BackfillProgressEvent
@@ -328,7 +312,7 @@ public class SyncOrchestrator
 
             if (records.Count == 0)
             {
-                _logger.LogInformation("补录按就诊号未查到候选记录: {TaskCode}", taskCode);
+                _logger.LogInformation("补录按{ModeName}未查到候选记录: {TaskCode}", modeName, taskCode);
                 if (onProgress != null)
                     await onProgress(new BackfillProgressEvent
                     { TaskCode = taskCode, TaskName = task.Name, Phase = BackfillPhase.TaskDone });
@@ -572,19 +556,24 @@ public class SyncOrchestrator
                     if (execution.Status == InterfaceExecutionStatus.Success)
                     {
                         hadSuccessfulInterface = true;
+                        AddCompletedInterface(result, iface);
                     }
                     else if (execution.Status == InterfaceExecutionStatus.Skipped)
                     {
                         hadSkippedInterface = true;
+                        AddCompletedInterface(result, iface);
                     }
                     else if (iface.IsRequired)
                     {
                         var reason = string.IsNullOrWhiteSpace(detail.ErrorMessage)
                             ? "未返回具体错误"
                             : detail.ErrorMessage;
-                        fatalException = new InvalidOperationException(
+                        fatalException ??= new InvalidOperationException(
                             $"必要接口 {iface.ServerCode}({iface.DisplayName}) 失败：{reason}");
-                        break;
+                    }
+                    else
+                    {
+                        AddCompletedInterface(result, iface);
                     }
                 }
 
@@ -955,6 +944,12 @@ public class SyncOrchestrator
             .ToList();
     }
 
+    private static void AddCompletedInterface(SyncResult result, SyncTaskInterface iface)
+    {
+        lock (result.CompletedInterfaceKeys)
+            result.CompletedInterfaceKeys.Add(InterfaceAccessWindow.GetProgressKey(iface));
+    }
+
     private static IReadOnlyCollection<int>? GetSelectedInterfaceIds(
         Dictionary<string, List<int>>? selectedInterfaceIdsByTask,
         string taskCode)
@@ -983,6 +978,9 @@ public class SyncOrchestrator
         if (errorMessage.StartsWith("[数据湖查询]", StringComparison.Ordinal))
             return StageFetchFailed;
 
+        if (errorMessage.StartsWith("[动态接口查询]", StringComparison.Ordinal))
+            return StageFetchFailed;
+
         if (errorMessage.StartsWith("[数据库查询]", StringComparison.Ordinal) ||
             errorMessage.StartsWith("[SQL查询]", StringComparison.Ordinal))
             return StageFetchFailed;
@@ -1000,6 +998,23 @@ public class SyncOrchestrator
         string? visitSn,
         CancellationToken ct)
     {
+        if (IsDynamicApiInterface(iface))
+        {
+            try
+            {
+                return await _dynamicApiClient.QueryAllPagesAsync(
+                    iface.QueryPath ?? "",
+                    hisPatId,
+                    visitSn ?? "",
+                    iface.UseTodayTimeRange,
+                    ct);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"[动态接口查询] {ex.Message}", ex);
+            }
+        }
+
         string queryValue;
         if (!string.IsNullOrEmpty(iface.QueryValueField))
         {
@@ -1021,6 +1036,9 @@ public class SyncOrchestrator
     {
         try
         {
+            if (IsDynamicApiInterface(iface))
+                throw new InvalidOperationException("动态接口只支持按患者触发记录查询");
+
             var validValues = queryValues
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1056,7 +1074,7 @@ public class SyncOrchestrator
         }
         catch (Exception ex)
         {
-            var prefix = IsDatabaseInterface(iface) ? "[数据库查询]" : "[数据湖查询]";
+            var prefix = GetQueryErrorPrefix(iface);
             throw new InvalidOperationException($"{prefix} {ex.Message}", ex);
         }
     }
@@ -1069,6 +1087,9 @@ public class SyncOrchestrator
     {
         try
         {
+            if (IsDynamicApiInterface(iface))
+                throw new InvalidOperationException("动态接口不支持父子关联查询");
+
             var validSets = queryValueSets
                 .Where(set => set.Values.Count > 0 && set.Values.All(value => !string.IsNullOrWhiteSpace(value.Value)))
                 .DistinctBy(set => BuildLinkValuesKey(set.Values))
@@ -1114,13 +1135,24 @@ public class SyncOrchestrator
         }
         catch (Exception ex)
         {
-            var prefix = IsDatabaseInterface(iface) ? "[数据库查询]" : "[数据湖查询]";
+            var prefix = GetQueryErrorPrefix(iface);
             throw new InvalidOperationException($"{prefix} {ex.Message}", ex);
         }
     }
 
     private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
         IngestionService.IsDatabaseSourceType(iface.SourceType);
+
+    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDynamicApiSourceType(iface.SourceType);
+
+    private static string GetQueryErrorPrefix(SyncTaskInterface iface)
+    {
+        if (IsDatabaseInterface(iface))
+            return "[数据库查询]";
+
+        return IsDynamicApiInterface(iface) ? "[动态接口查询]" : "[数据湖查询]";
+    }
 
     private async Task<DatabaseConnectionConfig> ResolveDatabaseConnectionAsync(
         SyncTaskInterface iface,

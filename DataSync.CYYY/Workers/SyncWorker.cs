@@ -211,12 +211,24 @@ public class SyncWorker : BackgroundService
                                 freshTask, source, snapshotRecord, ct);
                             if (triggerRecord == null)
                             {
-                                waitingCount++;
-                                await pendingSyncService.MarkWaitingAsync(
-                                    pendingItem.Id,
-                                    "同步条件未满足，等待依赖数据",
-                                    TimeSpan.FromSeconds(freshTask.PollingIntervalSeconds),
-                                    ct);
+                                var unfilteredRecord = await localQueryService.QueryMatchingTriggerRecordAsync(
+                                    freshTask, source, snapshotRecord, ct, skipRules: true);
+                                if (unfilteredRecord != null)
+                                {
+                                    await pendingSyncService.MarkSkippedAsync(
+                                        pendingItem.Id,
+                                        "未满足任务过滤条件",
+                                        ct);
+                                }
+                                else
+                                {
+                                    waitingCount++;
+                                    await pendingSyncService.MarkWaitingAsync(
+                                        pendingItem.Id,
+                                        "同步条件未满足，等待依赖数据",
+                                        TimeSpan.FromSeconds(freshTask.PollingIntervalSeconds),
+                                        ct);
+                                }
                                 continue;
                             }
 
@@ -248,27 +260,48 @@ public class SyncWorker : BackgroundService
                                 }
                             }
 
+                            var completedKeys = pendingItem.CompletedInterfaceKeySet;
+                            var remainingInterfaces = GetRemainingTopLevelInterfaces(freshTask, completedKeys);
+                            if (remainingInterfaces.Count == 0)
+                            {
+                                successCount++;
+                                await pendingSyncService.MarkSuccessAsync(pendingItem.Id, ct);
+                                continue;
+                            }
+
+                            var now = DateTime.Now;
+                            var dueInterfaces = remainingInterfaces
+                                .Where(iface => IsExecutionUnitOpen(freshTask, iface, now))
+                                .ToList();
+                            if (dueInterfaces.Count == 0)
+                            {
+                                waitingCount++;
+                                await pendingSyncService.MarkDeferredAsync(
+                                    pendingItem.Id,
+                                    GetNextExecutionTime(freshTask, remainingInterfaces, now),
+                                    ct);
+                                continue;
+                            }
+
                             var result = await orchestrator.ExecuteSyncAsync(
                                 freshTask,
                                 [triggerRecord],
                                 "Scheduled",
                                 ct,
                                 skipTriggerRecordPush: freshTask.EnableTriggerRecordPush,
-                                sourceRecordKey: pendingItem.SourceRecordKey);
+                                sourceRecordKey: pendingItem.SourceRecordKey,
+                                selectedInterfaceIds: dueInterfaces.Select(iface => iface.Id).ToList());
 
-                            if (result.FailCount == 0 && result.SuccessCount > 0)
+                            if (result.CompletedInterfaceKeys.Count > 0)
                             {
-                                successCount++;
-                                await pendingSyncService.MarkSuccessAsync(pendingItem.Id, ct);
-                            }
-                            else if (result.FailCount == 0 && result.SkipCount > 0)
-                            {
-                                await pendingSyncService.MarkSkippedAsync(
+                                completedKeys.UnionWith(result.CompletedInterfaceKeys);
+                                await pendingSyncService.SaveCompletedInterfacesAsync(
                                     pendingItem.Id,
-                                    "未命中任何可发送的关联分支",
+                                    result.CompletedInterfaceKeys,
                                     ct);
                             }
-                            else
+
+                            if (result.FailCount > 0)
                             {
                                 failCount++;
                                 var errorMessage = result.FailDetails.FirstOrDefault()?.ErrorMessage ?? "同步对象未完成";
@@ -276,6 +309,22 @@ public class SyncWorker : BackgroundService
                                     pendingItem.Id,
                                     errorMessage,
                                     TimeSpan.FromSeconds(freshTask.PollingIntervalSeconds),
+                                    ct);
+                                continue;
+                            }
+
+                            remainingInterfaces = GetRemainingTopLevelInterfaces(freshTask, completedKeys);
+                            if (remainingInterfaces.Count == 0)
+                            {
+                                successCount++;
+                                await pendingSyncService.MarkSuccessAsync(pendingItem.Id, ct);
+                            }
+                            else
+                            {
+                                waitingCount++;
+                                await pendingSyncService.MarkDeferredAsync(
+                                    pendingItem.Id,
+                                    GetNextExecutionTime(freshTask, remainingInterfaces, DateTime.Now),
                                     ct);
                             }
                         }
@@ -341,15 +390,82 @@ public class SyncWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var logService = scope.ServiceProvider.GetRequiredService<SyncLogService>();
         var tasks = await logService.GetEnabledTasksAsync(ct);
-        if (tasks.Count == 0 || tasks.All(t => t.Interfaces.All(IsDatabaseInterface)))
+        if (tasks.Count == 0)
             return true;
 
-        var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
-        return await dlClient.HasConfigAsync(ct);
+        if (tasks.Any(t => t.Interfaces.Any(i => i.Enabled && IsDataLakeInterface(i))))
+        {
+            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
+            if (!await dlClient.HasConfigAsync(ct))
+                return false;
+        }
+
+        if (tasks.Any(t => t.Interfaces.Any(i => i.Enabled && IsDynamicApiInterface(i))))
+        {
+            var dynamicApiClient = scope.ServiceProvider.GetRequiredService<DynamicApiClient>();
+            if (!await dynamicApiClient.HasConfigAsync(ct))
+                return false;
+        }
+
+        return true;
     }
 
-    private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
-        IngestionService.IsDatabaseSourceType(iface.SourceType);
+    private static bool IsDataLakeInterface(SyncTaskInterface iface) =>
+        string.Equals(
+            IngestionService.NormalizeSourceType(iface.SourceType),
+            IngestionService.SourceTypeDataLake,
+            StringComparison.Ordinal);
+
+    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDynamicApiSourceType(iface.SourceType);
+
+    private static List<SyncTaskInterface> GetRemainingTopLevelInterfaces(
+        SyncTask task,
+        HashSet<string> completedKeys)
+        => task.Interfaces
+            .Where(iface => iface.Enabled && string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+            .Where(iface => !completedKeys.Contains(InterfaceAccessWindow.GetProgressKey(iface)))
+            .OrderBy(iface => iface.SortOrder)
+            .ToList();
+
+    private static bool IsExecutionUnitOpen(SyncTask task, SyncTaskInterface root, DateTime now)
+        => GetExecutionUnit(task, root).All(iface => InterfaceAccessWindow.IsOpen(iface, now));
+
+    private static DateTime GetNextExecutionTime(
+        SyncTask task,
+        IEnumerable<SyncTaskInterface> roots,
+        DateTime now)
+        => roots
+            .SelectMany(root => GetExecutionUnit(task, root))
+            .Where(iface => !InterfaceAccessWindow.IsOpen(iface, now))
+            .Select(iface => InterfaceAccessWindow.GetNextOpen(iface, now))
+            .DefaultIfEmpty(now)
+            .Min();
+
+    private static List<SyncTaskInterface> GetExecutionUnit(SyncTask task, SyncTaskInterface root)
+    {
+        var result = new List<SyncTaskInterface> { root };
+        var parentKeys = new Queue<string>();
+        if (!string.IsNullOrWhiteSpace(root.InterfaceKey))
+            parentKeys.Enqueue(root.InterfaceKey);
+
+        while (parentKeys.Count > 0)
+        {
+            var parentKey = parentKeys.Dequeue();
+            foreach (var child in task.Interfaces.Where(iface =>
+                         iface.Enabled && string.Equals(
+                             iface.ParentInterfaceKey,
+                             parentKey,
+                             StringComparison.OrdinalIgnoreCase)))
+            {
+                result.Add(child);
+                if (!string.IsNullOrWhiteSpace(child.InterfaceKey))
+                    parentKeys.Enqueue(child.InterfaceKey);
+            }
+        }
+
+        return result;
+    }
 
     /// <summary>
     /// 每天执行一次日志清理

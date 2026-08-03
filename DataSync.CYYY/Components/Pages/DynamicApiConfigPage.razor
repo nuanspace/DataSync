@@ -1,0 +1,195 @@
+﻿@page "/dynamic-api"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>动态接口平台配置</PageTitle>
+
+<MudText Typo="Typo.h5">动态接口平台配置</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-4" />
+}
+else
+{
+    @if (!_hasConfig)
+    {
+        <MudAlert Severity="Severity.Warning" Class="mt-4">
+            尚未配置动态接口平台，使用 DynamicApi 来源的同步任务无法执行。
+        </MudAlert>
+    }
+
+    <MudPaper Class="pa-4 mt-4" Elevation="1">
+        <MudGrid>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.BaseUrl" Label="BaseUrl" Required="true"
+                              Variant="Variant.Outlined" HelperText="填写接口平台基础地址" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.TokenEndpoint" Label="Token 端点" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12">
+                <MudTextField @bind-Value="_config.QueryEndpointPrefix" Label="查询端点前缀" Required="true"
+                              Variant="Variant.Outlined"
+                              HelperText="任务接口中的查询路径会拼接到此前缀后" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.AppKey" Label="AppKey" Required="true"
+                              Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudTextField @bind-Value="_config.AppSecret" Label="AppSecret" Required="true"
+                              Variant="Variant.Outlined"
+                              InputType="@(_showSecret ? InputType.Text : InputType.Password)"
+                              Adornment="Adornment.End"
+                              AdornmentIcon="@(_showSecret ? Icons.Material.Filled.VisibilityOff : Icons.Material.Filled.Visibility)"
+                              OnAdornmentClick="@(() => _showSecret = !_showSecret)" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_config.PageSize" Label="每页大小" Min="1"
+                                 Variant="Variant.Outlined" />
+            </MudItem>
+            <MudItem xs="12" sm="6">
+                <MudNumericField @bind-Value="_config.RequestIntervalMilliseconds" Label="请求间隔（毫秒）" Min="0"
+                                 Variant="Variant.Outlined" />
+            </MudItem>
+        </MudGrid>
+    </MudPaper>
+
+    <div class="mt-4">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   OnClick="Save" Disabled="_saving">
+            @(_saving ? "保存中..." : "保存")
+        </MudButton>
+        <MudButton Variant="Variant.Outlined" Color="Color.Info" Class="ml-2"
+                   StartIcon="@Icons.Material.Filled.NetworkCheck"
+                   OnClick="TestConnection" Disabled="_testing">
+            @(_testing ? "测试中..." : "测试连接")
+        </MudButton>
+    </div>
+}
+
+@code {
+    private DynamicApiConfig _config = new();
+    private bool _hasConfig;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private bool _showSecret;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var existing = await db.DynamicApiConfigs.FirstOrDefaultAsync(CancellationToken);
+            if (existing != null)
+            {
+                _config = existing;
+                _hasConfig = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载配置失败：{ex.Message}", Severity.Error);
+        }
+
+        _loading = false;
+    }
+
+    private async Task TestConnection()
+    {
+        if (!ValidateForm())
+            return;
+
+        _testing = true;
+        try
+        {
+            await inj_dynamicApiClient.TestConnectionAsync(_config, CancellationToken);
+            inj_snackbar.Add("连接测试成功", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"连接测试失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task Save()
+    {
+        if (!ValidateForm())
+            return;
+
+        _saving = true;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var existing = await db.DynamicApiConfigs.FirstOrDefaultAsync(CancellationToken);
+            if (existing != null)
+            {
+                existing.BaseUrl = _config.BaseUrl.Trim();
+                existing.TokenEndpoint = _config.TokenEndpoint.Trim();
+                existing.QueryEndpointPrefix = _config.QueryEndpointPrefix.Trim();
+                existing.AppKey = _config.AppKey.Trim();
+                existing.AppSecret = _config.AppSecret;
+                existing.PageSize = _config.PageSize;
+                existing.RequestIntervalMilliseconds = _config.RequestIntervalMilliseconds;
+                existing.UpdatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _config.BaseUrl = _config.BaseUrl.Trim();
+                _config.TokenEndpoint = _config.TokenEndpoint.Trim();
+                _config.QueryEndpointPrefix = _config.QueryEndpointPrefix.Trim();
+                _config.AppKey = _config.AppKey.Trim();
+                _config.UpdatedAt = DateTime.UtcNow;
+                db.DynamicApiConfigs.Add(_config);
+            }
+
+            await db.SaveChangesAsync(CancellationToken);
+            inj_dynamicApiClient.ReloadConfig();
+            _hasConfig = true;
+            inj_snackbar.Add("动态接口平台配置已保存并生效", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private bool ValidateForm()
+    {
+        if (string.IsNullOrWhiteSpace(_config.BaseUrl) ||
+            string.IsNullOrWhiteSpace(_config.TokenEndpoint) ||
+            string.IsNullOrWhiteSpace(_config.QueryEndpointPrefix) ||
+            string.IsNullOrWhiteSpace(_config.AppKey) ||
+            string.IsNullOrWhiteSpace(_config.AppSecret))
+        {
+            inj_snackbar.Add("请填写所有必填字段", Severity.Warning);
+            return false;
+        }
+
+        if (!Uri.TryCreate(_config.BaseUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme is not ("http" or "https"))
+        {
+            inj_snackbar.Add("BaseUrl 必须是有效的 HTTP 或 HTTPS 地址", Severity.Warning);
+            return false;
+        }
+
+        if (_config.PageSize < 1 || _config.RequestIntervalMilliseconds < 0)
+        {
+            inj_snackbar.Add("每页大小必须大于 0，请求间隔不能小于 0", Severity.Warning);
+            return false;
+        }
+
+        return true;
+    }
+}

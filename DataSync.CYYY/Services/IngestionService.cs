@@ -7,12 +7,13 @@ using Npgsql;
 namespace DataSync.CYYY.Services;
 
 /// <summary>
-/// 采集服务：从数据湖增量查询并 UPSERT 到本地采集表。
+/// 采集服务：从数据湖、动态接口或数据库增量查询并 UPSERT 到本地采集表。
 /// </summary>
 public class IngestionService
 {
     private const int UpsertBatchSize = 200;
     public const string SourceTypeDataLake = "DataLake";
+    public const string SourceTypeDynamicApi = "DynamicApi";
     public const string SourceTypeDatabase = "Database";
     public const string SourceTypeSqlServer = "SqlServer";
     public const string SourceTypeOracle = "Oracle";
@@ -20,6 +21,7 @@ public class IngestionService
     public const string DatabaseTypeOracle = "Oracle";
 
     private readonly DataLakeClient _dataLakeClient;
+    private readonly DynamicApiClient _dynamicApiClient;
     private readonly DatabaseQueryService _databaseQueryService;
     private readonly PendingSyncService _pendingSyncService;
     private readonly SyncTaskSignalService _syncTaskSignalService;
@@ -45,6 +47,7 @@ public class IngestionService
 
     public IngestionService(
         DataLakeClient dataLakeClient,
+        DynamicApiClient dynamicApiClient,
         DatabaseQueryService databaseQueryService,
         PendingSyncService pendingSyncService,
         SyncTaskSignalService syncTaskSignalService,
@@ -54,6 +57,7 @@ public class IngestionService
         ILogger<IngestionService> logger)
     {
         _dataLakeClient = dataLakeClient;
+        _dynamicApiClient = dynamicApiClient;
         _databaseQueryService = databaseQueryService;
         _pendingSyncService = pendingSyncService;
         _syncTaskSignalService = syncTaskSignalService;
@@ -132,10 +136,11 @@ public class IngestionService
     public async Task<int> IngestForBackfillAsync(
         IngestionSource source,
         List<DataLakeCondition> conditions,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyCollection<(string PatientId, string VisitId)>? patientVisits = null)
     {
         var (from, to) = ExtractTimeRange(source, conditions);
-        return await IngestCoreAsync(source, conditions, "Backfill", from, to, ct);
+        return await IngestCoreAsync(source, conditions, "Backfill", from, to, ct, patientVisits);
     }
 
     /// <summary>
@@ -147,7 +152,8 @@ public class IngestionService
         string triggerType,
         DateTime? from,
         DateTime? to,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyCollection<(string PatientId, string VisitId)>? patientVisits = null)
     {
         var startedAt = DateTime.Now;
         var mergedConditions = new List<DataLakeCondition>(conditions);
@@ -160,7 +166,8 @@ public class IngestionService
         {
             _logger.LogDebug("采集 [{Name}] 查询条件数 {Count}", source.Name, mergedConditions.Count);
 
-            if (!string.IsNullOrWhiteSpace(source.Conditions))
+            if (!IsDatabaseSource(source) && !IsDynamicApiSource(source) &&
+                !string.IsNullOrWhiteSpace(source.Conditions))
             {
                 var extra = JsonSerializer.Deserialize<List<DataLakeCondition>>(source.Conditions);
                 if (extra?.Count > 0)
@@ -215,6 +222,49 @@ public class IngestionService
                 else
                 {
                     throw new InvalidOperationException("数据库采集必须提供时间范围，或提供 eq/in 字段条件用于按值补录");
+                }
+
+                apiCount = records.Count;
+                pageCount = records.Count > 0 ? 1 : 0;
+
+                if (records.Count > 0)
+                {
+                    await UpsertToLocalAsync(source, records, ct);
+
+                    if (triggerType == "Scheduled")
+                    {
+                        var taskCodes = await _pendingSyncService.EnqueueForIngestedRecordsAsync(source, records, ct);
+                        foreach (var taskCode in taskCodes)
+                            notifiedTaskCodes.Add(taskCode);
+                    }
+                }
+            }
+            else if (IsDynamicApiSource(source))
+            {
+                List<Dictionary<string, object>> records;
+                if (patientVisits is { Count: > 0 })
+                {
+                    records = [];
+                    foreach (var (patientId, visitId) in patientVisits)
+                    {
+                        records.AddRange(await _dynamicApiClient.QueryAllPagesAsync(
+                            source.QueryPath ?? "",
+                            patientId,
+                            visitId,
+                            false,
+                            ct));
+                    }
+                }
+                else
+                {
+                    if (!from.HasValue || !to.HasValue)
+                        throw new InvalidOperationException("DynamicApi 采集源按对象补录必须同时提供患者ID和就诊号");
+
+                    records = await _dynamicApiClient.QueryByTimeRangeAsync(
+                        source.QueryPath ?? "",
+                        from.Value,
+                        to.Value,
+                        ct);
                 }
 
                 apiCount = records.Count;
@@ -336,6 +386,9 @@ public class IngestionService
     public static bool IsDatabaseSource(IngestionSource source) =>
         IsDatabaseSourceType(source.SourceType);
 
+    public static bool IsDynamicApiSource(IngestionSource source) =>
+        IsDynamicApiSourceType(source.SourceType);
+
     public static bool IsSqlServerSource(IngestionSource source) =>
         IsDatabaseSource(source) &&
         IsSqlServerDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
@@ -349,8 +402,16 @@ public class IngestionService
         string.Equals(sourceType, SourceTypeSqlServer, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(sourceType, SourceTypeOracle, StringComparison.OrdinalIgnoreCase);
 
-    public static string NormalizeSourceType(string? sourceType) =>
-        IsDatabaseSourceType(sourceType) ? SourceTypeDatabase : SourceTypeDataLake;
+    public static bool IsDynamicApiSourceType(string? sourceType) =>
+        string.Equals(sourceType, SourceTypeDynamicApi, StringComparison.OrdinalIgnoreCase);
+
+    public static string NormalizeSourceType(string? sourceType)
+    {
+        if (IsDatabaseSourceType(sourceType))
+            return SourceTypeDatabase;
+
+        return IsDynamicApiSourceType(sourceType) ? SourceTypeDynamicApi : SourceTypeDataLake;
+    }
 
     public static string NormalizeDatabaseType(string? databaseType, string? sourceType = null)
     {

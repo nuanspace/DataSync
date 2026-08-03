@@ -46,7 +46,9 @@ CREATE TABLE cyyy.sync_task_interfaces (
     output_fields   TEXT,                                  -- 根接口输出字段，逗号分隔
     push_params     TEXT,                                  -- 推送目标占位符参数
     inject_fields   TEXT,                                  -- 注入字段 JSON
-    filter_conditions TEXT                                 -- 过滤条件 JSON
+    filter_conditions TEXT,                                -- 过滤条件 JSON
+    query_path      TEXT,                                  -- 动态接口查询路径
+    use_today_time_range BOOLEAN NOT NULL DEFAULT FALSE    -- 是否传入当天完整时间范围
 );
 
 CREATE UNIQUE INDEX ix_sync_task_interfaces_task_interface_key
@@ -150,6 +152,7 @@ CREATE TABLE cyyy.ingestion_sources (
     id                       SERIAL PRIMARY KEY,
     name                     VARCHAR(100) NOT NULL,
     server_code              VARCHAR(100) NOT NULL UNIQUE,
+    query_path               TEXT,
     time_field               VARCHAR(100) NOT NULL,
     primary_keys             VARCHAR(500) NOT NULL,
     polling_interval_seconds INT NOT NULL DEFAULT 300,
@@ -240,3 +243,18 @@ CREATE TABLE cyyy.data_lake_configs (
     "UpdatedAt"      TIMESTAMP NOT NULL DEFAULT NOW()
 );
 COMMENT ON TABLE cyyy.data_lake_configs IS '数据湖连接配置（全局唯一）';
+
+-- 11. 动态接口平台配置
+CREATE TABLE IF NOT EXISTS cyyy.dynamic_api_configs (
+    "Id"                          SERIAL PRIMARY KEY,
+    "BaseUrl"                     VARCHAR(500) NOT NULL,
+    "TokenEndpoint"               VARCHAR(200) NOT NULL DEFAULT '/api/v1/auth/token',
+    "QueryEndpointPrefix"         VARCHAR(300) NOT NULL DEFAULT '/api/dynamic/api/inpatient/query',
+    "AppKey"                      VARCHAR(200) NOT NULL DEFAULT '',
+    "AppSecret"                   VARCHAR(500) NOT NULL DEFAULT '',
+    "PageSize"                    INT NOT NULL DEFAULT 100,
+    "RequestIntervalMilliseconds" INT NOT NULL DEFAULT 200,
+    "UpdatedAt"                   TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE cyyy.dynamic_api_configs IS '动态接口平台连接与认证配置';

@@ -81,6 +81,7 @@
         <MudTh>最近开始</MudTh>
         <MudTh>最近完成</MudTh>
         <MudTh>最后错误</MudTh>
+        <MudTh>操作</MudTh>
     </HeaderContent>
     <RowTemplate>
         <MudTd>
@@ -119,7 +120,7 @@
         </MudTd>
         <MudTd>
             <MudChip T="string" Color="@GetStatusColor(context.Status)" Size="Size.Small">
-                @GetStatusLabel(context.Status)
+                @GetStatusLabel(context)
             </MudChip>
         </MudTd>
         <MudTd>@context.RetryCount</MudTd>
@@ -138,6 +139,15 @@
                         </div>
                     </ChildContent>
                 </MudTooltip>
+            }
+        </MudTd>
+        <MudTd>
+            @if (context.Status == PendingSyncStatuses.Failed)
+            {
+                <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Primary"
+                           OnClick="@(() => RetryAsync(context.Id))">
+                    重新推送
+                </MudButton>
             }
         </MudTd>
     </RowTemplate>
@@ -230,6 +240,20 @@
             await _table.ReloadServerData();
     }
 
+    private async Task RetryAsync(long id)
+    {
+        var taskCode = await inj_pendingSyncService.RetryManuallyAsync(id, CancellationToken);
+        if (string.IsNullOrWhiteSpace(taskCode))
+        {
+            inj_snackbar.Add("待同步对象不存在", Severity.Warning);
+            return;
+        }
+
+        inj_syncTaskSignalService.Notify(taskCode);
+        inj_snackbar.Add("已重新加入同步队列", Severity.Success);
+        await SearchAsync();
+    }
+
     private bool ApplyQueryFilters()
     {
         var taskCode = string.IsNullOrWhiteSpace(QueryTaskCode) ? null : QueryTaskCode;
@@ -286,6 +310,12 @@
             PendingSyncStatuses.Skipped => "跳过",
             _ => status
         };
+
+    private static string GetStatusLabel(PendingSyncItem item)
+        => item.Status == PendingSyncStatuses.Waiting &&
+           item.LastError?.StartsWith("等待接口闲时窗口", StringComparison.Ordinal) == true
+            ? "等待闲时"
+            : GetStatusLabel(item.Status);
 
     private static Color GetStatusColor(string status)
         => status switch

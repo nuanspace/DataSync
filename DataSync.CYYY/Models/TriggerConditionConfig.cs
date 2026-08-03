@@ -44,7 +44,7 @@ public class ConditionRule
     public string Field { get; set; } = "";
 
     /// <summary>
-    /// 模式：include（接受）/ exclude（排除）/ not_null（非空）
+    /// 模式：include（接受）/ exclude（排除）/ contains（包含）/ not_null（非空）
     /// </summary>
     [JsonPropertyName("mode")]
     public string Mode { get; set; } = "include";

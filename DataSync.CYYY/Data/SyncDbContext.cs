@@ -16,6 +16,7 @@ public class SyncDbContext : DbContext
     public DbSet<IngestionSource> IngestionSources => Set<IngestionSource>();
     public DbSet<DataLakeInterface> DataLakeInterfaces => Set<DataLakeInterface>();
     public DbSet<DataLakeConfig> DataLakeConfigs => Set<DataLakeConfig>();
+    public DbSet<DynamicApiConfig> DynamicApiConfigs => Set<DynamicApiConfig>();
     public DbSet<DatabaseResource> DatabaseResources => Set<DatabaseResource>();
     public DbSet<ActiveSyncTask> ActiveSyncTasks => Set<ActiveSyncTask>();
     public DbSet<ActiveSyncSource> ActiveSyncSources => Set<ActiveSyncSource>();
@@ -62,6 +63,11 @@ public class SyncDbContext : DbContext
         modelBuilder.Entity<DataLakeConfig>(e =>
         {
             e.ToTable("data_lake_configs");
+        });
+
+        modelBuilder.Entity<DynamicApiConfig>(e =>
+        {
+            e.ToTable("dynamic_api_configs");
         });
 
         // SyncLog 索引

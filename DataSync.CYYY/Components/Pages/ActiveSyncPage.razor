@@ -1,4 +1,4 @@
-@page "/active-sync"
+﻿@page "/active-sync"
 @inherits BasePage
 @rendermode InteractiveServer
 
@@ -370,6 +370,7 @@
                                                 <MudTh>结果</MudTh>
                                                 <MudTh>下次查询</MudTh>
                                                 <MudTh>错误</MudTh>
+                                                <MudTh>重试</MudTh>
                                             </HeaderContent>
                                             <RowTemplate>
                                                 <MudTd DataLabel="住院号">@context.InpatientNo</MudTd>
@@ -385,6 +386,19 @@
                                                     else
                                                     {
                                                         <span class="runtime-error" title="@context.LastError">@context.LastError</span>
+                                                    }
+                                                </MudTd>
+                                                <MudTd DataLabel="重试">
+                                                    @if (context.HasPendingCase && context.RetryCount >= 3)
+                                                    {
+                                                        <MudButton Variant="Variant.Text" Size="Size.Small"
+                                                                   OnClick="@(() => RetryCaseAsync(context.Id))">
+                                                            手动重试
+                                                        </MudButton>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span>@context.RetryCount</span>
                                                     }
                                                 </MudTd>
                                             </RowTemplate>
@@ -505,7 +519,8 @@
 
     protected override async Task OnPageInitializedAsync()
     {
-        await LoadData();
+        inj_navigationManager.NavigateTo("/tasks", replace: true);
+        await Task.CompletedTask;
     }
 
     private async Task LoadData()
@@ -603,13 +618,16 @@
         var sourceNames = _editingSources.ToDictionary(s => s.Id, GetSourceInterfaceLabel);
         _runtimeStates = states.Select(state => new ActiveSourceRuntimeState
         {
+            Id = state.Id,
             InpatientNo = state.InpatientNo,
             SourceName = sourceNames.TryGetValue(state.SourceId, out var sourceName) ? sourceName : $"子源 {state.SourceId}",
             LastQueryAt = state.LastQueryAt,
             LastResultCount = state.LastResultCount,
             NextQueryTime = state.NextQueryTime,
             EmptyCount = state.EmptyCount,
-            LastError = state.LastError
+            LastError = state.LastError,
+            RetryCount = state.RetryCount,
+            HasPendingCase = !string.IsNullOrWhiteSpace(state.PendingCaseJson)
         }).ToList();
 
         _runLogs = await db.ActiveSyncRunLogs
@@ -630,6 +648,13 @@
             return;
 
         await LoadRuntimeData(_editingTask.Id);
+    }
+
+    private async Task RetryCaseAsync(long stateId)
+    {
+        await inj_activeSyncService.RetryCaseAsync(stateId, CancellationToken);
+        inj_snackbar.Add("已重新加入在院增量队列", Severity.Success);
+        await RefreshRuntimeData();
     }
 
     private async Task SaveTask()
@@ -1125,6 +1150,7 @@
 
     private sealed class ActiveSourceRuntimeState
     {
+        public long Id { get; set; }
         public string InpatientNo { get; set; } = "";
         public string SourceName { get; set; } = "";
         public DateTime? LastQueryAt { get; set; }
@@ -1132,5 +1158,7 @@
         public DateTime? NextQueryTime { get; set; }
         public int EmptyCount { get; set; }
         public string? LastError { get; set; }
+        public int RetryCount { get; set; }
+        public bool HasPendingCase { get; set; }
     }
 }

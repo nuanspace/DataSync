@@ -4,7 +4,7 @@ using DataSync.CYYY.Services;
 namespace DataSync.CYYY.Workers;
 
 /// <summary>
-/// 采集后台任务 — 定时从数据湖拉取数据到本地采集表，定期刷新配置
+/// 采集后台任务 — 定时从采集源拉取数据到本地采集表，定期刷新配置
 /// </summary>
 public class IngestionWorker : BackgroundService
 {
@@ -29,7 +29,7 @@ public class IngestionWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // 等待数据湖配置就绪
+        // 等待启用采集源所需的平台配置就绪
         {
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -42,7 +42,7 @@ public class IngestionWorker : BackgroundService
                 {
                     _logger.LogWarning(ex, "检查数据湖配置时出错");
                 }
-                _logger.LogWarning("数据湖未配置，IngestionWorker 等待中...");
+                _logger.LogWarning("采集平台配置未就绪，IngestionWorker 等待中...");
                 await Task.Delay(TimeSpan.FromSeconds(ConfigReloadIntervalSeconds), stoppingToken);
             }
         }
@@ -184,10 +184,25 @@ public class IngestionWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var ingestionService = scope.ServiceProvider.GetRequiredService<IngestionService>();
         var sources = await ingestionService.GetEnabledSourcesAsync(ct);
-        if (sources.Count == 0 || sources.All(IngestionService.IsDatabaseSource))
+        if (sources.Count == 0)
             return true;
 
-        var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
-        return await dlClient.HasConfigAsync(ct);
+        if (sources.Any(source =>
+                !IngestionService.IsDatabaseSource(source) &&
+                !IngestionService.IsDynamicApiSource(source)))
+        {
+            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
+            if (!await dlClient.HasConfigAsync(ct))
+                return false;
+        }
+
+        if (sources.Any(IngestionService.IsDynamicApiSource))
+        {
+            var dynamicApiClient = scope.ServiceProvider.GetRequiredService<DynamicApiClient>();
+            if (!await dynamicApiClient.HasConfigAsync(ct))
+                return false;
+        }
+
+        return true;
     }
 }

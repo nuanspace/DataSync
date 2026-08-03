@@ -31,6 +31,21 @@ public class ActiveSyncTask
     [Column("integration_project_code")]
     public string? IntegrationProjectCode { get; set; }
 
+    [Column("last_cursor")]
+    public long? LastCursor { get; set; }
+
+    /// <summary>
+    /// Active 病历中用于同步任务患者 ID 的字段。
+    /// </summary>
+    [Column("patient_id_source")]
+    public string PatientIdSource { get; set; } = "Mrn";
+
+    /// <summary>
+    /// Active 病历中用于同步任务就诊号的字段。
+    /// </summary>
+    [Column("visit_sn_source")]
+    public string VisitSnSource { get; set; } = "InpatientNo";
+
     [Column("push_type")]
     public string PushType { get; set; } = "Api";
 
@@ -158,6 +173,15 @@ public class ActiveSyncCaseSourceState
     [Column("last_error")]
     public string? LastError { get; set; }
 
+    /// <summary>
+    /// 待执行病例快照；成功后清空。
+    /// </summary>
+    [Column("pending_case_json")]
+    public string? PendingCaseJson { get; set; }
+
+    [Column("retry_count")]
+    public int RetryCount { get; set; }
+
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
@@ -247,4 +271,11 @@ public class ActiveMedicalRecordInfo
     public Guid? PatientId { get; set; }
 
     public Guid? EventId { get; set; }
+}
+
+public class ActiveMedicalRecordBatch
+{
+    public List<ActiveMedicalRecordInfo> Items { get; set; } = [];
+
+    public long? NextCursor { get; set; }
 }

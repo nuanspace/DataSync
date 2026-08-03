@@ -1,0 +1,500 @@
+﻿@inherits BasePage
+
+<section class="active-sync-settings">
+    <div class="active-sync-heading">
+        <div>
+            <div class="active-sync-tag">在院增量</div>
+            <MudText Typo="Typo.h6">Active 病历同步</MudText>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                公共查询与推送配置直接继承当前同步任务，这里只维护在院增量参数。
+            </MudText>
+        </div>
+        <MudSwitch T="bool" @bind-Value="_enabled" Color="Color.Success" Label="启用在院增量" />
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="mt-3" />
+    }
+    else
+    {
+        @if (_lastRunAt.HasValue || _receiptCount > 0)
+        {
+            <div class="active-runtime-line">
+                <span>最近执行 <strong>@FormatDateTime(_lastRunAt)</strong></span>
+                <span>监控病例 <strong>@_caseCount</strong></span>
+                <span>已推送记录 <strong>@_receiptCount</strong></span>
+                <span class="@(_errorCount > 0 ? "has-error" : string.Empty)">异常 <strong>@_errorCount</strong></span>
+            </div>
+        }
+
+        <div class="active-task-grid @(_enabled ? string.Empty : "is-disabled")">
+            <MudTextField @bind-Value="_activeRecordsUrl"
+                          Label="Active 病历接口地址"
+                          Placeholder="http://localhost:50146/api/active-medical-records"
+                          Variant="Variant.Outlined"
+                          Disabled="@(!_enabled)"
+                          Required="@_enabled" />
+            <MudTextField @bind-Value="_integrationProjectCode"
+                          Label="项目编码"
+                          Variant="Variant.Outlined"
+                          Disabled="@(!_enabled)" />
+            <MudSelect T="string"
+                       @bind-Value="_patientIdSource"
+                       Label="患者ID取值字段"
+                       HelperText="从 Active 病历接口返回值中取值，用于填充同步任务的患者ID字段"
+                       Variant="Variant.Outlined"
+                       Disabled="@(!_enabled)">
+                @foreach (var option in ActiveIdentitySources)
+                {
+                    <MudSelectItem Value="@option.Value">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+            <MudSelect T="string"
+                       @bind-Value="_visitSnSource"
+                       Label="住院次数取值字段"
+                       HelperText="从 Active 病历接口返回值中取值，用于填充同步任务的住院次数字段"
+                       Variant="Variant.Outlined"
+                       Disabled="@(!_enabled)">
+                @foreach (var option in ActiveIdentitySources)
+                {
+                    <MudSelectItem Value="@option.Value">@option.Label</MudSelectItem>
+                }
+            </MudSelect>
+            <MudNumericField @bind-Value="_caseBatchSize"
+                             Label="每轮病例数"
+                             Variant="Variant.Outlined"
+                             Min="1"
+                             Max="500"
+                             Disabled="@(!_enabled)" />
+            <MudNumericField @bind-Value="_concurrency"
+                             Label="并发数"
+                             Variant="Variant.Outlined"
+                             Min="1"
+                             Max="20"
+                             Disabled="@(!_enabled)" />
+            <MudNumericField @bind-Value="_pollingIntervalSeconds"
+                             Label="病例轮询间隔(秒)"
+                             Variant="Variant.Outlined"
+                             Min="60"
+                             Disabled="@(!_enabled)" />
+            <MudNumericField @bind-Value="_emptyBackoffBaseSeconds"
+                             Label="空结果退避(秒)"
+                             Variant="Variant.Outlined"
+                             Min="60"
+                             Disabled="@(!_enabled)" />
+            <MudNumericField @bind-Value="_emptyBackoffMaxSeconds"
+                             Label="最大退避(秒)"
+                             Variant="Variant.Outlined"
+                             Min="60"
+                             Disabled="@(!_enabled)" />
+        </div>
+
+        <div class="active-interface-heading">
+            <div>
+                <MudText Typo="Typo.subtitle1">增量接口</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    数据库、SQL、查询字段和推送路由均继承上方接口配置。
+                </MudText>
+            </div>
+            <span>@_drafts.Count 个接口</span>
+        </div>
+
+        @if (_drafts.Count == 0)
+        {
+            <div class="active-empty">当前任务没有可用于在院增量同步的接口。</div>
+        }
+        else
+        {
+            <div class="active-interface-list @(_enabled ? string.Empty : "is-disabled")">
+                @foreach (var draft in _drafts.OrderBy(item => item.Interface.SortOrder).ThenBy(item => item.Interface.ServerCode))
+                {
+                    <div class="active-interface-row" @key="draft.Key">
+                        <div class="active-interface-identity">
+                            <MudSwitch T="bool" @bind-Value="draft.Enabled" Color="Color.Success" Disabled="@(!_enabled)" />
+                            <div>
+                                <strong>@GetInterfaceName(draft.Interface)</strong>
+                                <span>@GetSourceTypeText(draft.Interface) · @draft.Interface.ServerCode · 查询字段 @draft.Interface.QueryField</span>
+                            </div>
+                        </div>
+                        <MudTextField @bind-Value="draft.RecordKeyFields"
+                                      Label="增量唯一键字段"
+                                      HelperText="多个字段用逗号分隔；留空时自动计算整行 SHA-256"
+                                      Variant="Variant.Outlined"
+                                      Disabled="@(!_enabled || !draft.Enabled)" />
+                        <MudNumericField @bind-Value="draft.PollingIntervalSeconds"
+                                         Label="接口轮询(秒)"
+                                         Variant="Variant.Outlined"
+                                         Min="60"
+                                         Disabled="@(!_enabled || !draft.Enabled)" />
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="active-log-heading">
+            <div>
+                <MudText Typo="Typo.subtitle1">运行日志</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">最近 80 条 Active 病历同步记录。</MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Refresh"
+                       Disabled="@(_activeTaskId <= 0 || _refreshingLogs)"
+                       OnClick="RefreshRuntimeAsync">
+                刷新日志
+            </MudButton>
+        </div>
+
+        @if (_activeTaskId <= 0)
+        {
+            <div class="active-log-empty">保存同步任务后可查看运行日志。</div>
+        }
+        else if (_runLogs.Count == 0)
+        {
+            <div class="active-log-empty">还没有运行日志。</div>
+        }
+        else
+        {
+            <div class="active-log-list">
+                @foreach (var log in _runLogs)
+                {
+                    <div class="active-log-row" @key="log.Id">
+                        <div class="active-log-head">
+                            <span class="@GetLogLevelClass(log.Level)">@GetLogLevelText(log.Level)</span>
+                            <time>@FormatDateTime(log.CreatedAt)</time>
+                        </div>
+                        <div class="active-log-message">@log.Message</div>
+                        <div class="active-log-meta">
+                            <span>@(string.IsNullOrWhiteSpace(log.SourceName) ? "任务" : log.SourceName)</span>
+                            @if (!string.IsNullOrWhiteSpace(log.InpatientNo))
+                            {
+                                <span>住院号 @log.InpatientNo</span>
+                            }
+                            <span>Active @log.ActiveCaseCount</span>
+                            <span>查询 @log.QueryCount</span>
+                            <span>推送 @log.PushedCount</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public SyncTask TaskConfig { get; set; } = new();
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SyncTaskInterface> Interfaces { get; set; } = [];
+
+    private readonly List<ActiveInterfaceDraft> _drafts = [];
+    private readonly Dictionary<int, ActiveSyncSource> _existingSources = [];
+    private bool _loading = true;
+    private bool _enabled;
+    private int _activeTaskId;
+    private string _activeTaskCode = "";
+    private string _activeRecordsUrl = "";
+    private string? _integrationProjectCode;
+    private string _patientIdSource = "Mrn";
+    private string _visitSnSource = "InpatientNo";
+    private int _caseBatchSize = 50;
+    private int _concurrency = 3;
+    private int _pollingIntervalSeconds = 300;
+    private int _emptyBackoffBaseSeconds = 1800;
+    private int _emptyBackoffMaxSeconds = 7200;
+    private DateTime? _lastRunAt;
+    private int _caseCount;
+    private int _receiptCount;
+    private int _errorCount;
+    private List<ActiveSyncRunLog> _runLogs = [];
+    private bool _refreshingLogs;
+
+    protected override async Task OnPageInitializedAsync()
+    {
+        if (TaskConfig.Id > 0)
+            await LoadAsync(TaskConfig.Id);
+
+        SyncDrafts(Interfaces);
+        _loading = false;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!_loading)
+            SyncDrafts(Interfaces);
+    }
+
+    public async Task SaveAsync(
+        int taskId,
+        string taskName,
+        string taskCode,
+        string pushType,
+        string pushTarget,
+        IReadOnlyList<SyncTaskInterface> interfaces)
+    {
+        if (taskId <= 0)
+            throw new InvalidOperationException("同步任务尚未保存，无法保存 Active 增量配置");
+
+        SyncDrafts(interfaces);
+        Normalize();
+        if (_enabled && string.IsNullOrWhiteSpace(_activeRecordsUrl))
+            throw new InvalidOperationException("启用在院增量后必须填写 Active 病历接口地址");
+
+        if (_enabled && _drafts.All(item => !item.Enabled))
+            throw new InvalidOperationException("启用在院增量后至少需要启用一个接口");
+
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var activeTask = await db.ActiveSyncTasks
+            .Include(item => item.Sources)
+            .FirstOrDefaultAsync(item => item.SyncTaskId == taskId, CancellationToken);
+
+        if (activeTask == null)
+        {
+            activeTask = new ActiveSyncTask
+            {
+                SyncTaskId = taskId,
+                Code = await BuildAvailableCodeAsync(db, taskCode, taskId)
+            };
+            db.ActiveSyncTasks.Add(activeTask);
+        }
+
+        activeTask.Name = $"{taskName} 在院增量";
+        activeTask.Enabled = _enabled;
+        activeTask.ActiveRecordsUrl = _activeRecordsUrl;
+        activeTask.IntegrationProjectCode = _integrationProjectCode;
+        activeTask.PatientIdSource = _patientIdSource;
+        activeTask.VisitSnSource = _visitSnSource;
+        activeTask.PushType = pushType;
+        activeTask.PushTarget = pushTarget;
+        activeTask.CaseBatchSize = _caseBatchSize;
+        activeTask.Concurrency = _concurrency;
+        activeTask.PollingIntervalSeconds = _pollingIntervalSeconds;
+        activeTask.EmptyBackoffBaseSeconds = _emptyBackoffBaseSeconds;
+        activeTask.EmptyBackoffMaxSeconds = _emptyBackoffMaxSeconds;
+
+        var sourcesByInterfaceId = activeTask.Sources
+            .Where(item => item.SyncTaskInterfaceId.HasValue)
+            .GroupBy(item => item.SyncTaskInterfaceId!.Value)
+            .ToDictionary(group => group.Key, group => group.First());
+
+        foreach (var draft in _drafts)
+        {
+            var iface = draft.Interface;
+            if (iface.Id <= 0)
+                throw new InvalidOperationException($"接口 {GetInterfaceName(iface)} 尚未保存，无法建立增量配置");
+
+            if (!sourcesByInterfaceId.TryGetValue(iface.Id, out var source))
+            {
+                source = new ActiveSyncSource { SyncTaskInterfaceId = iface.Id };
+                activeTask.Sources.Add(source);
+            }
+
+            source.DataType = "Source";
+            source.ServerCode = iface.ServerCode;
+            source.DisplayName = GetInterfaceName(iface);
+            source.DatabaseResourceId = iface.DatabaseResourceId;
+            source.QuerySql = iface.QuerySql ?? "";
+            source.InpatientNoParameter = "InpatientNo";
+            source.AdmissionTimeParameter = null;
+            source.SourceRecordKeyFields = draft.RecordKeyFields;
+            source.PollingIntervalSeconds = draft.PollingIntervalSeconds;
+            source.SortOrder = iface.SortOrder;
+            source.Enabled = draft.Enabled;
+        }
+
+        var currentInterfaceIds = _drafts
+            .Select(item => item.Interface.Id)
+            .Where(id => id > 0)
+            .ToHashSet();
+        foreach (var obsoleteSource in activeTask.Sources.Where(item =>
+                     item.SyncTaskInterfaceId.HasValue && !currentInterfaceIds.Contains(item.SyncTaskInterfaceId.Value)))
+        {
+            obsoleteSource.Enabled = false;
+        }
+
+        await db.SaveChangesAsync(CancellationToken);
+        _activeTaskId = activeTask.Id;
+        _activeTaskCode = activeTask.Code;
+    }
+
+    private async Task LoadAsync(int taskId)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var activeTask = await db.ActiveSyncTasks
+            .AsNoTracking()
+            .Include(item => item.Sources)
+            .OrderBy(item => item.Id)
+            .FirstOrDefaultAsync(item => item.SyncTaskId == taskId, CancellationToken);
+        if (activeTask == null)
+            return;
+
+        _activeTaskId = activeTask.Id;
+        _activeTaskCode = activeTask.Code;
+        _enabled = activeTask.Enabled;
+        _activeRecordsUrl = activeTask.ActiveRecordsUrl;
+        _integrationProjectCode = activeTask.IntegrationProjectCode;
+        _patientIdSource = activeTask.PatientIdSource;
+        _visitSnSource = activeTask.VisitSnSource;
+        _caseBatchSize = activeTask.CaseBatchSize;
+        _concurrency = activeTask.Concurrency;
+        _pollingIntervalSeconds = activeTask.PollingIntervalSeconds;
+        _emptyBackoffBaseSeconds = activeTask.EmptyBackoffBaseSeconds;
+        _emptyBackoffMaxSeconds = activeTask.EmptyBackoffMaxSeconds;
+        foreach (var source in activeTask.Sources.Where(item => item.SyncTaskInterfaceId.HasValue))
+            _existingSources.TryAdd(source.SyncTaskInterfaceId!.Value, source);
+
+        await LoadRuntimeAsync(activeTask.Id);
+    }
+
+    private async Task RefreshRuntimeAsync()
+    {
+        if (_activeTaskId <= 0)
+            return;
+
+        _refreshingLogs = true;
+        try
+        {
+            await LoadRuntimeAsync(_activeTaskId);
+        }
+        finally
+        {
+            _refreshingLogs = false;
+        }
+    }
+
+    private async Task LoadRuntimeAsync(int activeTaskId)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _runLogs = await db.ActiveSyncRunLogs
+            .AsNoTracking()
+            .Where(item => item.TaskId == activeTaskId)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(80)
+            .ToListAsync(CancellationToken);
+        _lastRunAt = _runLogs.FirstOrDefault()?.CreatedAt;
+        _caseCount = await db.ActiveSyncCaseSourceStates
+            .Where(item => item.TaskId == activeTaskId)
+            .Select(item => item.InpatientNo)
+            .Distinct()
+            .CountAsync(CancellationToken);
+        _receiptCount = await db.ActiveSyncRecordReceipts
+            .CountAsync(item => item.TaskId == activeTaskId, CancellationToken);
+        _errorCount = await db.ActiveSyncCaseSourceStates
+            .CountAsync(item => item.TaskId == activeTaskId && item.LastError != null && item.LastError != "", CancellationToken);
+    }
+
+    private void SyncDrafts(IReadOnlyList<SyncTaskInterface> interfaces)
+    {
+        var eligible = interfaces.ToList();
+        var existingDrafts = _drafts.ToDictionary(item => item.Key, StringComparer.OrdinalIgnoreCase);
+        var result = new List<ActiveInterfaceDraft>();
+
+        foreach (var iface in eligible)
+        {
+            var key = GetInterfaceKey(iface);
+            if (existingDrafts.TryGetValue(key, out var draft))
+            {
+                draft.Interface = iface;
+                result.Add(draft);
+                continue;
+            }
+
+            _existingSources.TryGetValue(iface.Id, out var source);
+            result.Add(new ActiveInterfaceDraft
+            {
+                Key = key,
+                Interface = iface,
+                Enabled = source?.Enabled ?? iface.Enabled,
+                RecordKeyFields = source?.SourceRecordKeyFields ?? "",
+                PollingIntervalSeconds = Math.Max(60, source?.PollingIntervalSeconds ?? 1800)
+            });
+        }
+
+        _drafts.Clear();
+        _drafts.AddRange(result);
+    }
+
+    private void Normalize()
+    {
+        _activeRecordsUrl = _activeRecordsUrl.Trim();
+        _integrationProjectCode = string.IsNullOrWhiteSpace(_integrationProjectCode)
+            ? null
+            : _integrationProjectCode.Trim();
+        _patientIdSource = NormalizeIdentitySource(_patientIdSource, "Mrn");
+        _visitSnSource = NormalizeIdentitySource(_visitSnSource, "InpatientNo");
+        _caseBatchSize = Math.Clamp(_caseBatchSize, 1, 500);
+        _concurrency = Math.Clamp(_concurrency, 1, 20);
+        _pollingIntervalSeconds = Math.Max(60, _pollingIntervalSeconds);
+        _emptyBackoffBaseSeconds = Math.Max(60, _emptyBackoffBaseSeconds);
+        _emptyBackoffMaxSeconds = Math.Max(_emptyBackoffBaseSeconds, _emptyBackoffMaxSeconds);
+        foreach (var draft in _drafts)
+        {
+            draft.RecordKeyFields = draft.RecordKeyFields.Trim();
+            draft.PollingIntervalSeconds = Math.Max(60, draft.PollingIntervalSeconds);
+        }
+    }
+
+    private static async Task<string> BuildAvailableCodeAsync(SyncDbContext db, string taskCode, int taskId)
+    {
+        var preferred = $"{taskCode}_active";
+        var exists = await db.ActiveSyncTasks.AnyAsync(item => item.Code == preferred);
+        return exists ? $"{preferred}_{taskId}" : preferred;
+    }
+
+    private static string GetInterfaceKey(SyncTaskInterface iface)
+        => iface.Id > 0 ? $"id:{iface.Id}" : $"key:{iface.InterfaceKey}";
+
+    private static string GetInterfaceName(SyncTaskInterface iface)
+        => string.IsNullOrWhiteSpace(iface.DisplayName) ? iface.ServerCode : iface.DisplayName;
+
+    private static string NormalizeIdentitySource(string? value, string fallback)
+        => ActiveIdentitySources.Any(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase))
+            ? value!.Trim()
+            : fallback;
+
+    private static string GetSourceTypeText(SyncTaskInterface iface)
+    {
+        if (IngestionService.IsDatabaseSourceType(iface.SourceType))
+            return "数据库";
+        return IngestionService.IsDynamicApiSourceType(iface.SourceType) ? "DynamicApi" : "DataLake";
+    }
+
+    private static string FormatDateTime(DateTime? value)
+        => value.HasValue ? value.Value.ToString("yyyy-MM-dd HH:mm:ss") : "-";
+
+    private static string GetLogLevelClass(string? level)
+        => level?.Trim().ToLowerInvariant() switch
+        {
+            "error" => "active-log-level is-error",
+            "warning" => "active-log-level is-warning",
+            _ => "active-log-level is-info"
+        };
+
+    private static string GetLogLevelText(string? level)
+        => level?.Trim().ToLowerInvariant() switch
+        {
+            "error" => "错误",
+            "warning" => "警告",
+            _ => "信息"
+        };
+
+    private sealed class ActiveInterfaceDraft
+    {
+        public string Key { get; set; } = "";
+        public SyncTaskInterface Interface { get; set; } = new();
+        public bool Enabled { get; set; }
+        public string RecordKeyFields { get; set; } = "";
+        public int PollingIntervalSeconds { get; set; } = 1800;
+    }
+
+    private static readonly (string Value, string Label)[] ActiveIdentitySources =
+    [
+        ("Mrn", "病案号（mrn）"),
+        ("InpatientNo", "住院号（inpatientNo）"),
+        ("VisitNo", "住院次数（visitNo）"),
+        ("PatientId", "患者ID（patientId）"),
+        ("EventId", "事件ID（eventId）")
+    ];
+}

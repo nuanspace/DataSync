@@ -83,6 +83,36 @@ public class SyncTaskInterface
     public string? QuerySql { get; set; }
 
     /// <summary>
+    /// 动态接口查询路径，填写 query/ 后的路径部分。
+    /// </summary>
+    [Column("query_path")]
+    public string? QueryPath { get; set; }
+
+    /// <summary>
+    /// 是否传入当天 00:00:00 至 23:59:59。
+    /// </summary>
+    [Column("use_today_time_range")]
+    public bool UseTodayTimeRange { get; set; }
+
+    /// <summary>
+    /// 是否仅在指定时间段访问。
+    /// </summary>
+    [Column("access_window_enabled")]
+    public bool AccessWindowEnabled { get; set; }
+
+    /// <summary>
+    /// 每日允许访问开始时间，格式 HH:mm。
+    /// </summary>
+    [Column("access_window_start")]
+    public string? AccessWindowStart { get; set; }
+
+    /// <summary>
+    /// 每日允许访问结束时间，格式 HH:mm。
+    /// </summary>
+    [Column("access_window_end")]
+    public string? AccessWindowEnd { get; set; }
+
+    /// <summary>
     /// 查询条件字段名，如 HIS_PAT_ID 或 PAT_VISIT_SN
     /// </summary>
     [Column("query_field")]

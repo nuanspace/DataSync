@@ -1,3 +1,6 @@
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DataSync.CYYY.Data;
 using DataSync.CYYY.Models;
@@ -10,9 +13,12 @@ namespace DataSync.CYYY.Services;
 /// </summary>
 public class ActiveSyncService
 {
+    private const int MaxRetryCount = 3;
+
     private readonly IDbContextFactory<SyncDbContext> _dbFactory;
     private readonly ActiveMedicalRecordClient _activeClient;
     private readonly DatabaseQueryService _databaseQueryService;
+    private readonly SyncOrchestrator _syncOrchestrator;
     private readonly PushServiceFactory _pushServiceFactory;
     private readonly ILogger<ActiveSyncService> _logger;
 
@@ -20,12 +26,14 @@ public class ActiveSyncService
         IDbContextFactory<SyncDbContext> dbFactory,
         ActiveMedicalRecordClient activeClient,
         DatabaseQueryService databaseQueryService,
+        SyncOrchestrator syncOrchestrator,
         PushServiceFactory pushServiceFactory,
         ILogger<ActiveSyncService> logger)
     {
         _dbFactory = dbFactory;
         _activeClient = activeClient;
         _databaseQueryService = databaseQueryService;
+        _syncOrchestrator = syncOrchestrator;
         _pushServiceFactory = pushServiceFactory;
         _logger = logger;
     }
@@ -48,15 +56,30 @@ public class ActiveSyncService
 
     public async Task ExecuteTaskAsync(ActiveSyncTask task, CancellationToken ct)
     {
-        var cases = await _activeClient.GetActiveRecordsAsync(task, ct);
-        if (cases.Count == 0)
+        var cases = new List<ActiveMedicalRecordInfo>();
+        try
         {
-            _logger.LogInformation("Active 补采任务 [{TaskName}] 未获取到 Active 病历", task.Name);
-            await AddRunLogAsync(task, null, null, "Info", "未获取到 Active 病历", 0, 0, 0, ct);
-            return;
-        }
+            var batch = await _activeClient.GetActiveRecordsAsync(task, task.LastCursor, ct);
+            if (batch.Items.Count == 0 && task.LastCursor.HasValue)
+                batch = await _activeClient.GetActiveRecordsAsync(task, null, ct);
 
-        await AddRunLogAsync(task, null, null, "Info", $"获取到 Active 病历 {cases.Count} 条", cases.Count, 0, 0, ct);
+            await UpdateCursorAsync(task, batch.NextCursor, ct);
+            cases = batch.Items;
+            if (cases.Count == 0)
+            {
+                _logger.LogInformation("Active 补采任务 [{TaskName}] 未获取到 Active 病历", task.Name);
+                await AddRunLogAsync(task, null, null, "Info", "未获取到 Active 病历", 0, 0, 0, ct);
+            }
+            else
+            {
+                await AddRunLogAsync(task, null, null, "Info", $"获取到 Active 病历 {cases.Count} 条", cases.Count, 0, 0, ct);
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "Active 病历列表获取失败，继续处理已入队病例");
+            await AddRunLogAsync(task, null, null, "Error", $"Active 病历列表获取失败：{ex.Message}", 0, 0, 0, ct);
+        }
 
         var sources = task.Sources
             .Where(s => s.Enabled && (s.SyncTaskInterface == null || s.SyncTaskInterface.Enabled))
@@ -73,7 +96,27 @@ public class ActiveSyncService
         {
             ct.ThrowIfCancellationRequested();
 
-            var dueCases = await FilterDueCasesAsync(task, source, cases, ct);
+            await QueueCasesAsync(task, source, cases, ct);
+
+            if (source.SyncTaskInterface != null &&
+                !InterfaceAccessWindow.IsOpen(source.SyncTaskInterface, DateTime.Now))
+            {
+                var nextOpen = InterfaceAccessWindow.GetNextOpen(source.SyncTaskInterface, DateTime.Now);
+                await DeferPendingCasesAsync(task, source, nextOpen, ct);
+                await AddRunLogAsync(
+                    task,
+                    source,
+                    null,
+                    "Info",
+                    $"等待接口闲时窗口，下次执行时间 {nextOpen:yyyy-MM-dd HH:mm}",
+                    cases.Count,
+                    0,
+                    0,
+                    ct);
+                continue;
+            }
+
+            var dueCases = await LoadDueCasesAsync(task, source, ct);
             if (dueCases.Count == 0)
             {
                 await AddRunLogAsync(task, source, null, "Info", "本轮没有到期病历", cases.Count, 0, 0, ct);
@@ -84,29 +127,104 @@ public class ActiveSyncService
         }
     }
 
-    private async Task<List<ActiveMedicalRecordInfo>> FilterDueCasesAsync(
+    private async Task QueueCasesAsync(
         ActiveSyncTask task,
         ActiveSyncSource source,
         List<ActiveMedicalRecordInfo> cases,
         CancellationToken ct)
     {
+        if (cases.Count == 0)
+            return;
+
         var now = DateTime.Now;
         var inpatientNos = cases.Select(c => c.InpatientNo).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var stateList = await db.ActiveSyncCaseSourceStates
-            .AsNoTracking()
             .Where(s => s.TaskId == task.Id &&
                 s.SourceId == source.Id &&
                 inpatientNos.Contains(s.InpatientNo))
             .ToListAsync(ct);
         var states = stateList.ToDictionary(s => s.InpatientNo, StringComparer.OrdinalIgnoreCase);
 
-        return cases
-            .Where(c => !states.TryGetValue(c.InpatientNo, out var state) ||
-                !state.NextQueryTime.HasValue ||
-                state.NextQueryTime <= now)
-            .ToList();
+        foreach (var activeCase in cases)
+        {
+            if (!states.TryGetValue(activeCase.InpatientNo, out var state))
+            {
+                state = new ActiveSyncCaseSourceState
+                {
+                    TaskId = task.Id,
+                    SourceId = source.Id,
+                    InpatientNo = activeCase.InpatientNo,
+                    NextQueryTime = now
+                };
+                db.ActiveSyncCaseSourceStates.Add(state);
+                states[activeCase.InpatientNo] = state;
+            }
+
+            state.PendingCaseJson = JsonSerializer.Serialize(activeCase);
+            state.UpdatedAt = now;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task DeferPendingCasesAsync(
+        ActiveSyncTask task,
+        ActiveSyncSource source,
+        DateTime nextOpen,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var states = await db.ActiveSyncCaseSourceStates
+            .Where(state => state.TaskId == task.Id &&
+                state.SourceId == source.Id &&
+                state.PendingCaseJson != null &&
+                state.RetryCount < MaxRetryCount)
+            .ToListAsync(ct);
+
+        foreach (var state in states)
+        {
+            state.NextQueryTime = nextOpen;
+            state.UpdatedAt = DateTime.Now;
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<List<ActiveMedicalRecordInfo>> LoadDueCasesAsync(
+        ActiveSyncTask task,
+        ActiveSyncSource source,
+        CancellationToken ct)
+    {
+        var now = DateTime.Now;
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var snapshots = await db.ActiveSyncCaseSourceStates
+            .AsNoTracking()
+            .Where(state => state.TaskId == task.Id &&
+                state.SourceId == source.Id &&
+                state.PendingCaseJson != null &&
+                state.RetryCount < MaxRetryCount &&
+                (!state.NextQueryTime.HasValue || state.NextQueryTime <= now))
+            .Select(state => state.PendingCaseJson!)
+            .ToListAsync(ct);
+
+        var result = new List<ActiveMedicalRecordInfo>();
+        foreach (var snapshot in snapshots)
+        {
+            try
+            {
+                var activeCase = JsonSerializer.Deserialize<ActiveMedicalRecordInfo>(snapshot);
+                if (activeCase != null)
+                    result.Add(activeCase);
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Active 病例待执行快照反序列化失败");
+            }
+        }
+
+        return result;
     }
 
     private async Task ProcessSourceAsync(
@@ -141,7 +259,7 @@ public class ActiveSyncService
     {
         try
         {
-            var records = await QuerySourceAsync(source, activeCase, ct);
+            var records = await QuerySourceAsync(task, source, activeCase, ct);
             if (records.Count > 0)
                 InjectActiveCaseFields(records, activeCase);
 
@@ -192,12 +310,13 @@ public class ActiveSyncService
     }
 
     private async Task<List<Dictionary<string, object>>> QuerySourceAsync(
+        ActiveSyncTask task,
         ActiveSyncSource source,
         ActiveMedicalRecordInfo activeCase,
         CancellationToken ct)
     {
         if (source.SyncTaskInterface != null)
-            return await QueryInterfaceSourceAsync(source, source.SyncTaskInterface, activeCase, ct);
+            return await QueryInterfaceSourceAsync(task, source.SyncTaskInterface, activeCase, ct);
 
         if (source.DatabaseResource == null)
             throw new InvalidOperationException($"数据源 [{source.DisplayName}] 未配置数据库资源");
@@ -228,83 +347,22 @@ public class ActiveSyncService
     }
 
     private async Task<List<Dictionary<string, object>>> QueryInterfaceSourceAsync(
-        ActiveSyncSource source,
+        ActiveSyncTask task,
         SyncTaskInterface iface,
         ActiveMedicalRecordInfo activeCase,
         CancellationToken ct)
     {
-        if (!IngestionService.IsDatabaseSourceType(iface.SourceType))
-            throw new InvalidOperationException($"接口 [{GetInterfaceDisplayName(iface)}] 不是数据库接口，Active 补采暂不支持");
+        var syncTask = task.SyncTask
+            ?? throw new InvalidOperationException($"Active 任务 [{task.Name}] 未关联同步任务");
+        var patientId = ResolveActiveCaseValue(activeCase, task.PatientIdSource);
+        var visitSn = ResolveActiveCaseValue(activeCase, task.VisitSnSource);
+        if (string.IsNullOrWhiteSpace(patientId))
+            throw new InvalidOperationException($"Active 病历缺少患者ID来源字段 [{task.PatientIdSource}]");
+        if (!string.IsNullOrWhiteSpace(syncTask.VisitSnField) && string.IsNullOrWhiteSpace(visitSn))
+            throw new InvalidOperationException($"Active 病历缺少就诊号来源字段 [{task.VisitSnSource}]");
 
-        if (string.IsNullOrWhiteSpace(iface.QuerySql))
-            throw new InvalidOperationException($"接口 [{GetInterfaceDisplayName(iface)}] 未配置查询 SQL");
-
-        if (string.IsNullOrWhiteSpace(iface.QueryField))
-            throw new InvalidOperationException($"接口 [{GetInterfaceDisplayName(iface)}] 未配置查询字段");
-
-        var queryValue = ResolveActiveQueryValue(source, activeCase);
-        if (string.IsNullOrWhiteSpace(queryValue))
-            return [];
-
-        var connection = ResolveDatabaseConnection(source, iface);
-        return await _databaseQueryService.QueryByValuesAsync(
-            connection.DatabaseType,
-            connection.ConnectionStringName,
-            connection.Host,
-            connection.Database,
-            connection.Username,
-            connection.Password,
-            connection.TrustCertificate,
-            iface.QuerySql,
-            iface.QueryField,
-            [queryValue],
-            ct);
-    }
-
-    private static DatabaseConnectionConfig ResolveDatabaseConnection(
-        ActiveSyncSource source,
-        SyncTaskInterface iface)
-    {
-        if (iface.DatabaseResource != null)
-            return ToDatabaseConnectionConfig(iface.DatabaseResource);
-
-        if (source.DatabaseResource != null)
-            return ToDatabaseConnectionConfig(source.DatabaseResource);
-
-        var databaseType = IngestionService.NormalizeDatabaseType(iface.DatabaseType, iface.SourceType);
-        return new DatabaseConnectionConfig(
-            databaseType,
-            iface.ConnectionStringName,
-            iface.SqlServerHost,
-            iface.SqlServerDatabase,
-            iface.SqlServerUsername,
-            iface.SqlServerPassword,
-            iface.SqlServerTrustCertificate);
-    }
-
-    private static DatabaseConnectionConfig ToDatabaseConnectionConfig(DatabaseResource resource) => new(
-        resource.DatabaseType,
-        null,
-        resource.Host,
-        resource.DatabaseName,
-        resource.Username,
-        resource.Password,
-        resource.TrustCertificate);
-
-    private static string ResolveActiveQueryValue(
-        ActiveSyncSource source,
-        ActiveMedicalRecordInfo activeCase)
-    {
-        var valueSource = source.InpatientNoParameter;
-        if (string.IsNullOrWhiteSpace(valueSource))
-            valueSource = "InpatientNo";
-
-        return valueSource.Trim().ToLowerInvariant() switch
-        {
-            "mrn" or "medicalrecordnumber" or "medical_record_number" => activeCase.Mrn,
-            "visitno" or "visit_no" => activeCase.VisitNo ?? "",
-            _ => activeCase.InpatientNo
-        };
+        var triggerRecord = BuildActiveTriggerRecord(syncTask, activeCase, patientId, visitSn);
+        return await _syncOrchestrator.QueryInterfaceForActiveAsync(iface, syncTask, triggerRecord, ct);
     }
 
     private async Task<List<Dictionary<string, object>>> FilterNewRecordsAsync(
@@ -425,11 +483,42 @@ public class ActiveSyncService
 
         state.LastQueryAt = now;
         state.LastResultCount = resultCount;
-        state.LastError = error;
-        state.EmptyCount = string.IsNullOrWhiteSpace(error) && resultCount == 0 ? state.EmptyCount + 1 : 0;
-        state.NextQueryTime = now.AddSeconds(CalculateNextIntervalSeconds(task, source, state.EmptyCount, error));
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            state.LastError = null;
+            state.RetryCount = 0;
+            state.PendingCaseJson = null;
+            state.EmptyCount = resultCount == 0 ? state.EmptyCount + 1 : 0;
+            state.NextQueryTime = now.AddSeconds(
+                CalculateNextIntervalSeconds(task, source, state.EmptyCount, null));
+        }
+        else
+        {
+            state.RetryCount++;
+            state.EmptyCount = 0;
+            state.LastError = state.RetryCount >= MaxRetryCount
+                ? $"{error}；已达到最大自动重试次数 {MaxRetryCount}，请手动重试"
+                : error;
+            state.NextQueryTime = state.RetryCount >= MaxRetryCount
+                ? null
+                : now.AddSeconds(Math.Max(60, task.PollingIntervalSeconds));
+        }
         state.UpdatedAt = now;
 
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task RetryCaseAsync(long stateId, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var state = await db.ActiveSyncCaseSourceStates.FindAsync([stateId], ct);
+        if (state == null || string.IsNullOrWhiteSpace(state.PendingCaseJson))
+            return;
+
+        state.RetryCount = 0;
+        state.LastError = null;
+        state.NextQueryTime = DateTime.Now;
+        state.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync(ct);
     }
 
@@ -465,6 +554,49 @@ public class ActiveSyncService
                 TryAdd(record, "ADMISSION_TIME", activeCase.AdmissionTime.Value.ToString("yyyy-MM-dd HH:mm:ss"));
         }
     }
+
+    private async Task UpdateCursorAsync(ActiveSyncTask task, long? nextCursor, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.ActiveSyncTasks
+            .Where(item => item.Id == task.Id)
+            .ExecuteUpdateAsync(update => update.SetProperty(item => item.LastCursor, nextCursor), ct);
+        task.LastCursor = nextCursor;
+    }
+
+    private static Dictionary<string, object> BuildActiveTriggerRecord(
+        SyncTask syncTask,
+        ActiveMedicalRecordInfo activeCase,
+        string patientId,
+        string visitSn)
+    {
+        var record = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase)
+        {
+            [syncTask.PatientIdField] = patientId
+        };
+        if (!string.IsNullOrWhiteSpace(syncTask.VisitSnField))
+            record[syncTask.VisitSnField] = visitSn;
+
+        TryAdd(record, "MRN", activeCase.Mrn);
+        TryAdd(record, "INPATIENT_NO", activeCase.InpatientNo);
+        TryAdd(record, "VISIT_NO", activeCase.VisitNo ?? "");
+        TryAdd(record, "PATIENT_ID", activeCase.PatientId?.ToString() ?? "");
+        TryAdd(record, "EVENT_ID", activeCase.EventId?.ToString() ?? "");
+        if (activeCase.AdmissionTime.HasValue)
+            TryAdd(record, "ADMISSION_TIME", activeCase.AdmissionTime.Value.ToString("yyyy-MM-dd HH:mm:ss"));
+        return record;
+    }
+
+    private static string ResolveActiveCaseValue(ActiveMedicalRecordInfo activeCase, string? source)
+        => source?.Trim().ToLowerInvariant() switch
+        {
+            "mrn" => activeCase.Mrn,
+            "inpatientno" or "inpatient_no" => activeCase.InpatientNo,
+            "visitno" or "visit_no" => activeCase.VisitNo ?? "",
+            "patientid" or "patient_id" => activeCase.PatientId?.ToString() ?? "",
+            "eventid" or "event_id" => activeCase.EventId?.ToString() ?? "",
+            _ => ""
+        };
 
     private static void TryAdd(Dictionary<string, object> record, string key, object value)
     {
@@ -521,18 +653,13 @@ public class ActiveSyncService
             ? source.DisplayName
             : source.SyncTaskInterface.DisplayName;
 
-    private static string GetInterfaceDisplayName(SyncTaskInterface iface)
-        => string.IsNullOrWhiteSpace(iface.DisplayName)
-            ? iface.ServerCode
-            : $"{iface.DisplayName}（{iface.ServerCode}）";
-
     private static string BuildSourceRecordKey(
         ActiveSyncSource source,
         IReadOnlyDictionary<string, object> record)
     {
         var keyFields = source.SourceRecordKeyArray;
         if (keyFields.Length == 0)
-            throw new InvalidOperationException($"数据源 [{GetSourceDisplayName(source)}] 未配置源记录唯一键字段");
+            return BuildRecordDigest(record);
 
         return string.Join("|", keyFields.Select(field =>
         {
@@ -542,6 +669,26 @@ public class ActiveSyncService
             return $"{field}={EscapeKeyPart(value)}";
         }));
     }
+
+    private static string BuildRecordDigest(IReadOnlyDictionary<string, object> record)
+    {
+        var normalized = string.Join("\n", record
+            .OrderBy(item => item.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(item => $"{item.Key.ToUpperInvariant()}={NormalizeDigestValue(item.Value)}"));
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
+        return $"SHA256:{Convert.ToHexString(digest)}";
+    }
+
+    private static string NormalizeDigestValue(object? value) => value switch
+    {
+        null => "<NULL>",
+        JsonElement element => element.ToString(),
+        DateTime dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dateTimeOffset => dateTimeOffset.ToString("O", CultureInfo.InvariantCulture),
+        byte[] bytes => Convert.ToHexString(bytes),
+        IFormattable formattable => formattable.ToString(null, CultureInfo.InvariantCulture) ?? "",
+        _ => value.ToString() ?? ""
+    };
 
     private static bool TryGetValue(
         IReadOnlyDictionary<string, object> record,
@@ -571,12 +718,4 @@ public class ActiveSyncService
     private static string EscapeKeyPart(string value)
         => value.Replace("\\", "\\\\").Replace("|", "\\|").Replace("=", "\\=");
 
-    private sealed record DatabaseConnectionConfig(
-        string DatabaseType,
-        string? ConnectionStringName,
-        string? Host,
-        string? Database,
-        string? Username,
-        string? Password,
-        bool TrustCertificate);
 }

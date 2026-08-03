@@ -10,7 +10,8 @@ namespace DataSync.CYYY.Services;
 /// </summary>
 public class PendingSyncService
 {
-    public const int MaxAutoRetryCount = 3;
+    private const int DefaultMaxAutoRetryCount = 3;
+    private static readonly SemaphoreSlim EnqueueLock = new(1, 1);
 
     private sealed class SourceRecordSnapshot
     {
@@ -30,14 +31,21 @@ public class PendingSyncService
     }
 
     private readonly IDbContextFactory<SyncDbContext> _dbFactory;
+    private readonly LocalQueryService _localQueryService;
     private readonly ILogger<PendingSyncService> _logger;
+    private readonly int _maxAutoRetryCount;
 
     public PendingSyncService(
         IDbContextFactory<SyncDbContext> dbFactory,
+        LocalQueryService localQueryService,
+        IConfiguration configuration,
         ILogger<PendingSyncService> logger)
     {
         _dbFactory = dbFactory;
+        _localQueryService = localQueryService;
         _logger = logger;
+        _maxAutoRetryCount = Math.Max(1,
+            configuration.GetValue("Sync:PendingSyncMaxAutoRetryCount", DefaultMaxAutoRetryCount));
     }
 
     /// <summary>
@@ -51,29 +59,67 @@ public class PendingSyncService
         if (records.Count == 0)
             return [];
 
+        await EnqueueLock.WaitAsync(ct);
+        try
+        {
+            return await EnqueueForIngestedRecordsCoreAsync(source, records, ct);
+        }
+        finally
+        {
+            EnqueueLock.Release();
+        }
+    }
+
+    private async Task<List<string>> EnqueueForIngestedRecordsCoreAsync(
+        IngestionSource source,
+        IReadOnlyList<Dictionary<string, object>> records,
+        CancellationToken ct)
+    {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var tasks = await db.SyncTasks
-            .Where(t => t.Enabled && t.TriggerServerCode == source.ServerCode)
-            .Include(t => t.Interfaces.Where(i => i.Enabled))
+        var enabledTasks = await db.SyncTasks
+            .Where(t => t.Enabled)
             .ToListAsync(ct);
+        var tasks = enabledTasks
+            .Where(task => IsTriggeredBySource(task, source.ServerCode))
+            .ToList();
 
         if (tasks.Count == 0)
             return [];
 
         var now = DateTime.Now;
-        var sourceRecords = records
-            .Select(record => new SourceRecordSnapshot
-            {
-                Record = record,
-                SourceRecordKey = BuildSourceRecordKey(source.PrimaryKeyArray, record),
-                SnapshotJson = JsonSerializer.Serialize(record)
-            })
+        var triggerServerCodes = tasks
+            .Select(task => task.TriggerServerCode)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var triggerSources = await db.IngestionSources
+            .Where(item => triggerServerCodes.Contains(item.ServerCode))
+            .ToDictionaryAsync(item => item.ServerCode, StringComparer.OrdinalIgnoreCase, ct);
 
         var notifiedTasks = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var task in tasks)
         {
+            var isPrimaryTrigger = string.Equals(
+                task.TriggerServerCode,
+                source.ServerCode,
+                StringComparison.OrdinalIgnoreCase);
+            if (!triggerSources.TryGetValue(task.TriggerServerCode, out var triggerSource))
+            {
+                _logger.LogWarning(
+                    "任务 [{TaskCode}] 的患者来源采集源 [{ServerCode}] 不存在，无法登记待同步对象",
+                    task.Code, task.TriggerServerCode);
+                continue;
+            }
+
+            IReadOnlyList<Dictionary<string, object>> triggerRecords = records;
+            if (!isPrimaryTrigger)
+            {
+                triggerRecords = await ResolveTriggerRecordsAsync(task, source, records, ct);
+                if (triggerRecords.Count == 0)
+                    continue;
+            }
+
+            var sourceRecords = BuildSourceRecordSnapshots(triggerSource, triggerRecords);
             var candidates = BuildPendingCandidates(task, sourceRecords);
             if (candidates.Count == 0)
                 continue;
@@ -98,7 +144,7 @@ public class PendingSyncService
                     item = new PendingSyncItem
                     {
                         TaskCode = task.Code,
-                        SourceServerCode = source.ServerCode,
+                        SourceServerCode = triggerSource.ServerCode,
                         SourceRecordKey = candidate.SourceRecordKey,
                         ObjectKey = candidate.ObjectKey,
                         HisPatId = candidate.HisPatId,
@@ -118,9 +164,12 @@ public class PendingSyncService
 
                 if (item.Status == PendingSyncStatuses.Success)
                 {
-                    BackfillObjectIdentity(item, source.ServerCode, candidate);
+                    BackfillObjectIdentity(item, triggerSource.ServerCode, candidate);
                     continue;
                 }
+
+                if (!isPrimaryTrigger && IsWaitingForConditions(item))
+                    item.RetryCount = 0;
 
                 item.ObjectKey = candidate.ObjectKey;
                 item.HisPatId = candidate.HisPatId;
@@ -131,7 +180,7 @@ public class PendingSyncService
                     item.TriggerRecordJson = candidate.SnapshotJson;
                     item.TriggerPushError = null;
                 }
-                item.SourceServerCode = source.ServerCode;
+                item.SourceServerCode = triggerSource.ServerCode;
                 item.SourceRecordKey = candidate.SourceRecordKey;
                 if (!HasReachedRetryLimit(item))
                 {
@@ -156,6 +205,70 @@ public class PendingSyncService
         return [.. notifiedTasks];
     }
 
+    private bool IsTriggeredBySource(SyncTask task, string serverCode)
+    {
+        if (string.Equals(task.TriggerServerCode, serverCode, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return task.AdditionalTriggerServerCodeArray.Contains(
+            serverCode,
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task<IReadOnlyList<Dictionary<string, object>>> ResolveTriggerRecordsAsync(
+        SyncTask task,
+        IngestionSource source,
+        IReadOnlyList<Dictionary<string, object>> records,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(task.VisitSnField))
+        {
+            _logger.LogWarning(
+                "任务 [{TaskCode}] 未配置住院次字段，采集源 [{ServerCode}] 无法作为第二触发源",
+                task.Code, source.ServerCode);
+            return [];
+        }
+
+        var visitSnValues = records
+            .Select(record => TryGetRecordValue(record, task.VisitSnField, out var value) ? value : "")
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (visitSnValues.Count == 0)
+        {
+            _logger.LogWarning(
+                "采集源 [{ServerCode}] 返回记录缺少任务 [{TaskCode}] 的住院次字段 [{VisitSnField}]，无法触发同步",
+                source.ServerCode, task.Code, task.VisitSnField);
+            return [];
+        }
+
+        var triggerRecords = await _localQueryService.QueryCandidatesAsync(
+            task,
+            ct,
+            scopeField: task.VisitSnField,
+            scopeValues: visitSnValues,
+            excludeSyncedOverride: true);
+
+        if (triggerRecords.Count > 0)
+        {
+            _logger.LogInformation(
+                "采集源 [{ServerCode}] 命中任务 [{TaskCode}] {Count} 个待同步对象",
+                source.ServerCode, task.Code, triggerRecords.Count);
+        }
+
+        return triggerRecords;
+    }
+
+    private static List<SourceRecordSnapshot> BuildSourceRecordSnapshots(
+        IngestionSource source,
+        IReadOnlyList<Dictionary<string, object>> records)
+        => records.Select(record => new SourceRecordSnapshot
+        {
+            Record = record,
+            SourceRecordKey = BuildSourceRecordKey(source.PrimaryKeyArray, record),
+            SnapshotJson = JsonSerializer.Serialize(record)
+        }).ToList();
+
     /// <summary>
     /// 按任务领取到期的待同步对象
     /// </summary>
@@ -171,7 +284,7 @@ public class PendingSyncService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var items = await db.PendingSyncItems
             .Where(p => p.TaskCode == taskCode &&
-                p.RetryCount < MaxAutoRetryCount && (
+                p.RetryCount < _maxAutoRetryCount && (
                     p.Status == PendingSyncStatuses.Pending ||
                     (p.Status == PendingSyncStatuses.Waiting && (!p.NextRetryTime.HasValue || p.NextRetryTime <= now)) ||
                     (p.Status == PendingSyncStatuses.Failed && (!p.NextRetryTime.HasValue || p.NextRetryTime <= now)) ||
@@ -211,6 +324,58 @@ public class PendingSyncService
         item.LastCompletedAt = DateTime.Now;
         item.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task SaveCompletedInterfacesAsync(
+        long id,
+        IEnumerable<string> interfaceKeys,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var item = await db.PendingSyncItems.FindAsync([id], ct);
+        if (item == null)
+            return;
+
+        var keys = item.CompletedInterfaceKeySet;
+        keys.UnionWith(interfaceKeys.Where(key => !string.IsNullOrWhiteSpace(key)));
+        item.CompletedInterfaceKeys = JsonSerializer.Serialize(keys.OrderBy(key => key));
+        item.UpdatedAt = DateTime.Now;
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// 仅因接口访问时间窗延期，不消耗自动重试次数。
+    /// </summary>
+    public async Task MarkDeferredAsync(long id, DateTime nextRunTime, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var item = await db.PendingSyncItems.FindAsync([id], ct);
+        if (item == null)
+            return;
+
+        var now = DateTime.Now;
+        item.Status = PendingSyncStatuses.Waiting;
+        item.LastError = $"等待接口闲时窗口，下次执行时间 {nextRunTime:yyyy-MM-dd HH:mm}";
+        item.NextRetryTime = nextRunTime;
+        item.LastCompletedAt = now;
+        item.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<string?> RetryManuallyAsync(long id, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var item = await db.PendingSyncItems.FindAsync([id], ct);
+        if (item == null)
+            return null;
+
+        item.Status = PendingSyncStatuses.Pending;
+        item.RetryCount = 0;
+        item.LastError = null;
+        item.NextRetryTime = null;
+        item.UpdatedAt = DateTime.Now;
+        await db.SaveChangesAsync(ct);
+        return item.TaskCode;
     }
 
     public async Task MarkTriggerPushSuccessAsync(long id, CancellationToken ct)
@@ -429,17 +594,21 @@ public class PendingSyncService
             item.SourceServerCode = sourceServerCode;
     }
 
-    private static bool HasReachedRetryLimit(PendingSyncItem item)
-        => item.RetryCount >= MaxAutoRetryCount;
+    private bool HasReachedRetryLimit(PendingSyncItem item)
+        => item.RetryCount >= _maxAutoRetryCount;
 
-    private static string BuildRetryLimitMessage(string message)
+    private static bool IsWaitingForConditions(PendingSyncItem item)
+        => item.Status == PendingSyncStatuses.Waiting ||
+           item.LastError?.Contains("同步条件未满足", StringComparison.Ordinal) == true;
+
+    private string BuildRetryLimitMessage(string message)
     {
         if (string.IsNullOrWhiteSpace(message))
-            return $"已达到最大自动重试次数 {MaxAutoRetryCount}，请手动重新推送";
+            return $"已达到最大自动重试次数 {_maxAutoRetryCount}，请手动重新推送";
 
         return message.Contains("已达到最大自动重试次数", StringComparison.Ordinal)
             ? message
-            : $"{message}；已达到最大自动重试次数 {MaxAutoRetryCount}，请手动重新推送";
+            : $"{message}；已达到最大自动重试次数 {_maxAutoRetryCount}，请手动重新推送";
     }
 
     private static string GetOptionalRecordValue(

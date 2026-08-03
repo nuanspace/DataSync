@@ -84,6 +84,17 @@
 - 如果 SQL 已手动包含 `@queryValue` 或 `:queryValue`，仍直接执行原 SQL，由配置 SQL 自行决定过滤位置。
 - 影响链路：主动采集补数据；关键服务为 `IngestionService`、`DatabaseQueryService`。本次未涉及数据库结构变更，不新增迁移文件。
 
+动态接口平台主动查询：
+
+- 2026-07-17 起，`DataSync.CYYY` 的同步任务接口新增 `DynamicApi` 来源类型，与原 `DataLake`、`Database` 来源并存；该来源用于按患者 ID 和住院次数主动查询医院动态接口平台，再复用原有任务推送目标发送查询结果。
+- 连接与认证配置存放在 `cyyy.dynamic_api_configs`，由 `DynamicApiClient` 读取；Token 请求使用 JSON 客户端凭据，按响应绝对过期时间缓存，通过 Bearer 认证调用查询接口，查询返回 401 时清除 Token 并重试一次。日志不记录客户端密钥、Token 或患者请求参数。
+- 任务接口仍以 `server_code` 作为下游接口编码，新增 `query_path` 保存查询端点前缀后的接口路径，避免医院查询路径与下游接口识别编码混用；`use_today_time_range` 控制是否附带当天 `00:00:00` 至 `23:59:59`，默认不传时间范围。
+- 查询请求使用 POST JSON，同时传入任务 `PatientIdField`、`VisitSnField` 对应的 `patientId`、`visitId`，分页参数为 `pageNum`、`pageSize`；响应从统一外层的 `data` 读取对象或数组，并根据 `pagination.hasMore`、`totalPages` 自动翻页。
+- 当前 `DynamicApi` 仅支持任务中的独立接口，不参与父子关联查询，也不作为定时采集源落入本地 `dl_*` 表；查询结果继续通过现有 `ApiPushService` 或任务配置的其他推送方式发送，不改变 `DataSync.LHYY.V2` 的 ESB 接收与写入语义。
+- 影响项目：`DataSync.CYYY`；影响链路：我们主动查询医院接口并向现有下游推送；关键服务为 `DynamicApiClient`、`SyncOrchestrator`，关键配置为 `cyyy.dynamic_api_configs`、`cyyy.sync_task_interfaces`。
+- 数据库变更脚本：`DataSync.CYYY/Migrations/2026-07/2026-07-17_新增动态接口平台.sql`。
+- 验证结果：使用独立输出目录执行 `dotnet build DataSync.CYYY.csproj -p:UseAppHost=false`，0 警告、0 错误；未调用医院接口进行在线验证，未新增自动化测试。
+
 ### DataSync.LHYY.V2
 
 `DataSync.LHYY.V2` 是 .NET 10 / ASP.NET Core / MudBlazor 应用，主要承担“统一接收、配置映射、消息处理、写入 ntcare”职责。

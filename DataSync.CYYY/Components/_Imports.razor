@@ -15,6 +15,7 @@
 @using DataSync.CYYY.Components
 @using DataSync.CYYY.Components.Layout
 @using DataSync.CYYY.Components.Pages
+@using DataSync.CYYY.Components.Shared
 @using DataSync.CYYY.Data
 @using DataSync.CYYY.Models
 @using DataSync.CYYY.Models.FollowUp
@@ -29,3 +30,7 @@
 @inject IDialogService inj_dialogService
 @inject IJSRuntime inj_jsRuntime
 @inject DatabaseQueryService inj_databaseQueryService
+@inject DynamicApiClient inj_dynamicApiClient
+@inject PendingSyncService inj_pendingSyncService
+@inject SyncTaskSignalService inj_syncTaskSignalService
+@inject ActiveSyncService inj_activeSyncService

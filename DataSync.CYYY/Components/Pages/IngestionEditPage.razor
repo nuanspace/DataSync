@@ -34,6 +34,7 @@ else
                     <MudItem xs="12">
                         <MudSelect T="string" @bind-Value="_source.SourceType" Label="来源类型" Variant="Variant.Outlined">
                             <MudSelectItem Value="@(IngestionService.SourceTypeDataLake)">DataLake</MudSelectItem>
+                            <MudSelectItem Value="@(IngestionService.SourceTypeDynamicApi)">DynamicApi</MudSelectItem>
                             <MudSelectItem Value="@(IngestionService.SourceTypeDatabase)">数据库</MudSelectItem>
                         </MudSelect>
                     </MudItem>
@@ -146,6 +147,17 @@ else
                     </MudGrid>
                 </MudPaper>
             }
+            else if (IsDynamicApiSource)
+            {
+                <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
+                    <MudText Typo="Typo.h6" Class="mb-3">DynamicApi 查询</MudText>
+                    <MudTextField @bind-Value="_source.QueryPath"
+                                  Label="查询路径"
+                                  Required="true"
+                                  Variant="Variant.Outlined"
+                                  HelperText="填写查询端点前缀后的相对路径；采集时仅发送 startTime、endTime" />
+                </MudPaper>
+            }
 
             <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
                 <MudText Typo="Typo.h6" Class="mb-3">主键字段</MudText>
@@ -176,7 +188,7 @@ else
                 </div>
             </MudPaper>
 
-            @if (!IsDatabaseSource)
+            @if (!IsDatabaseSource && !IsDynamicApiSource)
             {
                 <MudPaper Class="pa-4 ingestion-edit-panel" Elevation="1">
                     <div class="section-header">
@@ -268,6 +280,9 @@ else
 
     private bool IsDatabaseSource =>
         IngestionService.IsDatabaseSourceType(_source.SourceType);
+
+    private bool IsDynamicApiSource =>
+        IngestionService.IsDynamicApiSourceType(_source.SourceType);
 
     private bool IsSqlServerDatabase =>
         IsDatabaseSource && IngestionService.IsSqlServerDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
@@ -478,6 +493,18 @@ else
             return;
         }
 
+        if (IsDynamicApiSource && string.IsNullOrWhiteSpace(_source.QueryPath))
+        {
+            inj_snackbar.Add("DynamicApi 采集源必须填写查询路径", Severity.Warning);
+            return;
+        }
+
+        if (IsDynamicApiSource && Uri.TryCreate(_source.QueryPath, UriKind.Absolute, out _))
+        {
+            inj_snackbar.Add("DynamicApi 查询路径只能填写相对路径", Severity.Warning);
+            return;
+        }
+
         if (_primaryKeys.Count == 0)
         {
             inj_snackbar.Add("请至少配置一个主键字段", Severity.Warning);
@@ -520,6 +547,7 @@ else
             _source.SqlServerPassword = null;
             _source.LookbackMinutes = Math.Max(0, _source.LookbackMinutes);
             _source.SqlServerTrustCertificate = resource.TrustCertificate;
+            _source.QueryPath = null;
         }
         else
         {
@@ -534,16 +562,26 @@ else
             _source.QuerySql = null;
             _source.LookbackMinutes = Math.Max(0, _source.LookbackMinutes);
 
-            // 序列化条件（过滤掉字段名为空的无效行）
-            var validConditions = _conditions.Where(c => !string.IsNullOrWhiteSpace(c.Column)).ToList();
-            _source.Conditions = validConditions.Count > 0
-                ? JsonSerializer.Serialize(validConditions.Select(c => new
-                {
-                    column = c.Column,
-                    type = c.Type,
-                    value = IsValueDisabled(c.Type) ? "" : c.Value
-                }))
-                : null;
+            if (IsDynamicApiSource)
+            {
+                _source.QueryPath = _source.QueryPath?.Trim().Trim('/');
+                _source.Conditions = null;
+            }
+            else
+            {
+                _source.QueryPath = null;
+
+                // 序列化条件（过滤掉字段名为空的无效行）
+                var validConditions = _conditions.Where(c => !string.IsNullOrWhiteSpace(c.Column)).ToList();
+                _source.Conditions = validConditions.Count > 0
+                    ? JsonSerializer.Serialize(validConditions.Select(c => new
+                    {
+                        column = c.Column,
+                        type = c.Type,
+                        value = IsValueDisabled(c.Type) ? "" : c.Value
+                    }))
+                    : null;
+            }
         }
 
         try
@@ -576,6 +614,7 @@ else
                 entity.SqlServerPassword = _source.SqlServerPassword;
                 entity.SqlServerTrustCertificate = _source.SqlServerTrustCertificate;
                 entity.QuerySql = _source.QuerySql;
+                entity.QueryPath = _source.QueryPath;
                 entity.TimeField = _source.TimeField;
                 entity.LookbackMinutes = _source.LookbackMinutes;
                 entity.PollingIntervalSeconds = _source.PollingIntervalSeconds;

@@ -1,0 +1,43 @@
+﻿.full-import-toolbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.full-import-panel {
+    border-radius: 8px;
+}
+
+.field-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.field-preview-grid div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.field-preview-grid span {
+    color: var(--mud-palette-text-secondary);
+    font-size: 0.75rem;
+}
+
+.field-preview-grid strong {
+    overflow-wrap: anywhere;
+}
+
+.preview-list {
+    margin: 14px 0 0;
+    padding-left: 20px;
+}
+
+@media (max-width: 600px) {
+    .field-preview-grid {
+        grid-template-columns: 1fr;
+    }
+}

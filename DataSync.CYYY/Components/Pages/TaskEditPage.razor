@@ -45,7 +45,7 @@
 
         <div class="task-overview-grid">
             <div class="task-overview-item">
-                <span class="overview-label">患者来源</span>
+                <span class="overview-label">触发来源</span>
                 <strong class="overview-value">@GetTriggerSourceSummary()</strong>
             </div>
             <div class="task-overview-item">
@@ -62,6 +62,13 @@
             </div>
         </div>
 
+        <MudTabs Elevation="0"
+                 Rounded="false"
+                 ApplyEffectsToContainer="true"
+                 KeepPanelsAlive="true"
+                 Class="task-config-tabs"
+                 PanelClass="task-config-tab-panel">
+            <MudTabPanel Text="基础配置" Icon="@Icons.Material.Filled.Tune">
         <div class="task-panel-grid">
             <MudPaper Class="task-panel" Elevation="0">
                 <div class="task-panel-header">
@@ -79,7 +86,8 @@
                     </MudItem>
                     <MudItem xs="12" sm="6">
                         <MudSelect T="string" Value="_task.TriggerServerCode" ValueChanged="OnTriggerServerCodeChanged"
-                                   Label="患者来源接口" Required="true" Variant="Variant.Outlined">
+                                   Label="患者主来源接口" Required="true" Variant="Variant.Outlined"
+                                   HelperText="提供患者ID、就诊号和主记录">
                             @foreach (var src in _ingestionSources)
                             {
                                 <MudSelectItem Value="@src.ServerCode">@src.Name (@src.ServerCode)</MudSelectItem>
@@ -91,6 +99,20 @@
                     </MudItem>
                     <MudItem xs="12" sm="3">
                         <MudTextField @bind-Value="_task.VisitSnField" Label="就诊号字段" Variant="Variant.Outlined" />
+                    </MudItem>
+                    <MudItem xs="12">
+                        <MudSelect T="string" MultiSelection="true"
+                                   SelectedValues="_additionalTriggerServerCodes"
+                                   SelectedValuesChanged="OnAdditionalTriggerSourcesChanged"
+                                   Label="附加触发采集源" Variant="Variant.Outlined"
+                                   HelperText="这些采集源有新数据时，也会按就诊号触发当前任务"
+                                   MultiSelectionTextFunc="@(selected => $"{selected.Count()} 个附加触发源")">
+                            @foreach (var src in _ingestionSources.Where(src =>
+                                !string.Equals(src.ServerCode, _task.TriggerServerCode, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                <MudSelectItem Value="@src.ServerCode">@src.Name (@src.ServerCode)</MudSelectItem>
+                            }
+                        </MudSelect>
                     </MudItem>
                     <MudItem xs="12">
                         <MudSwitch @bind-Value="_task.Enabled" Label="启用当前任务" Color="Color.Success" />
@@ -165,8 +187,10 @@
                 </MudGrid>
             </MudPaper>
         </div>
+            </MudTabPanel>
 
-        <MudPaper Class="task-panel task-panel--workspace mt-4" Elevation="0">
+            <MudTabPanel Text="接口编排" Icon="@Icons.Material.Filled.AccountTree">
+        <MudPaper Class="task-panel task-panel--workspace" Elevation="0">
             <div class="task-panel-header task-panel-header--split">
                 <div>
                     <div class="task-panel-tag">核心配置</div>
@@ -182,6 +206,10 @@
                             }
                         </div>
                     }
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                               StartIcon="@Icons.Material.Filled.UploadFile" OnClick="OpenDynamicApiImportDialog">
+                        导入 DynamicApi
+                    </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.Add" OnClick="AddInterface">
                         添加接口
@@ -387,8 +415,10 @@
                 </div>
             }
         </MudPaper>
+            </MudTabPanel>
 
-        <MudPaper Class="task-panel mt-4" Elevation="0">
+            <MudTabPanel Text="触发筛选" Icon="@Icons.Material.Filled.FilterAlt">
+        <MudPaper Class="task-panel" Elevation="0">
             <div class="task-panel-header task-panel-header--split">
                 <div>
                     <div class="task-panel-tag">触发筛选</div>
@@ -445,6 +475,7 @@
                                        Variant="Variant.Outlined" Dense="true">
                                 <MudSelectItem Value="@("include")">接受</MudSelectItem>
                                 <MudSelectItem Value="@("exclude")">排除</MudSelectItem>
+                                <MudSelectItem Value="@("contains")">包含</MudSelectItem>
                                 <MudSelectItem Value="@("not_null")">非空</MudSelectItem>
                             </MudSelect>
                         </MudItem>
@@ -467,6 +498,14 @@
                 </div>
             }
         </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="在院增量" Icon="@Icons.Material.Filled.SyncAlt">
+                <ActiveSyncSettings @ref="_activeSyncSettings"
+                                    TaskConfig="_task"
+                                    Interfaces="_interfaces" />
+            </MudTabPanel>
+        </MudTabs>
 
         <MudDialog @bind-Visible="_showConfigDialog" Options="_configDialogOptions">
             <TitleContent>
@@ -506,6 +545,7 @@
                                            Margin="Margin.Dense"
                                            Dense="true">
                                     <MudSelectItem Value="@(IngestionService.SourceTypeDataLake)">DataLake</MudSelectItem>
+                                    <MudSelectItem Value="@(IngestionService.SourceTypeDynamicApi)">DynamicApi</MudSelectItem>
                                     <MudSelectItem Value="@(IngestionService.SourceTypeDatabase)">数据库</MudSelectItem>
                                 </MudSelect>
                             </MudItem>
@@ -515,11 +555,11 @@
                                               Variant="Variant.Outlined"
                                               Margin="Margin.Dense" />
                             </MudItem>
-                            @if (IsDatabaseInterface(_editingConfigInterface))
+                            @if (IsDatabaseInterface(_editingConfigInterface) || IsDynamicApiInterface(_editingConfigInterface))
                             {
                                 <MudItem xs="12">
                                     <MudTextField @bind-Value="_editingConfigInterface.ServerCode"
-                                                  Label="接口编码"
+                                                  Label="@(IsDynamicApiInterface(_editingConfigInterface) ? "下游接口编码" : "接口编码")"
                                                   Variant="Variant.Outlined"
                                                   Margin="Margin.Dense" />
                                 </MudItem>
@@ -572,6 +612,52 @@
                                                   HelperText="@GetSqlTemplateHelperText(_editingConfigInterface)" />
                                 </MudItem>
                             }
+                            else if (IsDynamicApiInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12">
+                                    <MudTextField @bind-Value="_editingConfigInterface.QueryPath"
+                                                  Label="查询路径"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense"
+                                                  HelperText="填写查询端点前缀后的路径部分" />
+                                </MudItem>
+                                <MudItem xs="12">
+                                    <MudSwitch @bind-Value="_editingConfigInterface.UseTodayTimeRange"
+                                               Label="传入当天 00:00:00 至 23:59:59"
+                                               Color="Color.Primary" />
+                                </MudItem>
+                            }
+                        </MudGrid>
+                    </div>
+
+                    <div class="config-section">
+                        <div class="config-section-header">
+                            <MudText Typo="Typo.subtitle1">访问时段</MudText>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12">
+                                <MudSwitch @bind-Value="_editingConfigInterface.AccessWindowEnabled"
+                                           Label="仅在指定时段访问"
+                                           Color="Color.Primary" />
+                            </MudItem>
+                            @if (_editingConfigInterface.AccessWindowEnabled)
+                            {
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editingConfigInterface.AccessWindowStart"
+                                                  Label="开始时间"
+                                                  Placeholder="22:00"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="_editingConfigInterface.AccessWindowEnd"
+                                                  Label="结束时间"
+                                                  Placeholder="06:00"
+                                                  HelperText="支持跨午夜，格式 HH:mm"
+                                                  Variant="Variant.Outlined"
+                                                  Margin="Margin.Dense" />
+                                </MudItem>
+                            }
                         </MudGrid>
                     </div>
 
@@ -580,7 +666,15 @@
                             <MudText Typo="Typo.subtitle1">查询映射</MudText>
                         </div>
                         <MudGrid Spacing="2">
-                            @if (IsChildInterface(_editingConfigInterface))
+                            @if (IsDynamicApiInterface(_editingConfigInterface))
+                            {
+                                <MudItem xs="12">
+                                    <MudAlert Severity="Severity.Info" Dense="true">
+                                        自动使用任务配置的患者 ID 字段和住院次数字段。
+                                    </MudAlert>
+                                </MudItem>
+                            }
+                            else if (IsChildInterface(_editingConfigInterface))
                             {
                                 <MudItem xs="12">
                                     <div class="interface-inline-summary config-inline-summary">
@@ -753,7 +847,9 @@
                     </div>
                 }
 
-                @if (_editingConfigInterface != null && !IsDatabaseInterface(_editingConfigInterface))
+                @if (_editingConfigInterface != null &&
+                    !IsDatabaseInterface(_editingConfigInterface) &&
+                    !IsDynamicApiInterface(_editingConfigInterface))
                 {
                     <div class="config-section">
                         <div class="config-section-header">
@@ -811,6 +907,53 @@
             </DialogActions>
         </MudDialog>
 
+        <MudDialog @bind-Visible="_showDynamicApiImportDialog" Options="_configDialogOptions">
+            <TitleContent>
+                <MudText Typo="Typo.h6">导入单个 DynamicApi 接口</MudText>
+            </TitleContent>
+            <DialogContent>
+                <MudText Typo="Typo.body2" Class="mb-3">
+                    JSON 必须包含 taskCode 和 interfaceKey。系统只新增或更新匹配的一个接口，其他接口不会改变。
+                </MudText>
+                <MudTextField @bind-Value="_dynamicApiImportJson"
+                              Label="接口配置 JSON"
+                              Variant="Variant.Outlined"
+                              Lines="14"
+                              Immediate="true" />
+                <MudButton Variant="Variant.Outlined" Color="Color.Info" Class="mt-3"
+                           StartIcon="@Icons.Material.Filled.Preview" OnClick="PreviewDynamicApiImport">
+                    生成变更预览
+                </MudButton>
+                @if (!string.IsNullOrWhiteSpace(_dynamicApiImportError))
+                {
+                    <MudAlert Severity="Severity.Error" Class="mt-3">@_dynamicApiImportError</MudAlert>
+                }
+                else if (_dynamicApiImportPreview.Count > 0)
+                {
+                    <MudAlert Severity="Severity.Info" Class="mt-3">
+                        <ul>
+                            @foreach (var item in _dynamicApiImportPreview)
+                            {
+                                <li>@item</li>
+                            }
+                        </ul>
+                    </MudAlert>
+                }
+                else if (_dynamicApiImportCandidate != null)
+                {
+                    <MudAlert Severity="Severity.Success" Class="mt-3">接口配置没有变化。</MudAlert>
+                }
+            </DialogContent>
+            <DialogActions>
+                <MudButton OnClick="CloseDynamicApiImportDialog">取消</MudButton>
+                <MudButton Color="Color.Primary"
+                           Disabled="@(_dynamicApiImportCandidate == null || _dynamicApiImportPreview.Count == 0)"
+                           OnClick="ApplyDynamicApiImport">
+                    应用到当前任务
+                </MudButton>
+            </DialogActions>
+        </MudDialog>
+
         <div class="task-edit-actions">
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
                        OnClick="Save" Disabled="_saving">
@@ -834,8 +977,10 @@
     private bool _isEdit;
     private bool _loading = true;
     private bool _saving;
+    private ActiveSyncSettings? _activeSyncSettings;
     private bool _originalEnabled;
     private string _originalTriggerServerCode = "";
+    private string _originalAdditionalTriggerServerCodes = "";
     private string _originalPushType = "";
     private string _originalPushTarget = "";
     private SyncTaskInterface? _pendingNewInterface;
@@ -862,10 +1007,24 @@
     private bool _editingNewInterface;
     private readonly DialogOptions _configDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
 
+    // DynamicApi 单接口增量导入
+    private bool _showDynamicApiImportDialog;
+    private string _dynamicApiImportJson = "";
+    private string? _dynamicApiImportError;
+    private List<string> _dynamicApiImportPreview = [];
+    private SyncTaskInterface? _dynamicApiImportCandidate;
+    private SyncTaskInterface? _dynamicApiImportExisting;
+    private readonly JsonSerializerOptions _dynamicApiImportJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
+    };
+
     // 过滤条件相关
     private TriggerConditionConfig _conditionConfig = new();
     private List<string> _ruleValuesText = [];
     private readonly Dictionary<string, List<string>> _columnsCache = [];
+    private HashSet<string> _additionalTriggerServerCodes = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed class InterfaceGroupView
     {
@@ -923,6 +1082,10 @@
             _ruleValuesText = _conditionConfig.Rules
                 .Select(r => string.Join(",", r.Values))
                 .ToList();
+            _additionalTriggerServerCodes = _task.AdditionalTriggerServerCodeArray
+                .Where(code => !string.Equals(code, _task.TriggerServerCode, StringComparison.OrdinalIgnoreCase))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            SyncAdditionalTriggerServerCodes();
             CaptureOriginalTaskState();
 
             // 预加载已有规则的字段列表
@@ -959,6 +1122,230 @@
         await OpenConfigDialog(newInterface, true);
     }
 
+    private void OpenDynamicApiImportDialog()
+    {
+        _dynamicApiImportJson = "";
+        ResetDynamicApiImportPreview();
+        _showDynamicApiImportDialog = true;
+    }
+
+    private void CloseDynamicApiImportDialog()
+    {
+        _showDynamicApiImportDialog = false;
+        ResetDynamicApiImportPreview();
+    }
+
+    private void PreviewDynamicApiImport()
+    {
+        ResetDynamicApiImportPreview();
+
+        try
+        {
+            var import = JsonSerializer.Deserialize<DynamicApiInterfaceImport>(
+                _dynamicApiImportJson,
+                _dynamicApiImportJsonOptions) ?? throw new InvalidOperationException("JSON 内容不能为空");
+
+            ValidateDynamicApiImportIdentity(import);
+            var matches = _interfaces
+                .Where(i => string.Equals(i.InterfaceKey, import.InterfaceKey.Trim(), StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (matches.Count > 1)
+                throw new InvalidOperationException("当前任务存在重复的 interfaceKey，请先修正任务配置");
+
+            _dynamicApiImportExisting = matches.FirstOrDefault();
+            if (_dynamicApiImportExisting != null && !IsDynamicApiInterface(_dynamicApiImportExisting))
+                throw new InvalidOperationException("相同 interfaceKey 已用于非 DynamicApi 接口，不能覆盖");
+            if (_dynamicApiImportExisting != null &&
+                (IsChildInterface(_dynamicApiImportExisting) || HasChildInterfaces(_dynamicApiImportExisting)))
+            {
+                throw new InvalidOperationException("目标接口存在父子组合关系，不能通过 DynamicApi 单接口导入修改");
+            }
+
+            var candidate = CreateDynamicApiImportCandidate(_dynamicApiImportExisting, import);
+            ValidateDynamicApiImportCandidate(candidate);
+            NormalizeInterfaceConfig(candidate);
+
+            _dynamicApiImportCandidate = candidate;
+            _dynamicApiImportPreview = BuildDynamicApiImportPreview(_dynamicApiImportExisting, candidate);
+        }
+        catch (JsonException ex)
+        {
+            _dynamicApiImportError = $"JSON 格式错误：{ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            _dynamicApiImportError = ex.Message;
+        }
+    }
+
+    private async Task ApplyDynamicApiImport()
+    {
+        if (_dynamicApiImportCandidate == null || _dynamicApiImportPreview.Count == 0)
+            return;
+
+        if (_dynamicApiImportExisting == null)
+        {
+            _interfaces.Add(_dynamicApiImportCandidate);
+            _pendingNewInterface = _dynamicApiImportCandidate;
+        }
+        else
+        {
+            ApplyInterfaceValues(_dynamicApiImportExisting, _dynamicApiImportCandidate);
+        }
+
+        NormalizeInterfaceOrder();
+        await RefreshInterfaceWorkspaceAsync();
+        _showDynamicApiImportDialog = false;
+        inj_snackbar.Add("接口配置已应用，请检查后点击保存生效", Severity.Success);
+        ResetDynamicApiImportPreview();
+    }
+
+    private void ValidateDynamicApiImportIdentity(DynamicApiInterfaceImport import)
+    {
+        if (string.IsNullOrWhiteSpace(_task.Code))
+            throw new InvalidOperationException("请先填写当前任务编码");
+        if (string.IsNullOrWhiteSpace(import.TaskCode))
+            throw new InvalidOperationException("taskCode 不能为空");
+        if (!string.Equals(_task.Code.Trim(), import.TaskCode.Trim(), StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"JSON 目标任务为 {import.TaskCode}，与当前任务 {_task.Code} 不一致");
+        if (string.IsNullOrWhiteSpace(import.InterfaceKey))
+            throw new InvalidOperationException("interfaceKey 不能为空");
+
+        var interfaceKey = import.InterfaceKey.Trim();
+        if (interfaceKey.Length > 100 || interfaceKey.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
+            throw new InvalidOperationException("interfaceKey 只能包含字母、数字、短横线和下划线，且不能超过 100 个字符");
+        if (import.SortOrder.HasValue && import.SortOrder.Value < 1)
+            throw new InvalidOperationException("sortOrder 必须大于 0");
+    }
+
+    private SyncTaskInterface CreateDynamicApiImportCandidate(
+        SyncTaskInterface? existing,
+        DynamicApiInterfaceImport import)
+    {
+        var candidate = new SyncTaskInterface
+        {
+            Enabled = true,
+            SortOrder = GetRecommendedSortOrderForNewInterface(),
+            InterfaceKey = import.InterfaceKey.Trim(),
+            SourceType = IngestionService.SourceTypeDynamicApi,
+            DatabaseType = IngestionService.DatabaseTypeSqlServer,
+            RouteOperator = "eq"
+        };
+
+        if (existing != null)
+            ApplyInterfaceValues(candidate, existing);
+
+        candidate.InterfaceKey = import.InterfaceKey.Trim();
+        candidate.SourceType = IngestionService.SourceTypeDynamicApi;
+        if (import.ServerCode != null)
+            candidate.ServerCode = import.ServerCode.Trim();
+        if (import.DisplayName != null)
+            candidate.DisplayName = import.DisplayName.Trim();
+        if (import.QueryPath != null)
+            candidate.QueryPath = import.QueryPath.Trim();
+        if (import.UseTodayTimeRange.HasValue)
+            candidate.UseTodayTimeRange = import.UseTodayTimeRange.Value;
+        if (import.AccessWindowEnabled.HasValue)
+            candidate.AccessWindowEnabled = import.AccessWindowEnabled.Value;
+        if (import.AccessWindowStart != null)
+            candidate.AccessWindowStart = import.AccessWindowStart.Trim();
+        if (import.AccessWindowEnd != null)
+            candidate.AccessWindowEnd = import.AccessWindowEnd.Trim();
+        if (import.IsRequired.HasValue)
+            candidate.IsRequired = import.IsRequired.Value;
+        if (import.SortOrder.HasValue)
+            candidate.SortOrder = import.SortOrder.Value;
+        if (import.Enabled.HasValue)
+            candidate.Enabled = import.Enabled.Value;
+        if (import.PushParams != null)
+            candidate.PushParams = import.PushParams.Count == 0 ? null : JsonSerializer.Serialize(import.PushParams);
+        if (import.InjectFields != null)
+        {
+            SetInjectFields(candidate, import.InjectFields
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+        if (import.OutputFields != null)
+        {
+            candidate.OutputFields = string.Join(",", import.OutputFields
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(candidate.OutputFields))
+                candidate.OutputFields = null;
+        }
+
+        return candidate;
+    }
+
+    private static void ValidateDynamicApiImportCandidate(SyncTaskInterface candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate.ServerCode))
+            throw new InvalidOperationException("serverCode 不能为空；新增接口时必须提供该字段");
+        if (string.IsNullOrWhiteSpace(candidate.DisplayName))
+            throw new InvalidOperationException("displayName 不能为空；新增接口时必须提供该字段");
+        if (string.IsNullOrWhiteSpace(candidate.QueryPath))
+            throw new InvalidOperationException("queryPath 不能为空；新增接口时必须提供该字段");
+        if (Uri.TryCreate(candidate.QueryPath, UriKind.Absolute, out _))
+            throw new InvalidOperationException("queryPath 只能填写查询端点前缀后的相对路径");
+
+        InterfaceAccessWindow.Validate(candidate);
+    }
+
+    private static List<string> BuildDynamicApiImportPreview(
+        SyncTaskInterface? existing,
+        SyncTaskInterface candidate)
+    {
+        var preview = new List<string>();
+        if (existing == null)
+        {
+            preview.Add($"新增接口：{candidate.DisplayName}（{candidate.InterfaceKey}）");
+            preview.Add($"接口编码：{candidate.ServerCode}");
+            preview.Add($"查询路径：{candidate.QueryPath}");
+            preview.Add($"执行顺序：{candidate.SortOrder}；必要：{FormatImportValue(candidate.IsRequired)}；启用：{FormatImportValue(candidate.Enabled)}");
+            return preview;
+        }
+
+        AddDynamicApiImportChange(preview, "接口编码", existing.ServerCode, candidate.ServerCode);
+        AddDynamicApiImportChange(preview, "显示名称", existing.DisplayName, candidate.DisplayName);
+        AddDynamicApiImportChange(preview, "查询路径", existing.QueryPath, candidate.QueryPath);
+        AddDynamicApiImportChange(preview, "当天时间范围", existing.UseTodayTimeRange, candidate.UseTodayTimeRange);
+        AddDynamicApiImportChange(preview, "限制访问时段", existing.AccessWindowEnabled, candidate.AccessWindowEnabled);
+        AddDynamicApiImportChange(preview, "访问开始时间", existing.AccessWindowStart, candidate.AccessWindowStart);
+        AddDynamicApiImportChange(preview, "访问结束时间", existing.AccessWindowEnd, candidate.AccessWindowEnd);
+        AddDynamicApiImportChange(preview, "必要接口", existing.IsRequired, candidate.IsRequired);
+        AddDynamicApiImportChange(preview, "执行顺序", existing.SortOrder, candidate.SortOrder);
+        AddDynamicApiImportChange(preview, "启用状态", existing.Enabled, candidate.Enabled);
+        AddDynamicApiImportChange(preview, "路由参数", existing.PushParams, candidate.PushParams);
+        AddDynamicApiImportChange(preview, "注入字段", existing.InjectFields, candidate.InjectFields);
+        AddDynamicApiImportChange(preview, "输出字段", existing.OutputFields, candidate.OutputFields);
+        return preview;
+    }
+
+    private static void AddDynamicApiImportChange<T>(List<string> preview, string name, T before, T after)
+    {
+        if (EqualityComparer<T>.Default.Equals(before, after))
+            return;
+
+        preview.Add($"{name}：{FormatImportValue(before)} → {FormatImportValue(after)}");
+    }
+
+    private static string FormatImportValue<T>(T value) => value switch
+    {
+        null => "空",
+        bool boolValue => boolValue ? "是" : "否",
+        string stringValue when string.IsNullOrWhiteSpace(stringValue) => "空",
+        _ => value.ToString() ?? "空"
+    };
+
+    private void ResetDynamicApiImportPreview()
+    {
+        _dynamicApiImportError = null;
+        _dynamicApiImportPreview = [];
+        _dynamicApiImportCandidate = null;
+        _dynamicApiImportExisting = null;
+    }
+
     private void RemoveInterface(SyncTaskInterface item)
     {
         if (item.Id > 0)
@@ -993,7 +1380,7 @@
     {
         item.ServerCode = serverCode;
         var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == serverCode);
-        if (!IsDatabaseInterface(item))
+        if (!IsDatabaseInterface(item) && !IsDynamicApiInterface(item))
             item.DisplayName = dl?.Name ?? "";
     }
 
@@ -1004,10 +1391,25 @@
             return;
 
         item.SourceType = normalized;
+        if (!IsDynamicApiInterface(item))
+        {
+            item.QueryPath = null;
+            item.UseTodayTimeRange = false;
+        }
+
         if (IsDatabaseInterface(item))
         {
             item.DisplayName = string.IsNullOrWhiteSpace(item.DisplayName) ? item.ServerCode : item.DisplayName;
             item.DatabaseType = GetDefaultInterfaceDatabaseType();
+        }
+        else if (IsDynamicApiInterface(item))
+        {
+            ClearInterfaceDatabaseConnection(item);
+            item.QuerySql = null;
+            item.QueryField = "";
+            item.QueryValueField = null;
+            item.FilterConditions = null;
+            ClearParentBinding(item);
         }
         else
         {
@@ -1236,13 +1638,37 @@
     {
         var originalSourceType = iface.SourceType;
         iface.SourceType = NormalizeSourceType(iface.SourceType);
-        if (!IsDatabaseInterface(iface))
+        if (iface.AccessWindowEnabled)
         {
-            ClearInterfaceDatabaseConnection(iface);
-            iface.QuerySql = null;
+            iface.AccessWindowStart = iface.AccessWindowStart?.Trim();
+            iface.AccessWindowEnd = iface.AccessWindowEnd?.Trim();
         }
         else
         {
+            iface.AccessWindowStart = null;
+            iface.AccessWindowEnd = null;
+        }
+        if (IsDynamicApiInterface(iface))
+        {
+            ClearInterfaceDatabaseConnection(iface);
+            iface.QuerySql = null;
+            iface.QueryField = "";
+            iface.QueryValueField = null;
+            iface.FilterConditions = null;
+            iface.QueryPath = iface.QueryPath?.Trim();
+            ClearParentBinding(iface);
+        }
+        else if (!IsDatabaseInterface(iface))
+        {
+            ClearInterfaceDatabaseConnection(iface);
+            iface.QuerySql = null;
+            iface.QueryPath = null;
+            iface.UseTodayTimeRange = false;
+        }
+        else
+        {
+            iface.QueryPath = null;
+            iface.UseTodayTimeRange = false;
             iface.ConnectionStringName = null;
             iface.FilterConditions = null;
             var resource = GetEffectiveDatabaseResource(iface);
@@ -1306,8 +1732,16 @@
     private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
         IngestionService.IsDatabaseSourceType(iface.SourceType);
 
-    private string GetInterfaceSourceTypeText(SyncTaskInterface iface) =>
-        IsDatabaseInterface(iface) ? GetEffectiveDatabaseTypeText(iface) : "DataLake";
+    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
+        IngestionService.IsDynamicApiSourceType(iface.SourceType);
+
+    private string GetInterfaceSourceTypeText(SyncTaskInterface iface)
+    {
+        if (IsDatabaseInterface(iface))
+            return GetEffectiveDatabaseTypeText(iface);
+
+        return IsDynamicApiInterface(iface) ? "DynamicApi" : "DataLake";
+    }
 
     private bool IsSqlServerDatabase(SyncTaskInterface iface) =>
         IngestionService.IsSqlServerDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
@@ -1366,7 +1800,24 @@
     private async Task OnTriggerServerCodeChanged(string serverCode)
     {
         _task.TriggerServerCode = serverCode;
+        _additionalTriggerServerCodes.Remove(serverCode);
+        SyncAdditionalTriggerServerCodes();
         await EnsureColumnsLoadedAsync(serverCode);
+    }
+
+    private void OnAdditionalTriggerSourcesChanged(IEnumerable<string> serverCodes)
+    {
+        _additionalTriggerServerCodes = serverCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code) &&
+                !string.Equals(code, _task.TriggerServerCode, StringComparison.OrdinalIgnoreCase))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        SyncAdditionalTriggerServerCodes();
+    }
+
+    private void SyncAdditionalTriggerServerCodes()
+    {
+        _task.AdditionalTriggerServerCodes = string.Join(",", _additionalTriggerServerCodes
+            .OrderBy(code => code, StringComparer.OrdinalIgnoreCase));
     }
 
     private string GetTriggerSourceSummary()
@@ -1375,7 +1826,10 @@
             return "未设置";
 
         var source = _ingestionSources.FirstOrDefault(s => s.ServerCode == _task.TriggerServerCode);
-        return source is null ? _task.TriggerServerCode : $"{source.Name} ({source.ServerCode})";
+        var mainSource = source is null ? _task.TriggerServerCode : $"{source.Name} ({source.ServerCode})";
+        return _additionalTriggerServerCodes.Count == 0
+            ? mainSource
+            : $"{mainSource}，附加 {_additionalTriggerServerCodes.Count} 个";
     }
 
     private int GetEnabledInterfaceCount() => _interfaces.Count(i => i.Enabled);
@@ -1399,7 +1853,9 @@
                 continue;
             }
 
-            if (string.IsNullOrWhiteSpace(iface.QueryField))
+            if (IsDynamicApiInterface(iface)
+                ? string.IsNullOrWhiteSpace(iface.QueryPath)
+                : string.IsNullOrWhiteSpace(iface.QueryField))
                 missingQueryCount++;
 
             if (GetMissingPushParamCount(iface) > 0)
@@ -1532,6 +1988,9 @@
 
     private string GetQueryMappingPreview(SyncTaskInterface iface)
     {
+        if (IsDynamicApiInterface(iface))
+            return $"patientId ← {_task.PatientIdField}，visitId ← {_task.VisitSnField}";
+
         if (string.IsNullOrWhiteSpace(iface.QueryField))
             return "未配置";
 
@@ -1581,6 +2040,9 @@
         if (string.IsNullOrWhiteSpace(iface.ServerCode))
             return "待选接口";
 
+        if (IsDynamicApiInterface(iface))
+            return string.IsNullOrWhiteSpace(iface.QueryPath) ? "待定查询路径" : "可执行";
+
         if (string.IsNullOrWhiteSpace(iface.QueryField))
             return "待定查询";
 
@@ -1616,6 +2078,9 @@
 
     private string GetInterfaceQueryFieldSummary(SyncTaskInterface iface)
     {
+        if (IsDynamicApiInterface(iface))
+            return "patientId、visitId";
+
         if (IsChildInterface(iface))
         {
             var mappings = GetLinkMappings(iface);
@@ -1631,6 +2096,9 @@
 
     private string GetInterfaceValueSourceSummary(SyncTaskInterface iface)
     {
+        if (IsDynamicApiInterface(iface))
+            return $"{_task.PatientIdField}、{_task.VisitSnField}";
+
         if (IsChildInterface(iface))
         {
             var mappings = GetLinkMappings(iface);
@@ -1667,7 +2135,18 @@
             return issues;
         }
 
-        if (!IsChildInterface(iface) && string.IsNullOrWhiteSpace(iface.QueryField))
+        if (IsDynamicApiInterface(iface))
+        {
+            if (string.IsNullOrWhiteSpace(iface.QueryPath))
+                issues.Add("先填写动态接口查询路径");
+            if (string.IsNullOrWhiteSpace(_task.PatientIdField))
+                issues.Add("先配置任务患者 ID 字段");
+            if (string.IsNullOrWhiteSpace(_task.VisitSnField))
+                issues.Add("先配置任务住院次数字段");
+            if (IsChildInterface(iface) || HasChildInterfaces(iface))
+                issues.Add("动态接口仅支持独立接口");
+        }
+        else if (!IsChildInterface(iface) && string.IsNullOrWhiteSpace(iface.QueryField))
             issues.Add("先填写目标接口查询字段");
 
         if (IsDatabaseInterface(iface))
@@ -1683,6 +2162,33 @@
 
             if (string.IsNullOrWhiteSpace(iface.QuerySql))
                 issues.Add("先填写 SQL 查询模板");
+        }
+
+        if (iface.AccessWindowEnabled)
+        {
+            try
+            {
+                InterfaceAccessWindow.Validate(iface);
+            }
+            catch (InvalidOperationException ex)
+            {
+                issues.Add(ex.Message);
+            }
+        }
+
+        var relatedRoot = IsChildInterface(iface) ? GetParentInterface(iface) : iface;
+        if (relatedRoot != null)
+        {
+            var unit = _interfaces.Where(item => item.Enabled &&
+                (ReferenceEquals(item, relatedRoot) ||
+                 string.Equals(item.ParentInterfaceKey, relatedRoot.InterfaceKey, StringComparison.OrdinalIgnoreCase)));
+            if (unit.Any(item => item.AccessWindowEnabled != relatedRoot.AccessWindowEnabled ||
+                    relatedRoot.AccessWindowEnabled &&
+                    (!string.Equals(item.AccessWindowStart, relatedRoot.AccessWindowStart, StringComparison.Ordinal) ||
+                     !string.Equals(item.AccessWindowEnd, relatedRoot.AccessWindowEnd, StringComparison.Ordinal))))
+            {
+                issues.Add("组合根接口和子接口的访问时段必须一致");
+            }
         }
 
         if (IsChildInterface(iface))
@@ -2085,7 +2591,7 @@
 
     private static int GetFilterConditionCount(SyncTaskInterface iface)
     {
-        if (IsDatabaseInterface(iface))
+        if (IsDatabaseInterface(iface) || IsDynamicApiInterface(iface))
             return 0;
 
         if (string.IsNullOrWhiteSpace(iface.FilterConditions)) return 0;
@@ -2103,6 +2609,7 @@
     {
         _originalEnabled = _task.Enabled;
         _originalTriggerServerCode = _task.TriggerServerCode;
+        _originalAdditionalTriggerServerCodes = _task.AdditionalTriggerServerCodes;
         _originalPushType = _task.PushType;
         _originalPushTarget = _task.PushTarget;
     }
@@ -2119,6 +2626,7 @@
             return true;
 
         return !string.Equals(_task.TriggerServerCode, _originalTriggerServerCode, StringComparison.Ordinal) ||
+            !string.Equals(_task.AdditionalTriggerServerCodes, _originalAdditionalTriggerServerCodes, StringComparison.Ordinal) ||
             !string.Equals(_task.PushType, _originalPushType, StringComparison.Ordinal) ||
             !string.Equals(_task.PushTarget, _originalPushTarget, StringComparison.Ordinal);
     }
@@ -2244,6 +2752,7 @@
 
     private async Task Save()
     {
+        SyncAdditionalTriggerServerCodes();
         EnsureInterfaceKeys();
         foreach (var iface in _interfaces)
             NormalizeInterfaceConfig(iface);
@@ -2379,6 +2888,7 @@
                 entity.Name = _task.Name;
                 entity.Code = _task.Code;
                 entity.TriggerServerCode = _task.TriggerServerCode;
+                entity.AdditionalTriggerServerCodes = _task.AdditionalTriggerServerCodes;
                 entity.PushType = _task.PushType;
                 entity.PushTarget = _task.PushTarget;
                 entity.EnableTriggerRecordPush = _task.EnableTriggerRecordPush;
@@ -2430,6 +2940,17 @@
             foreach (var (pageItem, entityItem) in createdInterfaces)
                 pageItem.Id = entityItem.Id;
 
+            if (_activeSyncSettings != null)
+            {
+                await _activeSyncSettings.SaveAsync(
+                    _task.Id,
+                    _task.Name,
+                    _task.Code,
+                    _task.PushType,
+                    _task.PushTarget,
+                    _interfaces);
+            }
+
             inj_snackbar.Add(_isEdit ? "任务更新成功" : "任务创建成功", Severity.Success);
             _removedInterfaceIds.Clear();
             CaptureOriginalTaskState();
@@ -2465,6 +2986,11 @@
         target.SqlServerPassword = source.SqlServerPassword;
         target.SqlServerTrustCertificate = source.SqlServerTrustCertificate;
         target.QuerySql = source.QuerySql;
+        target.QueryPath = source.QueryPath;
+        target.UseTodayTimeRange = source.UseTodayTimeRange;
+        target.AccessWindowEnabled = source.AccessWindowEnabled;
+        target.AccessWindowStart = source.AccessWindowStart;
+        target.AccessWindowEnd = source.AccessWindowEnd;
         target.QueryField = source.QueryField;
         target.QueryValueField = source.QueryValueField;
         target.IsRequired = source.IsRequired;

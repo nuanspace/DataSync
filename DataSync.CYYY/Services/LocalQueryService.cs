@@ -190,6 +190,7 @@ public class LocalQueryService
                 aliasMap[serverCode] = (IngestionService.GetLocalTableName(serverCode), $"t{aliasIdx++}");
             }
 
+            var patientField = task.PatientIdField;
             var joinField = task.VisitSnField ?? "PAT_VISIT_SN";
             var skippedCodes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (serverCode, (tableName, alias)) in aliasMap)
@@ -198,16 +199,17 @@ public class LocalQueryService
                     continue;
 
                 var columns = await GetTableColumnsAsync(tableName, ct);
-                if (!columns.Contains(joinField, StringComparer.OrdinalIgnoreCase))
+                if (!columns.Contains(patientField, StringComparer.OrdinalIgnoreCase) ||
+                    !columns.Contains(joinField, StringComparer.OrdinalIgnoreCase))
                 {
                     _logger.LogWarning(
-                        "任务 [{TaskName}] 表 {Table} 不包含连接字段 [{JoinField}]，已跳过关联",
-                        task.Name, tableName, joinField);
+                        "任务 [{TaskName}] 表 {Table} 不包含连接字段 [{PatientField}] 或 [{JoinField}]，已跳过关联",
+                        task.Name, tableName, patientField, joinField);
                     skippedCodes.Add(serverCode);
                     continue;
                 }
 
-                sb.AppendLine($"LEFT JOIN {tableName} {alias} ON {mainAlias}.\"{joinField}\" = {alias}.\"{joinField}\"");
+                sb.AppendLine($"LEFT JOIN {tableName} {alias} ON {mainAlias}.\"{patientField}\" = {alias}.\"{patientField}\" AND {mainAlias}.\"{joinField}\" = {alias}.\"{joinField}\"");
             }
 
             foreach (var skippedCode in skippedCodes)
@@ -238,6 +240,19 @@ public class LocalQueryService
                         var paramName = $"@p{paramIdx++}";
                         whereClauses.Add($"({fieldRef} IS NULL OR NOT ({fieldRef} = ANY({paramName})))");
                         parameters.Add(new NpgsqlParameter(paramName, rule.Values.ToArray()));
+                        break;
+                    }
+                    case "contains" when rule.Values.Count > 0:
+                    {
+                        var containsClauses = new List<string>();
+                        foreach (var value in rule.Values)
+                        {
+                            var paramName = $"@p{paramIdx++}";
+                            containsClauses.Add($"strpos({fieldRef}::text, {paramName}) > 0");
+                            parameters.Add(new NpgsqlParameter(paramName, value));
+                        }
+
+                        whereClauses.Add($"({string.Join(" OR ", containsClauses)})");
                         break;
                     }
                     case "not_null":
@@ -382,7 +397,8 @@ public class LocalQueryService
         SyncTask task,
         IngestionSource source,
         Dictionary<string, object> triggerRecord,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool skipRules = false)
     {
         var filters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var primaryKey in source.PrimaryKeyArray)
@@ -406,6 +422,7 @@ public class LocalQueryService
             task,
             ct,
             excludeSyncedOverride: false,
+            skipRules: skipRules,
             mainEqualsFilters: filters,
             limit: 1);
 

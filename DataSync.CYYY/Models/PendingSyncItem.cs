@@ -71,6 +71,29 @@ public class PendingSyncItem
     [Column("next_retry_time")]
     public DateTime? NextRetryTime { get; set; }
 
+    /// <summary>
+    /// 已完成的顶层接口键 JSON，用于分段执行时避免重复推送。
+    /// </summary>
+    [Column("completed_interface_keys")]
+    public string CompletedInterfaceKeys { get; set; } = "[]";
+
+    [NotMapped]
+    public HashSet<string> CompletedInterfaceKeySet
+    {
+        get
+        {
+            try
+            {
+                return System.Text.Json.JsonSerializer.Deserialize<List<string>>(CompletedInterfaceKeys)
+                    ?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? [];
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return [];
+            }
+        }
+    }
+
     [Column("last_started_at")]
     public DateTime? LastStartedAt { get; set; }
 

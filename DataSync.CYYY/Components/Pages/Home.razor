@@ -298,9 +298,10 @@ else
             _tasks = tasksTask.Result;
             _checkpoints = checkpointsTask.Result.ToDictionary(item => item.TaskCode, StringComparer.OrdinalIgnoreCase);
             _pendingStats = pendingStatsTask.Result.ToDictionary(item => item.TaskCode, StringComparer.OrdinalIgnoreCase);
-            _sourceTaskCounts = _tasks
-                .GroupBy(task => task.TriggerServerCode, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+            _sourceTaskCounts = _sources.ToDictionary(
+                source => source.ServerCode,
+                source => _tasks.Count(task => TaskUsesSource(task, source.ServerCode)),
+                StringComparer.OrdinalIgnoreCase);
 
             var countTasks = _sources.Select(async source =>
             {
@@ -538,7 +539,7 @@ else
     {
         if (!enabled)
         {
-            var relatedTasks = _tasks.Where(task => task.TriggerServerCode == source.ServerCode).ToList();
+            var relatedTasks = _tasks.Where(task => TaskUsesSource(task, source.ServerCode)).ToList();
             if (relatedTasks.Count > 0)
             {
                 var taskNames = string.Join("、", relatedTasks.Select(task => task.Name));
@@ -568,6 +569,10 @@ else
             inj_snackbar.Add($"操作失败：{ex.Message}", Severity.Error);
         }
     }
+
+    private static bool TaskUsesSource(SyncTask task, string serverCode)
+        => string.Equals(task.TriggerServerCode, serverCode, StringComparison.OrdinalIgnoreCase) ||
+           task.AdditionalTriggerServerCodeArray.Contains(serverCode, StringComparer.OrdinalIgnoreCase);
 
     private async Task ToggleTaskEnabled(SyncTask task, bool enabled)
     {
