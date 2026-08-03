@@ -1,0 +1,58 @@
+name: 知识治理
+
+on:
+  pull_request:
+  push:
+    branches: [master, main]
+  schedule:
+    - cron: "0 1 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-knowledge:
+    runs-on: windows-latest
+    steps:
+      - name: 检出完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 测试知识路由和校验脚本
+        shell: pwsh
+        run: ./.codex/tools/test-knowledge-tools.ps1
+
+      - name: 检查知识影响
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: ./.codex/tools/detect-knowledge-impact.ps1 -BaseRef "origin/${{ github.base_ref }}" -FailOnMissingUpdate
+
+      - name: 检查推送提交的知识影响
+        if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        shell: pwsh
+        run: ./.codex/tools/detect-knowledge-impact.ps1 -BaseRef "${{ github.event.before }}" -FailOnMissingUpdate
+
+      - name: 生成每周知识漂移报告
+        if: github.event_name == 'schedule'
+        shell: pwsh
+        run: ./.codex/tools/audit-knowledge-drift.ps1 -OutputPath .codex/artifacts/knowledge-drift-report.json
+
+      - name: 上传知识漂移报告
+        if: github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: knowledge-drift-report
+          path: .codex/artifacts/knowledge-drift-report.json
+
+  validate-tools-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 在 Ubuntu PowerShell 验证知识工具
+        shell: pwsh
+        run: ./.codex/tools/test-knowledge-tools.ps1

@@ -1,0 +1,64 @@
+# LHYY ESB、映射与 ntcare 写入
+
+## 职责与入口
+
+`DataSync.LHYY.V2` 是 .NET 10 应用，提供统一 ESB、SOAP 适配、接口配置、异步消息处理、字段映射及 Bio.Core/目标表写入。
+
+连接边界：
+
+- `DataSyncDb`：DataSync 管理库，主要 schema 为 `lhyy`。
+- `CubeDb`：ntcare 产品库，主要涉及 `public`、`care`、`form`、`target`。
+
+关键入口：`EsbController`、`WebServiceController`、`EsbReceiverService`、`SoapWebServiceService`、`InterfaceRecognitionService`、`MessageProcessingService`、`MessageExecutionService`、`GenericMessageProcessor`、`GenericQuestionWriteBackProcessor`、`FieldMappingExecutor`、`FilterRuleService`、`BioCoreIntegrationService`、`DirectTargetWriteService`。
+
+## JSON/ESB 主流程
+
+1. `EsbController` 读取 JSON 请求体；入口支持 gzip，并有请求大小限制。
+2. `EsbReceiverService` 取得接入项目上下文，先持久化原消息。
+3. `InterfaceRecognitionService` 依次尝试传统交易码、`serverCode/ServerCode/tranCode/TranCode/code/Code`，最后执行配置化匹配规则。
+4. 根据 `ReceiveMode` 直接处理或进入后台队列。
+5. `MessageExecutionService` 根据 `HandlerType` 选择通用、题目/子卡回写或自定义处理器。
+6. 处理器执行接口级过滤、字段级过滤、字段映射、字典转换、幂等和事件定位。
+7. 通过 Bio.Core 或受控的目标表直写更新 ntcare，并写消息状态、回执和处理日志。
+
+## SOAP 1.1
+
+- 服务地址为 `/webservice/{serviceCode}`，WSDL 为同地址加 `?wsdl`。
+- 请求参数 `INPUTPARA` 可为 CDATA、转义 XML 文本或嵌套 XML。
+- `SoapWebServiceService` 按 `SOAPAction` 定位接口和项目，把业务 XML 转为 JSON并补充 `serverCode`，之后复用 ESB 主流程。
+- 同一 `soap_service_code` 下 `soap_operation` 和 `soap_action` 均不得重复。
+- 返回字符串包含 `RESULT_CODE` 和 `RESULT_CONTENT`；维护失败语义时保持 SOAP Fault 和可重试边界。
+
+## 识别与过滤规则
+
+- `esb_interface_match_rule`：同组规则 AND、组间 OR；路径含 `[]` 时可遍历数组。
+- `esb_filter_rule`：`mapping_id IS NULL` 为接口级，否则为映射级；同组 AND、组间 OR，无规则默认通过。
+- 数组路径下 `FilterScope.MessageCheck = 0` 表示数组中任一元素满足即让消息通过；`FilterScope.RowFilter = 1` 表示只保留满足条件的数组元素。不得互换两个数值或把行过滤解释为整条消息过滤。
+- 项目专属规则优先；没有项目规则时才回退全局规则。
+- 操作符包括相等、不等、包含、前后缀、集合、数值比较、空值和正则。
+- 接口识别配置存在内存缓存；修改后应使用现有缓存清理能力或重启加载，不把缓存时长当作即时一致性保证。
+
+## 消息状态和待身份绑定
+
+- `Pending/Processing/Success/Failed/Filtered/Unmatched/PartialSuccess` 表示普通处理生命周期。
+- `WaitingIdentity` 用于消息已保存但暂时无法定位患者事件的情况，不自动转为失败。
+- 支持的统一事件身份组合包括住院号、患者 ID + 住院日期、患者 ID + 住院次数。
+- 基础事件成功后，`EventIdentityService` upsert 身份并把匹配消息恢复为 `Pending`。
+- 生命体征等先到消息应由 LHYY 接收；CYYY 仅负责后续基础事件采集，不代存实时推送。
+
+## 映射与写入
+
+- `MappingTarget.Patient/Event/Question/SubCard` 分别映射患者、事件、题目和子卡。
+- 通用 JSONPath、数组路径、字典和值表达式由配置驱动；不要另建平行映射体系。
+- Bio.Core 初始化或能力不足时，只有明确支持的处理器可走 `DirectTargetWriteService`；不得把降级路径推广为默认路径。
+- 动态 target 表写入必须按表单元数据、系统字段和批准映射确定列范围，不能根据输入对象整行写入。
+
+## 配置表
+
+核心配置和状态表包括 `esb_integration_project`、`esb_integration_project_config`、`esb_global_config`、`esb_interface_config`、`esb_interface_match_rule`、`esb_field_mapping`、`esb_filter_rule`、`esb_idempotent_key_part`、`esb_event_identity`、`esb_messages`、`esb_message_receipt`、`esb_process_log` 和项目文档表。
+
+配置数量和消息数量属于动态状态，不写入知识库。数据库变更遵循 `DataSync.LHYY.V2/AGENTS.md`。
+
+## 变更检查
+
+修改识别顺序、receive mode、handler 分发、状态语义、规则组合、事件定位或写入目标时更新本文件。验证至少覆盖命中、不命中、重复消息、过滤、失败重试和项目隔离。

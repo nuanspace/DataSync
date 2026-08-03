@@ -1,0 +1,5 @@
+{
+  "domain": "database-operations",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "数据库升级、消息归档和维护互斥知识已与当前源码核对。"
+}

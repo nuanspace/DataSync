@@ -1,0 +1,5 @@
+{
+  "domain": "architecture",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "总体项目边界、依赖方向和主链路已与当前源码核对。"
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DataSync 业务知识"
+  short_description: "按任务渐进读取 DataSync 业务功能和流程知识"
+  default_prompt: "使用 $datasync-business-logic 定位本次 DataSync 任务所需的最小业务知识。"

@@ -1,0 +1,19 @@
+# DataSync 项目只启用任务所需工具，避免无关 MCP 占用上下文。
+[mcp_servers.hotnews]
+enabled = false
+
+[mcp_servers.memory]
+enabled = false
+
+[mcp_servers.files]
+enabled = false
+
+[mcp_servers.node_repl]
+enabled = false
+
+[mcp_servers.playwright]
+enabled = false
+
+# UI 验证继续使用 Codex 自带 Browser 插件；不在项目内配置数据库 MCP。
+[plugins."browser@openai-bundled"]
+enabled = true

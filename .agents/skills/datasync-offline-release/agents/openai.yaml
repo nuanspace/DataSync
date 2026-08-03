@@ -1,0 +1,4 @@
+interface:
+  display_name: "DataSync 离线发布"
+  short_description: "生成、检查并安全交付医院端离线部署包"
+  default_prompt: "使用 $datasync-offline-release 执行 DataSync 离线发布预检或交付。"

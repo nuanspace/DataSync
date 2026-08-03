@@ -1,0 +1,5 @@
+{
+  "domain": "interfaces-documents",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "医院接口、文档、文件和 OCR 知识已与当前源码及文档核对。"
+}
