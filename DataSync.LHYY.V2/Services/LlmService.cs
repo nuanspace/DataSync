@@ -199,6 +199,7 @@ public class LlmService
             27. 如果额外提供了“相关叶子路径候选”，说明这些候选是从完整叶子集合中按当前目标字段召回出的优先参考项；即使它们没有完整出现在结构摘要或叶子样本中，也必须优先结合这些候选做判断
             28. 如果当前目标字段全部属于同一 SubCard，应先锁定最可能的重复数组簇，再在同一数组元素内成组匹配多个字段；如果明显是单个对象，则在同一对象内成组匹配
             29. 对同一 SubCard 中已经能确认的字段，必须先返回已确认部分；不要因为其余字段暂时无法判断，就整组返回空数组 []
+            30. 目标字段带 parentCardId 时表示嵌套 SubCard；其 arrayPath 优先填写相对父级当前行的容器路径。内层与父级共用同一个对象时，arrayPath 填 "$parent"
 
             ## 输出格式
             严格输出 JSON 数组，每个元素：
@@ -1289,6 +1290,11 @@ public class LlmService
             return MessageJsonHelper.ResolveFirstScopedToken(sampleJson, mainContext, normalizedSourcePath, mainContext) != null;
         }
 
+        if (SubCardPathHelper.IsParentRecordContainerPath(suggestion.ArrayPath))
+        {
+            return true;
+        }
+
         var effectiveArrayPath = SubCardPathHelper.ExpandArrayPathToRoot(sampleJson, suggestion.ArrayPath, mainRecordArrayPath);
         if (SubCardPathHelper.IsAbsoluteJsonPath(normalizedSourcePath)
             || (!string.IsNullOrWhiteSpace(effectiveArrayPath)
@@ -1817,6 +1823,16 @@ public class LlmService
         if (!string.IsNullOrWhiteSpace(field.CardName))
         {
             metadata.Add($"cardName={field.CardName}");
+        }
+
+        if (field.ParentCardId.HasValue)
+        {
+            metadata.Add($"parentCardId={field.ParentCardId}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(field.ParentCardName))
+        {
+            metadata.Add($"parentCardName={field.ParentCardName}");
         }
 
         if (!string.IsNullOrWhiteSpace(field.SemanticHint))

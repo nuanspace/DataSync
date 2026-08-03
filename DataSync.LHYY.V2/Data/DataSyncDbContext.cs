@@ -163,6 +163,7 @@ public class DataSyncDbContext : DbContext
         {
             e.HasIndex(r => r.Status);
             e.HasIndex(r => r.IntegrationProjectCode);
+            e.HasIndex(r => new { r.IntegrationProjectCode, r.EventId });
             e.HasIndex(r => new { r.IntegrationProjectCode, r.InpatientNo });
             e.HasIndex(r => new { r.IntegrationProjectCode, r.Mrn, r.InpatientNo, r.VisitNo });
         });

@@ -47,6 +47,7 @@ else
     // 问题列表缓存（按 LicenseCode）
     private string? _cachedLicenseCode;
     private List<QuestionFieldItem> _questionFields = [];
+    private Dictionary<Guid, CardInfo> _cards = [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -100,9 +101,11 @@ else
     private async Task LoadQuestionFieldsAsync()
     {
         _questionFields = [];
+        _cards = [];
         if (string.IsNullOrEmpty(LicenseCode)) return;
 
         var dict = await BioCoreService.GetFormQuestionDictAsync(LicenseCode);
+        _cards = await BioCoreService.GetAllCardListAsync(LicenseCode);
         foreach (var (id, q) in dict)
         {
             var displayName = FormBrowserHelper.GetPropertyValue(q, "display_name")
@@ -128,7 +131,8 @@ else
 
         if (CardId.HasValue && CardId.Value != Guid.Empty)
         {
-            items = items.Where(q => q.CardId == CardId.Value);
+            var allowedCardIds = GetQuestionCardIds(CardId.Value);
+            items = items.Where(q => allowedCardIds.Contains(q.CardId));
         }
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -140,6 +144,31 @@ else
         }
 
         return Task.FromResult(items.Take(50).Select(q => q.QuestionId.ToString()));
+    }
+
+    private HashSet<Guid> GetQuestionCardIds(Guid cardId)
+    {
+        var result = new HashSet<Guid> { cardId };
+        var pending = new Queue<Guid>();
+        pending.Enqueue(cardId);
+
+        while (pending.TryDequeue(out var currentCardId))
+        {
+            if (!_cards.TryGetValue(currentCardId, out var card) || !card.RelatedFormId.HasValue)
+            {
+                continue;
+            }
+
+            foreach (var relatedCard in _cards.Values.Where(item => item.FormId == card.RelatedFormId.Value))
+            {
+                if (result.Add(relatedCard.Id))
+                {
+                    pending.Enqueue(relatedCard.Id);
+                }
+            }
+        }
+
+        return result;
     }
 
     private string FormatQuestionDisplay(string? questionIdStr)

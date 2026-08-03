@@ -1,5 +1,7 @@
 ﻿@using Newtonsoft.Json.Linq
 
+@using DataSync.LHYY.V2.Models.Dto
+
 @if (_loading)
 {
     <MudProgressLinear Indeterminate="true" />
@@ -8,6 +10,13 @@
 @if (!string.IsNullOrWhiteSpace(_errorMessage))
 {
     <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_errorMessage</MudAlert>
+}
+
+@if (HasMainRecordArrayAggregationConflict)
+{
+    <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+        当前配置了主记录数组路径 @MainRecordArrayPath，正式接收时会先拆分主记录。若要跨整个数组筛选并汇总 Question，请清空主记录数组路径。
+    </MudAlert>
 }
 
 @if (_results.Count > 0)
@@ -29,6 +38,7 @@
                 <th>目标</th>
                 <th>源路径</th>
                 <th>目标字段</th>
+                <th>过滤结果</th>
                 <th>原始值</th>
                 <th>转换后</th>
                 <th>最终值</th>
@@ -40,17 +50,26 @@
             @foreach (var r in FilteredResults)
             {
                 idx++;
-                var rowStyle = (r.IsRequired && r.IsMissing) ? "background-color:rgba(244,67,54,0.08);" : "";
+                var rowStyle = r.IsFiltered
+                    ? "background-color:rgba(158,158,158,0.08);"
+                    : (r.IsRequired && r.IsMissing) ? "background-color:rgba(244,67,54,0.08);" : "";
                 <tr style="@rowStyle">
                     <td>@idx</td>
                     <td><MudChip T="string" Size="Size.Small" Color="GetTargetColor(r.MappingTarget)">@r.MappingTarget</MudChip></td>
                     <td style="font-family:monospace;font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;">@r.SourcePath</td>
                     <td style="font-family:monospace;font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;">@r.TargetField</td>
+                    <td>@(r.FilterSummary ?? "-")</td>
                     <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;">@(r.RawValue ?? "-")</td>
                     <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;">@(r.DictTranslatedValue ?? "-")</td>
                     <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;font-weight:600;">@(r.FinalValue ?? "-")</td>
                     <td>
-                        @if (r.IsRequired && r.IsMissing)
+                        @if (r.IsFiltered)
+                        {
+                            <MudTooltip Text="过滤未通过，正式执行时跳过">
+                                <MudIcon Icon="@Icons.Material.Filled.FilterAltOff" Color="Color.Secondary" Size="Size.Small" />
+                            </MudTooltip>
+                        }
+                        else if (r.IsRequired && r.IsMissing)
                         {
                             <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
                         }
@@ -85,6 +104,13 @@
     [Parameter]
     public List<EsbFieldMapping> Mappings { get; set; } = [];
 
+    [Parameter]
+    public IReadOnlyDictionary<string, List<EsbFilterRule>> MappingFilterRules { get; set; }
+        = new Dictionary<string, List<EsbFilterRule>>(StringComparer.OrdinalIgnoreCase);
+
+    [Parameter]
+    public IReadOnlyDictionary<Guid, CardInfo> FormCards { get; set; } = new Dictionary<Guid, CardInfo>();
+
     private List<MappingPreviewResult> _results = [];
     private string _filterMode = "all";
     private string? _errorMessage;
@@ -95,6 +121,14 @@
 
     private IEnumerable<MappingPreviewResult> FilteredResults =>
         _filterMode == "error" ? _results.Where(r => r.IsMissing) : _results;
+
+    private bool HasMainRecordArrayAggregationConflict =>
+        !string.IsNullOrWhiteSpace(MainRecordArrayPath)
+        && Mappings.Any(mapping =>
+            mapping.MappingTarget == MappingTarget.Question
+            && SubCardPathHelper.HasArrayWildcard(mapping.SourcePath)
+            && MappingFilterRules.TryGetValue(MappingPreviewService.BuildMappingKey(mapping), out var rules)
+            && rules.Any(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter));
 
     protected override async Task OnParametersSetAsync()
     {
@@ -118,7 +152,12 @@
         try
         {
             var body = JToken.Parse(JsonText);
-            _results = await inj_mappingPreviewService.PreviewAllAsync(body, Mappings, MainRecordArrayPath);
+            _results = await inj_mappingPreviewService.PreviewAllAsync(
+                body,
+                Mappings,
+                MainRecordArrayPath,
+                FormCards,
+                MappingFilterRules);
         }
         catch (Exception ex)
         {
@@ -150,7 +189,28 @@
             hash.Add(mapping.ArrayPath);
         }
 
+        foreach (var pair in MappingFilterRules.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            hash.Add(pair.Key);
+            foreach (var rule in pair.Value.OrderBy(rule => rule.RuleGroup).ThenBy(rule => rule.SortOrder))
+            {
+                hash.Add(rule.SourcePath);
+                hash.Add(rule.Operator);
+                hash.Add(rule.CompareValue);
+                hash.Add(rule.RuleGroup);
+                hash.Add(rule.FilterScope);
+                hash.Add(rule.IsEnabled);
+            }
+        }
+
         hash.Add(MainRecordArrayPath);
+        foreach (var card in FormCards.Values.OrderBy(card => card.Id))
+        {
+            hash.Add(card.Id);
+            hash.Add(card.ParentId);
+            hash.Add(card.FormId);
+            hash.Add(card.RelatedFormId);
+        }
 
         return hash.ToHashCode();
     }

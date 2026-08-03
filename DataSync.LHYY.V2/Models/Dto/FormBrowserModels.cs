@@ -92,6 +92,7 @@ public class FormInfo
     public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public int SortIndex { get; set; }
+    public bool IsHidden { get; set; }
 }
 
 /// <summary>
@@ -102,6 +103,8 @@ public class CardInfo
     public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public Guid? ParentId { get; set; }
+    public Guid? FormId { get; set; }
+    public Guid? RelatedFormId { get; set; }
     public string FormName { get; set; } = "";
     public string CardType { get; set; } = "default";
     public Guid? PreUid { get; set; }
@@ -115,6 +118,10 @@ public class CardNode
     public Guid CardId { get; set; }
     public string Name { get; set; } = "";
     public string CardType { get; set; } = "default";
+    public Guid? FormId { get; set; }
+    public Guid? RelatedFormId { get; set; }
+    public Guid? ParentSubCardId { get; set; }
+    public string? ParentSubCardName { get; set; }
     public Guid? PreUid { get; set; }
     public bool IsExpanded { get; set; } = true;
     public List<CardNode> SubCards { get; set; } = [];

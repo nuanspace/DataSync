@@ -121,6 +121,7 @@ public class Program
             builder.Services.AddScoped<DictTemplateService>();
             builder.Services.AddScoped<FieldMappingExecutor>();
             builder.Services.AddScoped<DirectTargetWriteService>();
+            builder.Services.AddScoped<NestedFormWriteService>();
             builder.Services.AddScoped<GenericMessageProcessor>();
             builder.Services.AddScoped<GenericQuestionWriteBackProcessor>();
             builder.Services.AddScoped<OcrProfileService>();
@@ -172,20 +173,6 @@ public class Program
             });
 
             var app = builder.Build();
-
-            // 自动建表（平台库）
-            try
-            {
-                using var scope = app.Services.CreateScope();
-                var db = scope.ServiceProvider.GetRequiredService<IDbContextFactory<DataSyncDbContext>>().CreateDbContext();
-                db.Database.EnsureCreated();
-                EnsurePlatformSchemaPatched(db);
-                logger.Info("平台库表结构已就绪");
-            }
-            catch (Exception ex)
-            {
-                logger.Error(ex, "平台库初始化失败，请检查 DataSyncDb 连接字符串");
-            }
 
             // Bio.Core 静态数据预加载（失败不影响应用启动）
             try
@@ -308,166 +295,6 @@ public class Program
         }
 
         return null;
-    }
-
-    private static void EnsurePlatformSchemaPatched(DataSyncDbContext db)
-    {
-        db.Database.ExecuteSqlRaw("""
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS main_record_array_path VARCHAR(500);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS medical_record_sync_role INTEGER NOT NULL DEFAULT 0;
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS soap_enabled BOOLEAN NOT NULL DEFAULT FALSE;
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS soap_service_code VARCHAR(100);
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS soap_operation VARCHAR(100);
-            ALTER TABLE IF EXISTS lhyy.esb_interface_config
-                ADD COLUMN IF NOT EXISTS soap_action VARCHAR(500);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_interface_config_soap_operation
-                ON lhyy.esb_interface_config (LOWER(soap_service_code), LOWER(soap_operation))
-                WHERE soap_enabled = TRUE;
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_interface_config_soap_action
-                ON lhyy.esb_interface_config (LOWER(soap_service_code), LOWER(soap_action))
-                WHERE soap_enabled = TRUE;
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            ALTER TABLE IF EXISTS lhyy.esb_field_mapping
-                ADD COLUMN IF NOT EXISTS sync_key VARCHAR(64);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            ALTER TABLE IF EXISTS lhyy.esb_field_mapping
-                ADD COLUMN IF NOT EXISTS last_sync_hash VARCHAR(64);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_esb_field_mapping_sync_key
-                ON lhyy.esb_field_mapping (sync_key);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE TABLE IF NOT EXISTS lhyy.active_medical_records (
-                id                       BIGSERIAL PRIMARY KEY,
-                integration_project_code VARCHAR(50),
-                tran_code                VARCHAR(20),
-                mrn                      VARCHAR(100) NOT NULL,
-                inpatient_no             VARCHAR(100),
-                visit_no                 VARCHAR(100),
-                patient_id               UUID NOT NULL,
-                event_id                 UUID NOT NULL,
-                event_type_name          VARCHAR(100) NOT NULL DEFAULT '',
-                admission_time           TIMESTAMP,
-                discharge_time           TIMESTAMP,
-                status                   VARCHAR(20) NOT NULL DEFAULT 'Active',
-                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
-                updated_at               TIMESTAMP NOT NULL DEFAULT NOW(),
-                finished_at              TIMESTAMP
-            );
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_active_medical_records_status
-                ON lhyy.active_medical_records (status);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_active_medical_records_project
-                ON lhyy.active_medical_records (integration_project_code);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_active_medical_records_project_inpatient
-                ON lhyy.active_medical_records (integration_project_code, inpatient_no);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE TABLE IF NOT EXISTS lhyy.esb_dict_template (
-                id                 SERIAL PRIMARY KEY,
-                template_code      VARCHAR(100) NOT NULL,
-                template_name      VARCHAR(100) NOT NULL,
-                category           VARCHAR(50) NOT NULL DEFAULT '',
-                default_dict_code  VARCHAR(100),
-                default_match_mode VARCHAR(50) NOT NULL DEFAULT 'contains',
-                description        VARCHAR(500),
-                is_enabled         BOOLEAN NOT NULL DEFAULT TRUE,
-                sort_order         INTEGER NOT NULL DEFAULT 0,
-                created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
-                updated_at         TIMESTAMP NOT NULL DEFAULT NOW()
-            );
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE UNIQUE INDEX IF NOT EXISTS ux_esb_dict_template_code
-                ON lhyy.esb_dict_template (template_code);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_esb_dict_template_category
-                ON lhyy.esb_dict_template (category);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE TABLE IF NOT EXISTS lhyy.esb_dict_template_item (
-                id           SERIAL PRIMARY KEY,
-                template_id  INTEGER NOT NULL REFERENCES lhyy.esb_dict_template(id) ON DELETE CASCADE,
-                source_value VARCHAR(200) NOT NULL,
-                target_value VARCHAR(200) NOT NULL,
-                sort_order   INTEGER NOT NULL DEFAULT 0,
-                description  VARCHAR(500),
-                is_enabled   BOOLEAN NOT NULL DEFAULT TRUE
-            );
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_esb_dict_template_item_template_sort
-                ON lhyy.esb_dict_template_item (template_id, sort_order);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE TABLE IF NOT EXISTS lhyy.esb_ocr_profile (
-                id                       SERIAL PRIMARY KEY,
-                tran_code                VARCHAR(20) NOT NULL,
-                integration_project_code VARCHAR(50),
-                profile_name             VARCHAR(100),
-                is_enabled               BOOLEAN NOT NULL DEFAULT TRUE,
-                source_kind              INTEGER NOT NULL DEFAULT 0,
-                source_path              VARCHAR(500) NOT NULL DEFAULT '$.pdfPath',
-                language                 VARCHAR(50) NOT NULL DEFAULT 'chi_sim',
-                dpi                      INTEGER NOT NULL DEFAULT 300,
-                page_seg_mode            INTEGER NOT NULL DEFAULT 11,
-                max_pages                INTEGER,
-                max_input_bytes          BIGINT,
-                timeout_seconds          INTEGER NOT NULL DEFAULT 120,
-                keep_work_files          BOOLEAN NOT NULL DEFAULT FALSE,
-                allowed_file_roots       TEXT,
-                output_json_path         VARCHAR(1000),
-                description              VARCHAR(500),
-                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
-                updated_at               TIMESTAMP NOT NULL DEFAULT NOW()
-            );
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_esb_ocr_profile_tran_code
-                ON lhyy.esb_ocr_profile (tran_code);
-            """);
-
-        db.Database.ExecuteSqlRaw("""
-            CREATE INDEX IF NOT EXISTS ix_esb_ocr_profile_project_tran
-                ON lhyy.esb_ocr_profile (integration_project_code, tran_code);
-            """);
     }
 
     private static string EnsureCubeDbSearchPath(string connectionString)

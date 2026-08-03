@@ -1,5 +1,6 @@
 ﻿.filter-rule-editor {
     width: 100%;
+    container-type: inline-size;
 }
 
 .filter-rule-toolbar {
@@ -151,5 +152,45 @@
 
     .filter-rule-line {
         grid-template-columns: 1fr;
+    }
+}
+
+@container (max-width: 920px) {
+    .filter-rule-item {
+        grid-template-columns: 30px minmax(0, 1fr);
+    }
+
+    .filter-rule-line {
+        grid-template-columns: minmax(88px, 0.35fr) minmax(0, 1.65fr);
+    }
+
+    .filter-rule-scope {
+        grid-column: 1 / -1;
+    }
+
+    .filter-rule-actions {
+        grid-column: 2;
+        justify-content: flex-end;
+        min-height: 0;
+        padding-top: 0;
+    }
+}
+
+@container (max-width: 520px) {
+    .filter-rule-toolbar {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .filter-rule-toolbar ::deep .mud-button-root {
+        align-self: flex-start;
+    }
+
+    .filter-rule-line {
+        grid-template-columns: 1fr;
+    }
+
+    .filter-rule-scope {
+        grid-column: auto;
     }
 }

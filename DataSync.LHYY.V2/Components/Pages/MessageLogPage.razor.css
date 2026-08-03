@@ -87,15 +87,33 @@
 }
 
 .message-log-table-panel {
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 ::deep .message-log-table {
     background: transparent;
+    min-width: 1500px;
 }
 
 ::deep .message-log-table .mud-table-head {
     background: #f3f7fa;
+}
+
+::deep .message-log-table .mud-table-container {
+    overflow-x: auto;
+}
+
+::deep .message-log-table th,
+::deep .message-log-table td {
+    white-space: nowrap;
+}
+
+::deep .message-log-table .message-log-selection-cell {
+    width: 48px;
+    min-width: 48px;
+    padding-right: 4px;
+    padding-left: 8px;
 }
 
 @media (max-width: 1500px) {

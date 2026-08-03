@@ -229,7 +229,7 @@
     private bool _openWizardAfterCreateFromMessageSave;
 
     // 路径选取目标枚举（与 MappingEditDialog 模式一致）
-    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, SourceMessageId, MainRecordArray, FilterRule, MatchRule, IdempotentKeyPart }
+    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, CombinedVisitIdentity, SourceMessageId, MainRecordArray, FilterRule, MatchRule, IdempotentKeyPart }
     private enum EventIdentityModeOption
     {
         RequireEventTime,
@@ -257,7 +257,9 @@
     private bool _hasSampleJson => !string.IsNullOrWhiteSpace(_editItem?.SampleJson);
     private bool _supportsEventIdentity => _editItem != null && RequiresEventStartTimePath(_editItem.HandlerType);
     private bool _showVisitIdentityFields => _supportsEventIdentity;
-    private bool _isMrnPathRequired => _editItem?.HandlerType != HandlerType.GenericQuestionWriteBack;
+    private bool _isMrnPathRequired => _editItem?.HandlerType != HandlerType.GenericQuestionWriteBack &&
+                                       (_editItem?.HandlerType != HandlerType.Generic ||
+                                        string.IsNullOrWhiteSpace(_editItem.CombinedVisitIdentitySourcePath));
     private string EnabledTabText => $"启用接口 ({_enabledItems.Count})";
     private string DisabledTabText => $"未启用接口 ({_disabledItems.Count})";
 
@@ -352,6 +354,7 @@
             PathPickTarget.EventTime => "当前正在为事件开始时间路径选取节点。",
             PathPickTarget.VisitNo => "当前正在为住院次数路径选取节点。",
             PathPickTarget.InpatientNo => "当前正在为就诊号/住院号路径选取节点。",
+            PathPickTarget.CombinedVisitIdentity => "当前正在为病案号+住院次数组合标识路径选取节点。",
             PathPickTarget.SourceMessageId => "当前正在为上游消息号路径选取节点。",
             PathPickTarget.MainRecordArray => "当前正在为主记录数组路径选取节点，请尽量点击数组节点。",
             PathPickTarget.FilterRule => $"当前正在为过滤规则 #{_pickFilterRuleIndex + 1} 选取源路径。",
@@ -564,6 +567,29 @@
                         <MudTextField @bind-Value="_editItem!.VisitNoSourcePath" Label="住院次数路径"
                                       HelperText="缺少事件时间时用于回查住院事件；主记录字段可写 $main.VISIT_NO" Placeholder="$main.VISIT_NO" />
                     }
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    @if (_hasSampleJson)
+                    {
+                        <PathPickTextField @bind-Value="_editItem!.CombinedVisitIdentitySourcePath"
+                                           Label="病案号+住院次数路径"
+                                           HelperText="字段值由病案号和住院次数拼接，用于精确回查住院事件"
+                                           IsActive="@(_pathPickTarget == PathPickTarget.CombinedVisitIdentity)"
+                                           OnActivated="@(() => ActivatePathPickTarget(PathPickTarget.CombinedVisitIdentity))" />
+                    }
+                    else
+                    {
+                        <MudTextField @bind-Value="_editItem!.CombinedVisitIdentitySourcePath" Label="病案号+住院次数路径"
+                                      HelperText="字段值由病案号和住院次数拼接，用于精确回查住院事件" Placeholder="$main.PATIENT_VISIT_ID" />
+                    }
+                </MudItem>
+                <MudItem xs="12" sm="6">
+                    <MudSelect T="CombinedVisitIdentityFormat" @bind-Value="_editItem!.CombinedVisitIdentityFormat"
+                               Label="病案号+住院次数格式" HelperText="无分隔符格式只正向拼接匹配，不拆分原值">
+                        <MudSelectItem Value="CombinedVisitIdentityFormat.None">未使用</MudSelectItem>
+                        <MudSelectItem Value="CombinedVisitIdentityFormat.MrnUnderscoreVisitNo">病案号_住院次数</MudSelectItem>
+                        <MudSelectItem Value="CombinedVisitIdentityFormat.MrnVisitNo">病案号住院次数</MudSelectItem>
+                    </MudSelect>
                 </MudItem>
             }
             <MudItem xs="12">
@@ -847,6 +873,8 @@
             EventStartTimeSourcePath = item.EventStartTimeSourcePath,
             VisitNoSourcePath = item.VisitNoSourcePath,
             InpatientNoSourcePath = item.InpatientNoSourcePath,
+            CombinedVisitIdentitySourcePath = item.CombinedVisitIdentitySourcePath,
+            CombinedVisitIdentityFormat = item.CombinedVisitIdentityFormat,
             SourceMessageIdPath = item.SourceMessageIdPath,
             MainRecordArrayPath = item.MainRecordArrayPath,
             AllowMissingEventTime = item.AllowMissingEventTime,
@@ -910,22 +938,22 @@
         if (_editItem?.HandlerType == HandlerType.GenericQuestionWriteBack &&
             SelectedEventIdentityMode == EventIdentityModeOption.RequireEventTime)
         {
-            return "优先使用事件开始时间；未配置时会按就诊号/住院号或住院次数回查，仍找不到就失败。";
+            return "优先使用事件开始时间；未配置时会按就诊号/住院号、住院次数或组合标识回查，仍找不到就失败。";
         }
 
         return SelectedEventIdentityMode switch
         {
             EventIdentityModeOption.RequireEventTime => "消息里必须直接带事件开始时间；取不到就失败。",
-            EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就只处理患者。",
-            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就转待身份绑定。",
-            _ => "允许缺少事件时间；会先按就诊号/住院号或住院次数回查，仍找不到就报错。"
+            EventIdentityModeOption.LookupThenDegradeToPatientOnly => "允许缺少事件时间；会先按就诊号/住院号、住院次数或组合标识回查，仍找不到就只处理患者。",
+            EventIdentityModeOption.LookupThenPending => "允许缺少事件时间；会先按就诊号/住院号、住院次数或组合标识回查，仍找不到就转待身份绑定。",
+            _ => "允许缺少事件时间；会先按就诊号/住院号、住院次数或组合标识回查，仍找不到就报错。"
         };
     }
 
     private string GetMrnPathHelperText()
         => _editItem?.HandlerType == HandlerType.GenericQuestionWriteBack
-            ? "有病案号就填写；没有病案号时可留空，但必须填写就诊号/住院号路径或住院次数路径"
-            : "消息 JSON 中病案号的路径；主记录字段可写 $main.mrn，根字段可写 $.patient.mrn";
+            ? "有病案号就填写；没有时可通过就诊号/住院号、住院次数或组合标识回查"
+            : "消息 JSON 中病案号的路径；Generic 接口也可改用病案号+住院次数组合标识";
 
     private static bool RequiresEventStartTimePath(HandlerType handlerType)
         => handlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack;
@@ -1101,6 +1129,7 @@
             PathPickTarget.EventTime => _editItem.EventStartTimeSourcePath,
             PathPickTarget.VisitNo => _editItem.VisitNoSourcePath,
             PathPickTarget.InpatientNo => _editItem.InpatientNoSourcePath,
+            PathPickTarget.CombinedVisitIdentity => _editItem.CombinedVisitIdentitySourcePath,
             PathPickTarget.SourceMessageId => _editItem.SourceMessageIdPath,
             PathPickTarget.MainRecordArray => _editItem.MainRecordArrayPath,
             PathPickTarget.FilterRule when targetIndex >= 0 && targetIndex < _editFilterRules.Count => _editFilterRules[targetIndex].SourcePath,
@@ -1164,6 +1193,9 @@
                 break;
             case PathPickTarget.InpatientNo:
                 _editItem.InpatientNoSourcePath = normalizedPath;
+                break;
+            case PathPickTarget.CombinedVisitIdentity:
+                _editItem.CombinedVisitIdentitySourcePath = normalizedPath;
                 break;
             case PathPickTarget.SourceMessageId:
                 _editItem.SourceMessageIdPath = normalizedPath;
@@ -1248,6 +1280,7 @@
             _editItem.EventStartTimeSourcePath = NormalizePickedPath(_editItem.EventStartTimeSourcePath);
             _editItem.VisitNoSourcePath = NormalizePickedPath(_editItem.VisitNoSourcePath);
             _editItem.InpatientNoSourcePath = NormalizePickedPath(_editItem.InpatientNoSourcePath);
+            _editItem.CombinedVisitIdentitySourcePath = NormalizePickedPath(_editItem.CombinedVisitIdentitySourcePath);
             _editItem.SourceMessageIdPath = NormalizePickedPath(_editItem.SourceMessageIdPath);
             SoapWebServiceService.NormalizeConfiguration(_editItem);
 
@@ -1297,6 +1330,8 @@
                     existing.EventStartTimeSourcePath = _editItem.EventStartTimeSourcePath;
                     existing.VisitNoSourcePath = _editItem.VisitNoSourcePath;
                     existing.InpatientNoSourcePath = _editItem.InpatientNoSourcePath;
+                    existing.CombinedVisitIdentitySourcePath = _editItem.CombinedVisitIdentitySourcePath;
+                    existing.CombinedVisitIdentityFormat = _editItem.CombinedVisitIdentityFormat;
                     existing.SourceMessageIdPath = _editItem.SourceMessageIdPath;
                     existing.MainRecordArrayPath = _editItem.MainRecordArrayPath;
                     existing.AllowMissingEventTime = _editItem.AllowMissingEventTime;

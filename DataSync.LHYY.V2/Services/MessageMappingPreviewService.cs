@@ -14,15 +14,18 @@ public class MessageMappingPreviewService
     private readonly ConfigService _configService;
     private readonly FieldMappingExecutor _mappingExecutor;
     private readonly FilterRuleService _filterRuleService;
+    private readonly BioCoreIntegrationService _bioCore;
 
     public MessageMappingPreviewService(
         ConfigService configService,
         FieldMappingExecutor mappingExecutor,
-        FilterRuleService filterRuleService)
+        FilterRuleService filterRuleService,
+        BioCoreIntegrationService bioCore)
     {
         _configService = configService;
         _mappingExecutor = mappingExecutor;
         _filterRuleService = filterRuleService;
+        _bioCore = bioCore;
     }
 
     public async Task<MessageMappingPreviewResult> PreviewAsync(EsbMessage message)
@@ -43,6 +46,7 @@ public class MessageMappingPreviewService
 
         result.InterfaceName = config.TranName;
         result.HandlerType = config.HandlerType;
+        var formMetadata = await LoadFormMetadataAsync(config);
         if (config.HandlerType is not (HandlerType.Generic or HandlerType.GenericQuestionWriteBack))
         {
             result.Warnings.Add($"当前接口处理器为 {config.HandlerType}，预览仅展示配置映射提取结果，不能代表自定义处理器的全部逻辑。");
@@ -66,7 +70,7 @@ public class MessageMappingPreviewService
             var filteredCount = 0;
             foreach (var slice in slices)
             {
-                var sliceResult = await PreviewPayloadAsync(message, config, slice.Payload);
+                var sliceResult = await PreviewPayloadAsync(message, config, slice.Payload, formMetadata);
                 if (sliceResult.IsFiltered)
                 {
                     filteredCount++;
@@ -92,7 +96,7 @@ public class MessageMappingPreviewService
             return result;
         }
 
-        var singleResult = await PreviewPayloadAsync(message, config, slices[0].Payload);
+        var singleResult = await PreviewPayloadAsync(message, config, slices[0].Payload, formMetadata);
         result.IsFiltered = singleResult.IsFiltered;
         result.FilterReason = singleResult.FilterReason;
         result.Warnings.AddRange(singleResult.Warnings);
@@ -103,7 +107,8 @@ public class MessageMappingPreviewService
     private async Task<MessageMappingPreviewResult> PreviewPayloadAsync(
         EsbMessage message,
         EsbInterfaceConfig config,
-        JToken root)
+        JToken root,
+        FormPreviewMetadata formMetadata)
     {
         var result = new MessageMappingPreviewResult
         {
@@ -153,15 +158,16 @@ public class MessageMappingPreviewService
             message.TranCode,
             config.IntegrationProjectCode,
             config.MainRecordArrayPath);
-        result.Sections.Add(BuildQuestionSection("题目答案", questionValues, questionMappings));
+        result.Sections.Add(BuildQuestionSection("题目答案", questionValues, questionMappings, formMetadata.Questions));
 
         var subCardData = await _mappingExecutor.ExtractSubCardDataAsync(
             root,
             message.TranCode,
             interfaceFilterResult.RowFilterResults,
             config.IntegrationProjectCode,
-            config.MainRecordArrayPath);
-        result.Sections.Add(BuildSubCardSection(subCardData, subCardMappings));
+            config.MainRecordArrayPath,
+            formMetadata.Cards);
+        result.Sections.Add(BuildSubCardSection(subCardData, subCardMappings, formMetadata));
 
         result.Sections = result.Sections.Where(section => section.Rows.Count > 0).ToList();
         if (result.Sections.Count == 0)
@@ -181,6 +187,7 @@ public class MessageMappingPreviewService
         AddContextRow(section, "病案号", "MrnSourcePath", MessageJsonHelper.ReadString(root, config.MrnSourcePath, mainContext));
         AddContextRow(section, "住院次数", "VisitNoSourcePath", MessageJsonHelper.ReadString(root, config.VisitNoSourcePath, mainContext));
         AddContextRow(section, "就诊号/住院号", "InpatientNoSourcePath", MessageJsonHelper.ReadString(root, config.InpatientNoSourcePath, mainContext));
+        AddContextRow(section, "病案号+住院次数", "CombinedVisitIdentitySourcePath", MessageJsonHelper.ReadString(root, config.CombinedVisitIdentitySourcePath, mainContext));
         AddContextRow(section, "事件开始时间", "EventStartTimeSourcePath", MessageJsonHelper.ReadDateTime(root, config.EventStartTimeSourcePath, mainContext)?.ToString("yyyy-MM-dd HH:mm:ss"));
         return section;
     }
@@ -225,9 +232,10 @@ public class MessageMappingPreviewService
     private static MessageMappingPreviewSection BuildQuestionSection(
         string name,
         List<QuestionValue> values,
-        List<EsbFieldMapping> mappings)
+        List<EsbFieldMapping> mappings,
+        IReadOnlyDictionary<string, QuestionPreviewMetadata> questions)
     {
-        var labelByQuestionId = BuildQuestionLabelMap(mappings);
+        var labelByQuestionId = BuildQuestionLabelMap(mappings, questions);
         var section = new MessageMappingPreviewSection { Name = name };
         foreach (var item in values)
         {
@@ -237,6 +245,7 @@ public class MessageMappingPreviewService
             {
                 Target = key,
                 DisplayName = label.DisplayName,
+                QuestionType = label.QuestionType,
                 Value = item.Value?.ToString(),
                 Note = item.IsDictMiss ? "字典未命中，选择题正式写入时会跳过" : label.Note,
                 IsWarning = item.IsDictMiss
@@ -248,37 +257,22 @@ public class MessageMappingPreviewService
 
     private static MessageMappingPreviewSection BuildSubCardSection(
         List<SubCardData> subCardData,
-        List<EsbFieldMapping> mappings)
+        List<EsbFieldMapping> mappings,
+        FormPreviewMetadata formMetadata)
     {
-        var labelByQuestionId = BuildQuestionLabelMap(mappings);
+        var labelByQuestionId = BuildQuestionLabelMap(mappings, formMetadata.Questions);
         var section = new MessageMappingPreviewSection { Name = "SubCard 子卡片" };
         foreach (var card in subCardData)
         {
-            for (var rowIndex = 0; rowIndex < card.Rows.Count; rowIndex++)
-            {
-                foreach (var item in card.Rows[rowIndex])
-                {
-                    var key = item.QuestionId.ToString();
-                    labelByQuestionId.TryGetValue(key, out var label);
-                    section.Rows.Add(new MessageMappingPreviewRow
-                    {
-                        GroupName = BuildSubCardGroupName(card.CardId, rowIndex),
-                        Target = key,
-                        DisplayName = label.DisplayName,
-                        Value = item.Value?.ToString(),
-                        Note = item.IsDictMiss
-                            ? $"CardId={card.CardId}，第 {rowIndex + 1} 行，字典未命中，选择题正式写入时会跳过"
-                            : $"CardId={card.CardId}，第 {rowIndex + 1} 行{FormatNoteSuffix(label.Note)}",
-                        IsWarning = item.IsDictMiss
-                    });
-                }
-            }
+            AddSubCardRows(section, card, labelByQuestionId, formMetadata.Cards, null);
         }
 
         return section;
     }
 
-    private static Dictionary<string, (string? DisplayName, string? Note)> BuildQuestionLabelMap(List<EsbFieldMapping> mappings)
+    private static Dictionary<string, (string DisplayName, string? QuestionType, string? Note)> BuildQuestionLabelMap(
+        List<EsbFieldMapping> mappings,
+        IReadOnlyDictionary<string, QuestionPreviewMetadata> questions)
     {
         return mappings
             .Where(m => !EsbFieldMapping.IsSubCardFilterMapping(m))
@@ -288,7 +282,16 @@ public class MessageMappingPreviewService
                 g =>
                 {
                     var mapping = g.First();
-                    return (mapping.Description, BuildMappingNote(mapping));
+                    questions.TryGetValue(mapping.TargetField, out var question);
+                    var displayName = question?.DisplayPath;
+                    if (string.IsNullOrWhiteSpace(displayName))
+                    {
+                        displayName = IsReadableName(mapping.Description)
+                            ? mapping.Description
+                            : "题目名称未配置";
+                    }
+
+                    return (displayName!, question?.QuestionType, BuildMappingNote(mapping));
                 },
                 StringComparer.OrdinalIgnoreCase);
     }
@@ -335,6 +338,7 @@ public class MessageMappingPreviewService
                     GroupName = BuildRecordGroupName(recordIndex, row.GroupName),
                     Target = row.Target,
                     DisplayName = row.DisplayName,
+                    QuestionType = row.QuestionType,
                     Value = row.Value,
                     Note = BuildRecordNote(recordIndex, row.Note),
                     IsWarning = row.IsWarning
@@ -373,8 +377,161 @@ public class MessageMappingPreviewService
         return string.IsNullOrWhiteSpace(note) ? prefix : $"{prefix}；{note}";
     }
 
-    private static string BuildSubCardGroupName(Guid cardId, int rowIndex) =>
-        $"CardId={cardId}，第 {rowIndex + 1} 行";
+    private static string BuildSubCardGroupName(
+        Guid cardId,
+        int rowIndex,
+        IReadOnlyDictionary<Guid, CardInfo> cards)
+    {
+        var cardName = cards.TryGetValue(cardId, out var card) && IsReadableName(card.Name)
+            ? card.Name
+            : "未命名子卡片";
+        return $"{cardName}，第 {rowIndex + 1} 行";
+    }
+
+    private static void AddSubCardRows(
+        MessageMappingPreviewSection section,
+        SubCardData card,
+        IReadOnlyDictionary<string, (string DisplayName, string? QuestionType, string? Note)> labelByQuestionId,
+        IReadOnlyDictionary<Guid, CardInfo> cards,
+        string? parentGroupName)
+    {
+        for (var rowIndex = 0; rowIndex < card.Rows.Count; rowIndex++)
+        {
+            var row = card.Rows[rowIndex];
+            var currentGroupName = BuildSubCardGroupName(card.CardId, rowIndex, cards);
+            var groupName = string.IsNullOrWhiteSpace(parentGroupName)
+                ? currentGroupName
+                : $"{parentGroupName} > {currentGroupName}";
+
+            foreach (var item in row.Values)
+            {
+                var key = item.QuestionId.ToString();
+                labelByQuestionId.TryGetValue(key, out var label);
+                section.Rows.Add(new MessageMappingPreviewRow
+                {
+                    GroupName = groupName,
+                    Target = key,
+                    DisplayName = label.DisplayName,
+                    QuestionType = label.QuestionType,
+                    Value = item.Value?.ToString(),
+                    Note = item.IsDictMiss
+                        ? $"{groupName}，字典未命中，选择题正式写入时会跳过"
+                        : $"{groupName}{FormatNoteSuffix(label.Note)}",
+                    IsWarning = item.IsDictMiss
+                });
+            }
+
+            foreach (var child in row.Children)
+            {
+                AddSubCardRows(section, child, labelByQuestionId, cards, groupName);
+            }
+        }
+    }
+
+    private async Task<FormPreviewMetadata> LoadFormMetadataAsync(EsbInterfaceConfig config)
+    {
+        if (string.IsNullOrWhiteSpace(config.EventTypeName))
+            return FormPreviewMetadata.Empty;
+
+        var licenseCode = string.IsNullOrWhiteSpace(config.LicenseCode)
+            ? await _configService.GetDefaultLicenseCodeAsync(config.IntegrationProjectCode)
+            : config.LicenseCode;
+        if (string.IsNullOrWhiteSpace(licenseCode))
+            return FormPreviewMetadata.Empty;
+
+        var (formSet, _, _) = await _bioCore.FindFormSetAsync(licenseCode, config.EventTypeName);
+        if (formSet == null)
+            return FormPreviewMetadata.Empty;
+
+        var questionDict = await _bioCore.GetFormQuestionDictByFormSetAsync(formSet.id);
+        var cards = await _bioCore.GetAllCardListByFormSetAsync(formSet.id);
+        var forms = await _bioCore.GetFormListByFormSetAsync(formSet.id);
+        var questions = questionDict.Values
+            .Select(FormBrowserHelper.BuildQuestionInfo)
+            .ToList();
+        var formTree = FormBrowserHelper.BuildTree(questions, cards, forms);
+
+        return new FormPreviewMetadata(cards, BuildQuestionMetadataMap(formTree));
+    }
+
+    private static IReadOnlyDictionary<string, QuestionPreviewMetadata> BuildQuestionMetadataMap(
+        IEnumerable<FormNode> formTree)
+    {
+        var result = new Dictionary<string, QuestionPreviewMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var form in formTree)
+        {
+            var formPath = IsReadableName(form.Name) ? new[] { form.Name } : [];
+            foreach (var question in form.OrphanQuestions)
+            {
+                AddQuestionMetadata(result, question, formPath, false);
+            }
+
+            foreach (var card in form.Cards)
+            {
+                AddCardQuestionMetadata(result, card, []);
+            }
+        }
+
+        return result;
+    }
+
+    private static void AddCardQuestionMetadata(
+        Dictionary<string, QuestionPreviewMetadata> result,
+        CardNode card,
+        IReadOnlyList<string> parentPath)
+    {
+        var cardName = IsReadableName(card.Name) ? card.Name : "未命名卡片";
+        var currentPath = parentPath.Append(cardName).ToList();
+        foreach (var question in card.Questions)
+        {
+            AddQuestionMetadata(result, question, currentPath, true);
+        }
+
+        foreach (var child in card.SubCards)
+        {
+            AddCardQuestionMetadata(result, child, currentPath);
+        }
+    }
+
+    private static void AddQuestionMetadata(
+        Dictionary<string, QuestionPreviewMetadata> result,
+        QuestionInfo question,
+        IEnumerable<string> parentPath,
+        bool isCardPath)
+    {
+        var questionName = IsReadableName(question.Title)
+            ? question.Title!
+            : IsReadableName(question.LabelText)
+                ? question.LabelText!
+                : "题目名称未配置";
+        var path = parentPath
+            .Where(IsReadableName)
+            .Append(questionName)
+            .ToList();
+        var metadata = new QuestionPreviewMetadata(
+            string.Join(" → ", path),
+            GetQuestionType(question),
+            path.Count,
+            isCardPath);
+
+        if (!result.TryGetValue(question.Id, out var existing)
+            || metadata.IsCardPath && !existing.IsCardPath
+            || metadata.IsCardPath == existing.IsCardPath && metadata.HierarchyDepth > existing.HierarchyDepth)
+        {
+            result[question.Id] = metadata;
+        }
+    }
+
+    private static string? GetQuestionType(QuestionInfo question)
+    {
+        if (!string.Equals(question.DataType, "选择", StringComparison.Ordinal))
+            return string.IsNullOrWhiteSpace(question.DataType) ? null : question.DataType;
+
+        return question.SelectInfo?.StartsWith("多选", StringComparison.Ordinal) == true ? "多选" : "单选";
+    }
+
+    private static bool IsReadableName(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && !Guid.TryParse(value, out _);
 
     private static string? BuildRecordGroupName(string? recordIndex, string? groupName)
     {
@@ -521,6 +678,21 @@ public class MessageMappingPreviewService
 
         return found;
     }
+
+    private sealed record FormPreviewMetadata(
+        IReadOnlyDictionary<Guid, CardInfo> Cards,
+        IReadOnlyDictionary<string, QuestionPreviewMetadata> Questions)
+    {
+        public static FormPreviewMetadata Empty { get; } = new(
+            new Dictionary<Guid, CardInfo>(),
+            new Dictionary<string, QuestionPreviewMetadata>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private sealed record QuestionPreviewMetadata(
+        string DisplayPath,
+        string? QuestionType,
+        int HierarchyDepth,
+        bool IsCardPath);
 
     private sealed record PreviewPayloadSlice(JToken Payload, string? RecordIndex);
 }

@@ -24,6 +24,13 @@
                           Class="json-tree-search" />
         </div>
     }
+    @if (_rootArraySampleCount is int rootArraySampleCount)
+    {
+        <div class="json-tree-sample-hint" role="note">
+            <MudIcon Icon="@Icons.Material.Filled.Info" Size="Size.Small" />
+            <span>根节点为数组，当前按第 1 项展示结构，共 @rootArraySampleCount 项。</span>
+        </div>
+    }
     @if (!string.IsNullOrWhiteSpace(_errorMessage))
     {
         <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_errorMessage</MudAlert>
@@ -78,6 +85,7 @@
 
     private List<JsonTreeNode> _rootNodes = [];
     private string? _errorMessage;
+    private int? _rootArraySampleCount;
     private string? _lastJsonText;
     private bool _lastUseArrayBrackets;
     private bool _lastPreferFirstArrayItemAsRoot;
@@ -135,6 +143,7 @@
     {
         _rootNodes = [];
         _errorMessage = null;
+        _rootArraySampleCount = null;
 
         if (string.IsNullOrWhiteSpace(JsonText))
         {
@@ -149,6 +158,7 @@
                 && array.Count > 0
                 && array[0] is JObject or JArray)
             {
+                _rootArraySampleCount = array.Count;
                 token = array[0];
             }
 
@@ -409,7 +419,7 @@
                     else
                     {
                         var rawValue = GetScalarValueText(firstItem);
-                        node.Value = $"[{arr.Count} 项] 示例: {rawValue}";
+                        node.Value = $"共 {arr.Count} 项，首项示例：{rawValue}";
                     }
                 }
             }
@@ -485,10 +495,21 @@
 
             if (value is JArray arr)
             {
-                var renderedCount = UseArrayBrackets ? Math.Min(arr.Count, 1) : GetArrayItemsToRenderCount(arr.Count);
-                node.Value = renderedCount < arr.Count
-                    ? $"[{arr.Count} 项，仅展示前 {renderedCount} 项]"
-                    : $"[{arr.Count} 项]";
+                if (arr.Count == 0)
+                {
+                    node.Value = "[0 项]";
+                }
+                else if (UseArrayBrackets)
+                {
+                    node.Value = $"[{arr.Count} 项，按第 1 项展示结构]";
+                }
+                else
+                {
+                    var renderedCount = GetArrayItemsToRenderCount(arr.Count);
+                    node.Value = renderedCount < arr.Count
+                        ? $"[{arr.Count} 项，仅展示前 {renderedCount} 项]"
+                        : $"[{arr.Count} 项]";
+                }
             }
             else
             {
@@ -558,23 +579,25 @@
                 <div class="json-tree-node-main">
                     <div class="json-tree-node-line">
                         <MudIcon Icon="@GetNodeIcon(node.NodeType)" Size="Size.Small" Class="json-tree-node-icon" />
-                        <span class="json-tree-node-key">@node.Key</span>
+                        <span class="json-tree-node-key">@RenderHighlightedText(node.Key)</span>
                         <span class="@GetNodeTypeClass(node.NodeType)">@GetNodeTypeText(node.NodeType)</span>
                         @if (isBranchNode)
                         {
                             @if (!string.IsNullOrEmpty(node.Value))
                             {
-                                <span class="json-tree-node-meta">@node.Value</span>
+                                <span class="json-tree-node-meta" title="@node.Value">@RenderHighlightedText(node.Value)</span>
                             }
                         }
                         else if (!string.IsNullOrEmpty(node.Value))
                         {
-                            <span class="json-tree-node-value">@FormatNodeValue(node)</span>
+                            var displayValue = FormatNodeValue(node);
+                            <span class="json-tree-node-separator" aria-hidden="true">:</span>
+                            <span class="json-tree-node-value" title="@displayValue">@RenderHighlightedText(displayValue)</span>
                         }
                     </div>
                     @if (ShowPathInRow)
                     {
-                        <div class="json-tree-node-path">@node.Path</div>
+                        <div class="json-tree-node-path">@RenderHighlightedText(node.Path)</div>
                     }
                 </div>
             </div>
@@ -606,6 +629,11 @@
             classes.Add("is-selected");
         }
 
+        if (OnPathSelected.HasDelegate)
+        {
+            classes.Add("is-selectable");
+        }
+
         if (AllowValueWrap)
         {
             classes.Add("allow-value-wrap");
@@ -628,23 +656,49 @@
         _ => nodeType
     };
 
-    private static string FormatNodeValue(JsonTreeNode node) =>
-        node.NodeType == "String" ? $"\"{node.Value}\"" : node.Value ?? "";
+    private static string FormatNodeValue(JsonTreeNode node) => node.Value ?? "";
 
-    private static string GetScalarValueText(JToken value)
+    private RenderFragment RenderHighlightedText(string? value) => builder =>
     {
-        if (value.Type == JTokenType.Null)
+        var text = value ?? "";
+        var keyword = HasActiveSearch ? _searchText?.Trim() : null;
+        if (string.IsNullOrEmpty(keyword))
         {
-            return "null";
+            builder.AddContent(0, text);
+            return;
         }
 
-        if (value.Type == JTokenType.String)
+        var sequence = 0;
+        var startIndex = 0;
+        while (startIndex < text.Length)
         {
-            return value.Value<string>() ?? "";
+            var matchIndex = text.IndexOf(keyword, startIndex, StringComparison.OrdinalIgnoreCase);
+            if (matchIndex < 0)
+            {
+                builder.AddContent(sequence++, text[startIndex..]);
+                break;
+            }
+
+            if (matchIndex > startIndex)
+            {
+                builder.AddContent(sequence++, text[startIndex..matchIndex]);
+            }
+
+            builder.OpenElement(sequence++, "mark");
+            builder.AddAttribute(sequence++, "class", "json-tree-search-mark");
+            builder.AddContent(sequence++, text.Substring(matchIndex, keyword.Length));
+            builder.CloseElement();
+            startIndex = matchIndex + keyword.Length;
         }
 
-        return value.ToString(Newtonsoft.Json.Formatting.None);
-    }
+        if (text.Length == 0)
+        {
+            builder.AddContent(sequence, text);
+        }
+    };
+
+    private static string GetScalarValueText(JToken value) =>
+        value.ToString(Newtonsoft.Json.Formatting.None);
 
     private class JsonTreeNode
     {

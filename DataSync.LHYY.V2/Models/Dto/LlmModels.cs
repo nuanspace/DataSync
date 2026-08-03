@@ -41,6 +41,10 @@ public class TargetFieldInfo
     public Guid? CardId { get; set; }
     /// <summary>所属卡片名称（供 LLM 语义匹配）</summary>
     public string? CardName { get; set; }
+    /// <summary>父级 SubCard ID</summary>
+    public Guid? ParentCardId { get; set; }
+    /// <summary>父级 SubCard 名称</summary>
+    public string? ParentCardName { get; set; }
 }
 
 /// <summary>

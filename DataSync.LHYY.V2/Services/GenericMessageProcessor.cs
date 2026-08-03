@@ -20,6 +20,7 @@ public class GenericMessageProcessor
     private readonly EventIdentityService _eventIdentityService;
     private readonly ActiveMedicalRecordService _activeMedicalRecordService;
     private readonly DirectTargetWriteService _directTargetWriteService;
+    private readonly NestedFormWriteService _nestedFormWriteService;
     private readonly ILogger<GenericMessageProcessor> _logger;
 
     public GenericMessageProcessor(
@@ -30,6 +31,7 @@ public class GenericMessageProcessor
         EventIdentityService eventIdentityService,
         ActiveMedicalRecordService activeMedicalRecordService,
         DirectTargetWriteService directTargetWriteService,
+        NestedFormWriteService nestedFormWriteService,
         ILogger<GenericMessageProcessor> logger)
     {
         _bioCore = bioCore;
@@ -39,6 +41,7 @@ public class GenericMessageProcessor
         _eventIdentityService = eventIdentityService;
         _activeMedicalRecordService = activeMedicalRecordService;
         _directTargetWriteService = directTargetWriteService;
+        _nestedFormWriteService = nestedFormWriteService;
         _logger = logger;
     }
 
@@ -51,9 +54,6 @@ public class GenericMessageProcessor
             return ProcessResult.Fail(error ?? "Raw JSON 解析失败");
         var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, config.MainRecordArrayPath);
 
-        if (string.IsNullOrWhiteSpace(config.MrnSourcePath))
-            return ProcessResult.Fail($"配置错误：接口 {message.TranCode} 未配置病案号路径（MrnSourcePath）");
-
         var filterResult = await _filterRuleService.ApplyInterfaceFiltersAsync(
             root,
             message.TranCode,
@@ -62,13 +62,46 @@ public class GenericMessageProcessor
         if (!filterResult.IsPassed)
             return ProcessResult.Filtered(filterResult.Reason);
 
-        var mrn = MessageJsonHelper.ReadString(root, config.MrnSourcePath, mainContext);
-        if (string.IsNullOrWhiteSpace(mrn))
-            return ProcessResult.Fail($"未提取到病案号: 路径 {config.MrnSourcePath} 在消息中无匹配");
-
+        var mrn = string.IsNullOrWhiteSpace(config.MrnSourcePath)
+            ? null
+            : MessageJsonHelper.ReadString(root, config.MrnSourcePath, mainContext);
         var visitNo = MessageJsonHelper.ReadString(root, config.VisitNoSourcePath, mainContext);
         var inpatientNo = MessageJsonHelper.ReadString(root, config.InpatientNoSourcePath, mainContext);
+        var combinedVisitIdentity = MessageJsonHelper.ReadString(root, config.CombinedVisitIdentitySourcePath, mainContext);
         var eventStartTime = MessageJsonHelper.ReadDateTime(root, config.EventStartTimeSourcePath, mainContext);
+
+        EsbEventIdentity? combinedIdentity = null;
+        if (!string.IsNullOrWhiteSpace(combinedVisitIdentity))
+        {
+            var lookup = await result.LogStepAsync("按病案号+住院次数组合标识定位患者事件",
+                () => _eventIdentityService.FindByCombinedVisitIdentityAsync(
+                    integrationProjectCode,
+                    combinedVisitIdentity,
+                    config.CombinedVisitIdentityFormat,
+                    mrn,
+                    config.EventTypeName));
+
+            if (lookup.IsAmbiguous)
+                return ProcessResult.Fail($"病案号+住院次数组合标识匹配到多条住院事件：{combinedVisitIdentity}");
+
+            combinedIdentity = lookup.Identity;
+            if (combinedIdentity != null)
+            {
+                mrn ??= combinedIdentity.Mrn;
+                inpatientNo ??= combinedIdentity.InpatientNo;
+                visitNo ??= combinedIdentity.VisitNo;
+                message.Mrn ??= combinedIdentity.Mrn;
+                message.InpatientNo ??= combinedIdentity.InpatientNo;
+                message.VisitNo ??= combinedIdentity.VisitNo;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(mrn))
+        {
+            return string.IsNullOrWhiteSpace(combinedVisitIdentity)
+                ? ProcessResult.Fail("未提取到病案号或病案号+住院次数组合标识")
+                : ProcessResult.Fail($"未能按病案号+住院次数组合标识定位患者事件：{combinedVisitIdentity}");
+        }
 
         if (config.MedicalRecordSyncRole == MedicalRecordSyncRole.Supplemental)
         {
@@ -76,7 +109,8 @@ public class GenericMessageProcessor
                 integrationProjectCode,
                 mrn,
                 inpatientNo,
-                visitNo);
+                visitNo,
+                eventStartTime);
             if (!isActive)
                 return ProcessResult.Filtered("病历不是 Active，补采消息已忽略");
         }
@@ -102,7 +136,10 @@ public class GenericMessageProcessor
         patientFields["medical_record_number"] = mrn;
 
         patient? dbPatient;
-        var existingPatient = await _bioCore.GetPatientByMrnAsync(mrn, projectContext.HospitalId, projectContext.ProjectId);
+        var existingPatient = combinedIdentity == null
+            ? null
+            : await _bioCore.GetPatientByIdAsync(combinedIdentity.PatientId, projectContext.HospitalId, projectContext.ProjectId);
+        existingPatient ??= await _bioCore.GetPatientByMrnAsync(mrn, projectContext.HospitalId, projectContext.ProjectId);
         if (existingPatient != null)
         {
             dbPatient = existingPatient;
@@ -150,7 +187,8 @@ public class GenericMessageProcessor
             eventEndTime,
             projectContext.FormSet,
             projectContext.HospitalId,
-            projectContext.ProjectId);
+            projectContext.ProjectId,
+            combinedIdentity);
 
         if (eventResolve.Result != null)
         {
@@ -161,6 +199,8 @@ public class GenericMessageProcessor
         var dbEvent = eventResolve.Event;
         if (dbEvent == null)
             return ProcessResult.Fail("获取事件失败");
+
+        var resolvedEventStartTime = eventStartTime ?? dbEvent.event_start_time;
 
         await _eventIdentityService.UpsertAsync(
             integrationProjectCode,
@@ -173,7 +213,7 @@ public class GenericMessageProcessor
             config.EventTypeName!,
             inpatientNo,
             visitNo,
-            eventStartTime);
+            resolvedEventStartTime);
 
         if (config.MedicalRecordSyncRole == MedicalRecordSyncRole.CaseDriver)
         {
@@ -186,7 +226,7 @@ public class GenericMessageProcessor
                 config.EventTypeName!,
                 inpatientNo,
                 visitNo,
-                eventStartTime,
+                resolvedEventStartTime,
                 eventEndTime);
         }
 
@@ -198,6 +238,54 @@ public class GenericMessageProcessor
         }
 
         var formQuestionDict = await _bioCore.GetFormQuestionDictByFormSetAsync(projectContext.FormSet.id);
+        var formCardDict = hasSubCardMappings
+            ? await _bioCore.GetAllCardListByFormSetAsync(projectContext.FormSet.id)
+            : [];
+        var hasNestedSubCardMappings = hasSubCardMappings
+                                       && await _mappingExecutor.HasNestedSubCardMappingsAsync(
+                                           message.TranCode,
+                                           config.IntegrationProjectCode,
+                                           formCardDict);
+
+        if (hasNestedSubCardMappings)
+        {
+            try
+            {
+                var questionValues = hasQuestionMappings
+                    ? await result.ExtractWithLogAsync(
+                        "提取Question映射",
+                        () => _mappingExecutor.ExtractQuestionValuesAsync(
+                            root,
+                            message.TranCode,
+                            config.IntegrationProjectCode,
+                            config.MainRecordArrayPath))
+                    : [];
+                var subCardData = await result.ExtractWithLogAsync(
+                    "提取SubCard映射",
+                    () => _mappingExecutor.ExtractSubCardDataAsync(
+                        root,
+                        message.TranCode,
+                        filterResult.RowFilterResults,
+                        config.IntegrationProjectCode,
+                        config.MainRecordArrayPath,
+                        formCardDict));
+                var writeResult = await _nestedFormWriteService.WriteAsync(
+                    dbEvent.id,
+                    formQuestionDict,
+                    questionValues,
+                    subCardData);
+                result.AddStep("写入Question", true, $"成功写入 {writeResult.QuestionCount} 个问题答案");
+                result.AddStep("写入嵌套SubCard", true, $"成功写入 {writeResult.SubCardCount} 行子卡片");
+
+                var nestedResult = ProcessResult.Success("处理成功", dbPatient.id, dbEvent.id);
+                nestedResult.Steps = result.Steps;
+                return nestedResult;
+            }
+            catch (Exception ex)
+            {
+                return ProcessResult.Fail($"写入嵌套 SubCard 失败: {ex.Message}");
+            }
+        }
 
         IFormsetImportService importService;
         try
@@ -214,6 +302,7 @@ public class GenericMessageProcessor
                 filterResult,
                 result,
                 formQuestionDict,
+                formCardDict,
                 dbPatient,
                 dbEvent,
                 hasQuestionMappings,
@@ -272,7 +361,8 @@ public class GenericMessageProcessor
                         message.TranCode,
                         filterResult.RowFilterResults,
                         config.IntegrationProjectCode,
-                        config.MainRecordArrayPath));
+                        config.MainRecordArrayPath,
+                        formCardDict));
 
                 var subCardCount = 0;
                 foreach (var subCardData in subCardDataList)
@@ -284,7 +374,7 @@ public class GenericMessageProcessor
                             var subCardId = Guid.Empty;
                             var written = false;
 
-                            foreach (var questionValue in row)
+                            foreach (var questionValue in row.Values)
                             {
                                 var questionId = questionValue.QuestionId;
                                 if (!formQuestionDict.TryGetValue(questionId, out var subQuestion))
@@ -362,7 +452,8 @@ public class GenericMessageProcessor
                !string.IsNullOrWhiteSpace(config.EventTypeName) ||
                !string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) ||
                !string.IsNullOrWhiteSpace(config.VisitNoSourcePath) ||
-               !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath);
+               !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath) ||
+               !string.IsNullOrWhiteSpace(config.CombinedVisitIdentitySourcePath);
     }
 
     private async Task<ProcessResult> ProcessWithDirectTargetWriteAsync(
@@ -372,6 +463,7 @@ public class GenericMessageProcessor
         FilterResult filterResult,
         ProcessResult result,
         Dictionary<Guid, form_question> formQuestionDict,
+        IReadOnlyDictionary<Guid, CardInfo> formCardDict,
         patient dbPatient,
         patient_event dbEvent,
         bool hasQuestionMappings,
@@ -416,7 +508,8 @@ public class GenericMessageProcessor
                     message.TranCode,
                     filterResult.RowFilterResults,
                     config.IntegrationProjectCode,
-                    config.MainRecordArrayPath));
+                    config.MainRecordArrayPath,
+                    formCardDict));
 
             var subCardCount = 0;
             foreach (var subCardData in subCardDataList)
@@ -425,7 +518,7 @@ public class GenericMessageProcessor
                 {
                     var subCardId = Guid.NewGuid();
                     var written = false;
-                    foreach (var questionValue in row)
+                    foreach (var questionValue in row.Values)
                     {
                         var questionId = questionValue.QuestionId;
                         if (!formQuestionDict.TryGetValue(questionId, out var question))
@@ -495,7 +588,8 @@ public class GenericMessageProcessor
         DateTime? eventEndTime,
         form_form_set formSet,
         Guid hospitalId,
-        Guid projectId)
+        Guid projectId,
+        EsbEventIdentity? knownIdentity = null)
     {
         var eventTypeName = config.EventTypeName!;
 
@@ -520,7 +614,7 @@ public class GenericMessageProcessor
             return (null, BuildMissingEventResult(config, dbPatient.id, "未提取到事件开始时间"));
         }
 
-        var identity = await result.LogStepAsync("按住院标识定位住院时间",
+        var identity = knownIdentity ?? await result.LogStepAsync("按住院标识定位住院时间",
             () => _eventIdentityService.FindByVisitIdentityAsync(config.IntegrationProjectCode, mrn, inpatientNo, visitNo));
 
         if (identity?.EventStartTime != null)
@@ -538,7 +632,7 @@ public class GenericMessageProcessor
             return (dbEvent, null);
         }
 
-        return (null, BuildMissingEventResult(config, dbPatient.id, "缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间"));
+        return (null, BuildMissingEventResult(config, dbPatient.id, "缺少事件时间且未能按就诊号/住院号、住院次数或组合标识定位住院时间"));
     }
 
     private static ProcessResult BuildMissingEventResult(EsbInterfaceConfig config, Guid patientId, string message)

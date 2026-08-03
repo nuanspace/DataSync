@@ -132,7 +132,8 @@
                                     <td colspan="8" class="card-mapping-filter-cell">
                                         <FilterRuleEditor Rules="row.FilterRules"
                                                           RulesChanged="v => row.FilterRules = v"
-                                                          ShowScope="false"
+                                                          ShowScope="@SubCardPathHelper.HasArrayWildcard(GetRowDisplaySourcePath(row))"
+                                                          UseMappingScopeLabels="true"
                                                           OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, filterIdx => HandleFilterPathPick(idx, filterIdx)))"
                                                           ActivePickIndex="@(_pickTarget == PickTarget.FilterRule && _pickRowIndex == idx ? _pickFilterRuleIndex : -1)" />
                                     </td>

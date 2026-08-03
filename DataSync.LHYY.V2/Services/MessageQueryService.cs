@@ -4,7 +4,10 @@ using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
 using DataSync.LHYY.V2.Services.FollowUp;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Newtonsoft.Json.Linq;
+using Npgsql;
+using NpgsqlTypes;
 
 namespace DataSync.LHYY.V2.Services;
 
@@ -15,6 +18,7 @@ public class MessageQueryService
 {
     private const int DefaultHotDays = 30;
     private const string MaintenanceMessage = "系统维护中，请稍后重试";
+    private const long ArchiveLockKey = 2026052601;
 
     private const string AllMessagesSql = """
         SELECT
@@ -64,6 +68,7 @@ public class MessageQueryService
     private readonly ConfigService _configService;
     private readonly EsbReceiverService _receiverService;
     private readonly FollowUpCubeOperationCoordinator _operationCoordinator;
+    private readonly MessageProcessingNotifier? _messageProcessingNotifier;
 
     public MessageQueryService(
         IDbContextFactory<DataSyncDbContext> contextFactory,
@@ -71,12 +76,30 @@ public class MessageQueryService
         ConfigService configService,
         EsbReceiverService receiverService,
         FollowUpCubeOperationCoordinator operationCoordinator)
+        : this(
+            contextFactory,
+            integrationProjectService,
+            configService,
+            receiverService,
+            operationCoordinator,
+            null)
+    {
+    }
+
+    public MessageQueryService(
+        IDbContextFactory<DataSyncDbContext> contextFactory,
+        IntegrationProjectService integrationProjectService,
+        ConfigService configService,
+        EsbReceiverService receiverService,
+        FollowUpCubeOperationCoordinator operationCoordinator,
+        MessageProcessingNotifier? messageProcessingNotifier)
     {
         _contextFactory = contextFactory;
         _integrationProjectService = integrationProjectService;
         _configService = configService;
         _receiverService = receiverService;
         _operationCoordinator = operationCoordinator;
+        _messageProcessingNotifier = messageProcessingNotifier;
     }
 
     public async Task<int> GetHotRetentionDaysAsync()
@@ -411,25 +434,565 @@ public class MessageQueryService
             .SetProperty(m => m.ProcessingStartedAt, (DateTime?)null));
     }
 
+    public static bool CanBatchRetry(MessageStatus status) => status is
+        MessageStatus.Failed or
+        MessageStatus.Success or
+        MessageStatus.Filtered or
+        MessageStatus.Unmatched or
+        MessageStatus.PartialSuccess or
+        MessageStatus.WaitingIdentity;
+
+    public async Task<BatchRetryPreview> PreviewBatchRetryAsync(
+        IReadOnlyCollection<long> messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = messageIds.Distinct().ToArray();
+        var preview = new BatchRetryPreview { SelectedCount = ids.Length };
+        if (ids.Length == 0)
+            return preview;
+
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
+        var messages = await LoadRetryMessagesAsync(
+            db,
+            ids,
+            currentProjectCode,
+            await IsArchiveReadableAsync(db),
+            cancellationToken);
+        if (messages.GroupBy(item => item.Message.Id).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("热表与归档表存在重复消息，无法批量重试。");
+
+        var messageById = messages.ToDictionary(item => item.Message.Id);
+
+        foreach (var id in ids)
+        {
+            if (!messageById.TryGetValue(id, out var item))
+            {
+                preview.SkippedItems.Add(CreateSkippedItem(id, null, "消息不存在或不属于当前项目"));
+                continue;
+            }
+
+            if (!CanBatchRetry(item.Message.Status))
+            {
+                preview.SkippedItems.Add(CreateSkippedItem(
+                    id,
+                    item.Message.MessageId,
+                    $"{item.Message.Status.ToDisplayText()}状态不允许重试"));
+                continue;
+            }
+
+            preview.ValidCount++;
+            if (item.IsArchive)
+                preview.ArchiveCount++;
+            else
+                preview.HotCount++;
+
+            preview.StatusCounts[item.Message.Status] =
+                preview.StatusCounts.GetValueOrDefault(item.Message.Status) + 1;
+        }
+
+        return preview;
+    }
+
+    public async Task<BatchRetryResult> BatchRetryAsync(
+        IReadOnlyCollection<long> messageIds,
+        CancellationToken cancellationToken = default)
+    {
+        await using var operationLease = await _operationCoordinator.TryAcquireSharedAsync(cancellationToken);
+        if (operationLease is null)
+            throw new InvalidOperationException(MaintenanceMessage);
+
+        var ids = messageIds.Distinct().ToArray();
+        var result = new BatchRetryResult();
+        if (ids.Length == 0)
+            return result;
+
+        await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
+        var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
+        var archiveReadable = await IsArchiveReadableAsync(db);
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        try
+        {
+            var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+            var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
+            await AcquireArchiveLockAsync(connection, dbTransaction, cancellationToken);
+            var lockedMessages = await LoadLockedRetryMessagesAsync(
+                connection,
+                dbTransaction,
+                ids,
+                currentProjectCode,
+                archiveReadable,
+                cancellationToken);
+            var messageById = lockedMessages.ToDictionary(item => item.Message.Id);
+            var validMessages = new List<RetryMessageSnapshot>();
+
+            foreach (var id in ids)
+            {
+                if (!messageById.TryGetValue(id, out var item))
+                {
+                    result.SkippedItems.Add(CreateSkippedItem(id, null, "消息不存在或不属于当前项目"));
+                    continue;
+                }
+
+                if (!CanBatchRetry(item.Message.Status))
+                {
+                    result.SkippedItems.Add(CreateSkippedItem(
+                        id,
+                        item.Message.MessageId,
+                        $"消息状态已变为{item.Message.Status.ToDisplayText()}，已跳过"));
+                    continue;
+                }
+
+                validMessages.Add(item);
+            }
+
+            var receiptKeys = new HashSet<MessageReceiptKey>();
+            foreach (var item in validMessages)
+            {
+                var keys = await _receiverService.ResolveReplayReceiptKeysAsync(item.Message, cancellationToken);
+                receiptKeys.UnionWith(keys);
+            }
+
+            await AcquireReceiptLocksAsync(connection, dbTransaction, receiptKeys, cancellationToken);
+            await ClearMessageReceiptsAsync(db, receiptKeys, cancellationToken);
+
+            var archiveMessages = validMessages
+                .Where(item => item.IsArchive)
+                .ToArray();
+            if (archiveMessages.Length > 0)
+            {
+                await RestoreArchiveMessagesAsync(
+                    connection,
+                    dbTransaction,
+                    archiveMessages,
+                    currentProjectCode,
+                    cancellationToken);
+            }
+
+            var validIds = validMessages.Select(item => item.Message.Id).ToArray();
+            if (validIds.Length > 0)
+                await ResetMessagesForRetryAsync(connection, dbTransaction, validIds, cancellationToken);
+
+            await transaction.CommitAsync(cancellationToken);
+
+            result.SubmittedCount = validIds.Length;
+            result.RestoredArchiveCount = archiveMessages.Length;
+            if (result.SubmittedCount > 0)
+                _messageProcessingNotifier?.Notify();
+
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
+    }
+
+    private static async Task<List<RetryMessageSnapshot>> LoadRetryMessagesAsync(
+        DataSyncDbContext db,
+        long[] ids,
+        string? currentProjectCode,
+        bool archiveReadable,
+        CancellationToken cancellationToken)
+    {
+        if (!archiveReadable)
+        {
+            return (await db.EsbMessages
+                    .AsNoTracking()
+                    .WhereInProjectOrGlobal(currentProjectCode)
+                    .Where(message => ids.Contains(message.Id))
+                    .ToListAsync(cancellationToken))
+                .Select(message => new RetryMessageSnapshot(message, false))
+                .ToList();
+        }
+
+        var messages = await db.EsbMessages
+            .FromSqlRaw(AllMessagesSql)
+            .AsNoTracking()
+            .WhereInProjectOrGlobal(currentProjectCode)
+            .Where(message => ids.Contains(message.Id))
+            .ToListAsync(cancellationToken);
+        var hotIds = await db.EsbMessages
+            .AsNoTracking()
+            .WhereInProjectOrGlobal(currentProjectCode)
+            .Where(message => ids.Contains(message.Id))
+            .Select(message => message.Id)
+            .ToListAsync(cancellationToken);
+        var hotIdSet = hotIds.ToHashSet();
+        return messages
+            .Select(message => new RetryMessageSnapshot(message, !hotIdSet.Contains(message.Id)))
+            .ToList();
+    }
+
+    private static async Task AcquireArchiveLockAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(@lock_key);",
+            connection,
+            transaction);
+        command.Parameters.AddWithValue("lock_key", NpgsqlDbType.Bigint, ArchiveLockKey);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<List<RetryMessageSnapshot>> LoadLockedRetryMessagesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long[] ids,
+        string? currentProjectCode,
+        bool archiveReadable,
+        CancellationToken cancellationToken)
+    {
+        var messages = await LoadLockedRetryMessagesFromTableAsync(
+            connection,
+            transaction,
+            "esb_messages",
+            false,
+            ids,
+            currentProjectCode,
+            cancellationToken);
+        if (!archiveReadable)
+            return messages;
+
+        var archiveMessages = await LoadLockedRetryMessagesFromTableAsync(
+            connection,
+            transaction,
+            "esb_messages_archive",
+            true,
+            ids,
+            currentProjectCode,
+            cancellationToken);
+        var loadedIds = messages.Select(item => item.Message.Id).ToHashSet();
+        if (archiveMessages.Any(item => !loadedIds.Add(item.Message.Id)))
+            throw new InvalidOperationException("热表与归档表存在重复消息，无法批量重试。");
+
+        messages.AddRange(archiveMessages);
+        return messages;
+    }
+
+    private static async Task<List<RetryMessageSnapshot>> LoadLockedRetryMessagesFromTableAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string tableName,
+        bool isArchive,
+        long[] ids,
+        string? currentProjectCode,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand($"""
+            SELECT
+                id,
+                message_id,
+                source_message_id,
+                tran_code,
+                integration_project_code,
+                raw_json,
+                idempotent_key,
+                status,
+                created_at
+            FROM lhyy.{tableName}
+            WHERE id = ANY(@ids)
+              AND (integration_project_code IS NULL OR integration_project_code = @project_code)
+            ORDER BY id
+            FOR UPDATE;
+            """, connection, transaction);
+        AddRetrySqlParameters(command, ids, currentProjectCode);
+
+        var result = new List<RetryMessageSnapshot>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result.Add(new RetryMessageSnapshot(
+                new EsbMessage
+                {
+                    Id = reader.GetInt64(0),
+                    MessageId = reader.GetString(1),
+                    SourceMessageId = reader.IsDBNull(2) ? null : reader.GetString(2),
+                    TranCode = reader.GetString(3),
+                    IntegrationProjectCode = reader.IsDBNull(4) ? null : reader.GetString(4),
+                    RawJson = reader.GetString(5),
+                    IdempotentKey = reader.IsDBNull(6) ? null : reader.GetString(6),
+                    Status = (MessageStatus)reader.GetInt16(7),
+                    CreatedAt = reader.GetDateTime(8)
+                },
+                isArchive));
+        }
+
+        return result;
+    }
+
+    private static async Task RestoreArchiveMessagesAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        RetryMessageSnapshot[] messages,
+        string? currentProjectCode,
+        CancellationToken cancellationToken)
+    {
+        var ids = messages.Select(item => item.Message.Id).ToArray();
+        var createdTimes = messages.Select(item => item.Message.CreatedAt).ToArray();
+        await using var command = new NpgsqlCommand("""
+            WITH selected(id, created_at) AS (
+                SELECT *
+                FROM unnest(@ids::bigint[], @created_times::timestamp[])
+            ), moved AS (
+                DELETE FROM lhyy.esb_messages_archive AS archive
+                USING selected
+                WHERE archive.id = selected.id
+                  AND archive.created_at = selected.created_at
+                  AND (archive.integration_project_code IS NULL OR archive.integration_project_code = @project_code)
+                RETURNING
+                    archive.id,
+                    archive.message_id,
+                    archive.source_message_id,
+                    archive.tran_code,
+                    archive.integration_project_code,
+                    archive.tran_name,
+                    archive.app_id,
+                    archive.org_id,
+                    archive.esb_timestamp,
+                    archive.raw_json,
+                    archive.body_json,
+                    archive.idempotent_key,
+                    archive.mrn,
+                    archive.visit_no,
+                    archive.inpatient_no,
+                    archive.resolved_event_time,
+                    archive.matched_rule_group,
+                    archive.status,
+                    archive.retry_count,
+                    archive.error_message,
+                    archive.patient_id,
+                    archive.event_id,
+                    archive.processed_at,
+                    archive.processing_started_at,
+                    archive.created_at
+            )
+            INSERT INTO lhyy.esb_messages (
+                id,
+                message_id,
+                source_message_id,
+                tran_code,
+                integration_project_code,
+                tran_name,
+                app_id,
+                org_id,
+                esb_timestamp,
+                raw_json,
+                body_json,
+                idempotent_key,
+                mrn,
+                visit_no,
+                inpatient_no,
+                resolved_event_time,
+                matched_rule_group,
+                status,
+                retry_count,
+                error_message,
+                patient_id,
+                event_id,
+                processed_at,
+                processing_started_at,
+                created_at
+            )
+            SELECT
+                id,
+                message_id,
+                source_message_id,
+                tran_code,
+                integration_project_code,
+                tran_name,
+                app_id,
+                org_id,
+                esb_timestamp,
+                raw_json,
+                body_json,
+                idempotent_key,
+                mrn,
+                visit_no,
+                inpatient_no,
+                resolved_event_time,
+                matched_rule_group,
+                status,
+                retry_count,
+                error_message,
+                patient_id,
+                event_id,
+                processed_at,
+                processing_started_at,
+                created_at
+            FROM moved;
+            """, connection, transaction);
+        AddRetrySqlParameters(command, ids, currentProjectCode);
+        command.Parameters.AddWithValue(
+            "created_times",
+            NpgsqlDbType.Array | NpgsqlDbType.Timestamp,
+            createdTimes);
+
+        var restoredCount = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (restoredCount != messages.Length)
+            throw new InvalidOperationException("归档消息恢复数量不一致，已取消本批重试。");
+    }
+
+    private static async Task ResetMessagesForRetryAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        long[] ids,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand("""
+            UPDATE lhyy.esb_messages
+            SET status = @pending_status,
+                error_message = NULL,
+                processed_at = NULL,
+                processing_started_at = NULL
+            WHERE id = ANY(@ids);
+            """, connection, transaction);
+        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Bigint, ids);
+        command.Parameters.AddWithValue("pending_status", NpgsqlDbType.Smallint, (short)MessageStatus.Pending);
+        var updatedCount = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (updatedCount != ids.Length)
+            throw new InvalidOperationException("消息重置数量不一致，已取消本批重试。");
+    }
+
+    private static void AddRetrySqlParameters(
+        NpgsqlCommand command,
+        long[] ids,
+        string? currentProjectCode)
+    {
+        command.Parameters.AddWithValue("ids", NpgsqlDbType.Array | NpgsqlDbType.Bigint, ids);
+        command.Parameters.Add(new NpgsqlParameter("project_code", NpgsqlDbType.Varchar)
+        {
+            Value = string.IsNullOrWhiteSpace(currentProjectCode)
+                ? DBNull.Value
+                : currentProjectCode
+        });
+    }
+
+    private static async Task ClearMessageReceiptsAsync(
+        DataSyncDbContext db,
+        IEnumerable<MessageReceiptKey> receiptKeys,
+        CancellationToken cancellationToken)
+    {
+        foreach (var key in receiptKeys)
+        {
+            var sourceMessageId = string.IsNullOrWhiteSpace(key.SourceMessageId) ? null : key.SourceMessageId;
+            var idempotentKey = string.IsNullOrWhiteSpace(key.IdempotentKey) ? null : key.IdempotentKey;
+            if (sourceMessageId == null && idempotentKey == null)
+                continue;
+
+            var query = db.EsbMessageReceipts.Where(receipt =>
+                receipt.IntegrationProjectCode == key.IntegrationProjectCode &&
+                receipt.TranCode == key.TranCode);
+            if (sourceMessageId != null && idempotentKey != null)
+            {
+                query = query.Where(receipt =>
+                    receipt.SourceMessageId == sourceMessageId ||
+                    receipt.IdempotentKey == idempotentKey);
+            }
+            else if (sourceMessageId != null)
+            {
+                query = query.Where(receipt => receipt.SourceMessageId == sourceMessageId);
+            }
+            else
+            {
+                query = query.Where(receipt => receipt.IdempotentKey == idempotentKey);
+            }
+
+            await query.ExecuteDeleteAsync(cancellationToken);
+        }
+    }
+
+    private static async Task AcquireReceiptLocksAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IEnumerable<MessageReceiptKey> receiptKeys,
+        CancellationToken cancellationToken)
+    {
+        var lockKeys = receiptKeys
+            .SelectMany(key => MessageReceiptService.BuildAdvisoryLockKeys(
+                key.IntegrationProjectCode,
+                key.TranCode,
+                key.SourceMessageId,
+                key.IdempotentKey))
+            .Distinct()
+            .OrderBy(key => key)
+            .ToArray();
+        if (lockKeys.Length == 0)
+            return;
+
+        await using var command = new NpgsqlCommand(
+            "SELECT pg_advisory_xact_lock(@lock_key);",
+            connection,
+            transaction);
+        var parameter = command.Parameters.Add("lock_key", NpgsqlDbType.Bigint);
+        foreach (var lockKey in lockKeys)
+        {
+            parameter.Value = lockKey;
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static BatchRetrySkippedItem CreateSkippedItem(long id, string? messageId, string reason) => new()
+    {
+        Id = id,
+        MessageId = messageId,
+        Reason = reason
+    };
+
     private async Task<bool> PrepareMessageForDirectProcessAsync(long id, CancellationToken cancellationToken)
     {
         await using var db = await _contextFactory.CreateDbContextAsync(cancellationToken);
         var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
-        var message = await db.EsbMessages
-            .WhereInProjectOrGlobal(currentProjectCode)
-            .FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
-        if (message == null || !CanDirectProcess(message.Status))
-            return false;
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        var originalStatus = message.Status;
-        await ClearMessageReceiptsAsync(db, message, cancellationToken);
+        try
+        {
+            var connection = (NpgsqlConnection)db.Database.GetDbConnection();
+            var dbTransaction = (NpgsqlTransaction)transaction.GetDbTransaction();
+            await using (var lockCommand = new NpgsqlCommand("""
+                SELECT id
+                FROM lhyy.esb_messages
+                WHERE id = @id
+                  AND (integration_project_code IS NULL OR integration_project_code = @project_code)
+                FOR UPDATE;
+                """, connection, dbTransaction))
+            {
+                lockCommand.Parameters.AddWithValue("id", NpgsqlDbType.Bigint, id);
+                lockCommand.Parameters.Add(new NpgsqlParameter("project_code", NpgsqlDbType.Varchar)
+                {
+                    Value = string.IsNullOrWhiteSpace(currentProjectCode)
+                        ? DBNull.Value
+                        : currentProjectCode
+                });
+                if (await lockCommand.ExecuteScalarAsync(cancellationToken) == null)
+                    return false;
+            }
 
-        message.Status = MessageStatus.Processing;
-        message.ErrorMessage = null;
-        message.ProcessedAt = null;
-        message.ProcessingStartedAt = DateTime.Now;
-        await db.SaveChangesAsync(cancellationToken);
-        return true;
+            var message = await db.EsbMessages.FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+            if (message == null || !CanDirectProcess(message.Status))
+                return false;
+
+            var receiptKeys = await _receiverService.ResolveReplayReceiptKeysAsync(message, cancellationToken);
+            await AcquireReceiptLocksAsync(connection, dbTransaction, receiptKeys, cancellationToken);
+            await ClearMessageReceiptsAsync(db, receiptKeys, cancellationToken);
+
+            message.Status = MessageStatus.Processing;
+            message.ErrorMessage = null;
+            message.ProcessedAt = null;
+            message.ProcessingStartedAt = DateTime.Now;
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return true;
+        }
+        catch
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            throw;
+        }
     }
 
     private async Task MarkDirectProcessFailedAsync(long id, string errorMessage, CancellationToken cancellationToken)
@@ -452,26 +1015,6 @@ public class MessageQueryService
         {
             // 保留原始异常给页面提示。
         }
-    }
-
-    private static async Task ClearMessageReceiptsAsync(DataSyncDbContext db, EsbMessage message, CancellationToken cancellationToken)
-    {
-        var sourceMessageId = string.IsNullOrWhiteSpace(message.SourceMessageId) ? null : message.SourceMessageId;
-        var idempotentKey = string.IsNullOrWhiteSpace(message.IdempotentKey) ? null : message.IdempotentKey;
-        if (sourceMessageId == null && idempotentKey == null)
-            return;
-
-        var query = db.EsbMessageReceipts
-            .Where(r => r.IntegrationProjectCode == message.IntegrationProjectCode && r.TranCode == message.TranCode);
-
-        if (sourceMessageId != null && idempotentKey != null)
-            query = query.Where(r => r.SourceMessageId == sourceMessageId || r.IdempotentKey == idempotentKey);
-        else if (sourceMessageId != null)
-            query = query.Where(r => r.SourceMessageId == sourceMessageId);
-        else
-            query = query.Where(r => r.IdempotentKey == idempotentKey);
-
-        await query.ExecuteDeleteAsync(cancellationToken);
     }
 
     private static bool CanDirectProcess(MessageStatus status) =>
@@ -730,6 +1273,8 @@ public class MessageQueryService
             return false;
         }
     }
+
+    private sealed record RetryMessageSnapshot(EsbMessage Message, bool IsArchive);
 }
 
 public class TodaySummary

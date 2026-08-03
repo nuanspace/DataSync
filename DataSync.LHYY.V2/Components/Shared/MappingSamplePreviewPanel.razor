@@ -1,4 +1,4 @@
-@inherits BasePage
+﻿@inherits BasePage
 
 <div class="mapping-sample-preview">
     <div class="mapping-sample-preview-title">
@@ -216,6 +216,7 @@
             hash.Add(rule.CompareValue);
             hash.Add(rule.RuleGroup);
             hash.Add(rule.SortOrder);
+            hash.Add(rule.FilterScope);
             hash.Add(rule.IsEnabled);
         }
 
@@ -282,7 +283,8 @@
     private static string BuildRuleText(EsbFilterRule rule)
     {
         var compareValue = IsCompareValueDisabled(rule.Operator) ? "" : $" {rule.CompareValue}";
-        return $"{GetOperatorText(rule.Operator)}{compareValue}";
+        var scope = rule.FilterScope == FilterScope.RowFilter ? "数组项过滤" : "整条映射判断";
+        return $"{scope}；{GetOperatorText(rule.Operator)}{compareValue}";
     }
 
     private static string GetOperatorText(string? op) => op?.ToLowerInvariant() switch

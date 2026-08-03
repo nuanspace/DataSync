@@ -440,7 +440,7 @@ public class BioCoreIntegrationService
 
         var paramList = string.Join(",", formSetIds.Select((_, i) => $"@p{i}"));
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT id, name, parent_id, form_name, type, pre_uid FROM form.form_card WHERE form_set_id IN ({paramList}) AND type IN ('multiple', 'table')";
+        cmd.CommandText = $"SELECT id, name, parent_id, form_name, type, pre_uid, form_id, related_form_id FROM form.form_card WHERE form_set_id IN ({paramList}) AND type IN ('multiple', 'table')";
 
         for (var i = 0; i < formSetIds.Count; i++)
         {
@@ -462,6 +462,8 @@ public class BioCoreIntegrationService
                 FormName = reader.IsDBNull(3) ? "" : reader.GetString(3),
                 CardType = reader.IsDBNull(4) ? "default" : reader.GetString(4),
                 PreUid = reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                FormId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                RelatedFormId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
             });
         }
 
@@ -492,7 +494,7 @@ public class BioCoreIntegrationService
 
         var paramList = string.Join(",", formSetIds.Select((_, i) => $"@p{i}"));
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SELECT id, name, parent_id, form_name, type, pre_uid FROM form.form_card WHERE form_set_id IN ({paramList})";
+        cmd.CommandText = $"SELECT id, name, parent_id, form_name, type, pre_uid, form_id, related_form_id FROM form.form_card WHERE form_set_id IN ({paramList})";
 
         for (var i = 0; i < formSetIds.Count; i++)
         {
@@ -515,6 +517,8 @@ public class BioCoreIntegrationService
                 FormName = reader.IsDBNull(3) ? "" : reader.GetString(3),
                 CardType = reader.IsDBNull(4) ? "default" : reader.GetString(4),
                 PreUid = reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                FormId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                RelatedFormId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
             };
         }
 
@@ -672,7 +676,7 @@ public class BioCoreIntegrationService
         await conn.OpenAsync();
 
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, name, parent_id, form_name, type, pre_uid FROM form.form_card WHERE form_set_id = @p0";
+        cmd.CommandText = "SELECT id, name, parent_id, form_name, type, pre_uid, form_id, related_form_id FROM form.form_card WHERE form_set_id = @p0";
         var param = cmd.CreateParameter();
         param.ParameterName = "@p0";
         param.Value = formSetId;
@@ -691,6 +695,8 @@ public class BioCoreIntegrationService
                 FormName = reader.IsDBNull(3) ? "" : reader.GetString(3),
                 CardType = reader.IsDBNull(4) ? "default" : reader.GetString(4),
                 PreUid = reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                FormId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
+                RelatedFormId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
             };
         }
 
@@ -707,7 +713,7 @@ public class BioCoreIntegrationService
         await conn.OpenAsync();
 
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT id, name, sort_index FROM form.form_form WHERE form_set_id = @p0";
+        cmd.CommandText = "SELECT id, name, sort_index, is_hidden FROM form.form_form WHERE form_set_id = @p0";
         var param = cmd.CreateParameter();
         param.ParameterName = "@p0";
         param.Value = formSetId;
@@ -723,6 +729,7 @@ public class BioCoreIntegrationService
                 Id = id,
                 Name = reader.IsDBNull(1) ? "" : reader.GetString(1),
                 SortIndex = reader.IsDBNull(2) ? int.MaxValue : reader.GetInt16(2),
+                IsHidden = !reader.IsDBNull(3) && reader.GetBoolean(3),
             };
         }
 
@@ -1030,6 +1037,15 @@ public class BioCoreIntegrationService
         var importService = _serviceProvider.GetRequiredService<IFormsetImportService>();
         await importService.InitializeImportAsync(formSetId);
         return importService;
+    }
+
+    /// <summary>
+    /// 创建已绑定患者事件的表单服务，用于写入带父子关系的子卡。
+    /// </summary>
+    public async Task<IFormsetService> CreateFormsetServiceAsync(Guid patientEventId)
+    {
+        var factory = _serviceProvider.GetRequiredService<FormSetServiceFactory>();
+        return await factory.CreateAsync(patientEventId);
     }
 
     /// <summary>

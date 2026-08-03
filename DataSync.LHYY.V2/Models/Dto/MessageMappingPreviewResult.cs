@@ -38,6 +38,7 @@ public class MessageMappingPreviewRow
     public string? GroupName { get; set; }
     public string Target { get; set; } = "";
     public string? DisplayName { get; set; }
+    public string? QuestionType { get; set; }
     public string? Value { get; set; }
     public string? Note { get; set; }
     public bool IsWarning { get; set; }

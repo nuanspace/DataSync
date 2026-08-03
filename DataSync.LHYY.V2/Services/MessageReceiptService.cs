@@ -90,4 +90,34 @@ public class MessageReceiptService
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    internal static long[] BuildAdvisoryLockKeys(
+        string? integrationProjectCode,
+        string tranCode,
+        string? sourceMessageId,
+        string? idempotentKey)
+    {
+        var keys = new List<long>(2);
+        if (!string.IsNullOrWhiteSpace(sourceMessageId))
+        {
+            keys.Add(AdvisoryLockKeyHelper.Build(
+                "esb-receipt",
+                integrationProjectCode,
+                tranCode,
+                "source:" + sourceMessageId,
+                null));
+        }
+
+        if (!string.IsNullOrWhiteSpace(idempotentKey))
+        {
+            keys.Add(AdvisoryLockKeyHelper.Build(
+                "esb-receipt",
+                integrationProjectCode,
+                tranCode,
+                null,
+                "key:" + idempotentKey));
+        }
+
+        return keys.Distinct().OrderBy(key => key).ToArray();
+    }
 }

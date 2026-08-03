@@ -10,6 +10,7 @@ public static class SubCardPathHelper
 {
     public const string RootContainerPath = "$";
     public const string MainRecordContainerPath = "$main";
+    public const string ParentRecordContainerPath = "$parent";
     private static readonly Regex ArrayIndexRegex = new(@"\[\d+\]", RegexOptions.Compiled);
 
     public static bool IsAbsoluteJsonPath(string? path) =>
@@ -52,6 +53,29 @@ public static class SubCardPathHelper
 
     public static bool IsMainRecordContainerPath(string? path) =>
         NormalizeArrayContainerPath(path).Equals(MainRecordContainerPath, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsParentRecordContainerPath(string? path) =>
+        NormalizeArrayContainerPath(path).Equals(ParentRecordContainerPath, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsParentRecordScopedPath(string? path)
+    {
+        var normalized = NormalizeArrayPath(path);
+        return normalized.Equals(ParentRecordContainerPath, StringComparison.OrdinalIgnoreCase)
+               || normalized.StartsWith(ParentRecordContainerPath + ".", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string TrimParentRecordScopePrefix(string? path)
+    {
+        var normalized = NormalizeArrayPath(path);
+        if (normalized.Equals(ParentRecordContainerPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return "";
+        }
+
+        return normalized.StartsWith(ParentRecordContainerPath + ".", StringComparison.OrdinalIgnoreCase)
+            ? normalized[(ParentRecordContainerPath.Length + 1)..]
+            : normalized;
+    }
 
     public static bool IsRootScopedPath(string? sourcePath, string? arrayPath)
     {
@@ -252,6 +276,64 @@ public static class SubCardPathHelper
         }
 
         return normalized;
+    }
+
+    public static string? ExpandNestedArrayPathToRoot(
+        JToken? root,
+        string? arrayPath,
+        string? parentArrayPath,
+        string? mainRecordArrayPath)
+    {
+        var normalized = NormalizeArrayContainerPath(arrayPath);
+        var normalizedParent = NormalizeArrayContainerPath(parentArrayPath);
+        if (string.IsNullOrWhiteSpace(normalizedParent))
+        {
+            return ExpandArrayPathToRoot(root, normalized, mainRecordArrayPath);
+        }
+
+        if (IsParentRecordContainerPath(normalized))
+        {
+            return normalizedParent;
+        }
+
+        if (IsAbsoluteJsonPath(normalized) || IsMainRecordContainerPath(normalized))
+        {
+            return ExpandArrayPathToRoot(root, normalized, mainRecordArrayPath);
+        }
+
+        if (PathsEqual(normalized, normalizedParent)
+            || TryBuildRelativePath(normalized, normalizedParent, out _))
+        {
+            return normalized;
+        }
+
+        if (TryBuildRelativePathFromParentSuffix(normalized, normalizedParent, out var suffixRelativePath))
+        {
+            return BuildScopedPath(root, normalizedParent, suffixRelativePath);
+        }
+
+        return BuildScopedPath(root, normalizedParent, normalized);
+    }
+
+    private static bool TryBuildRelativePathFromParentSuffix(
+        string sourcePath,
+        string parentPath,
+        out string relativePath)
+    {
+        relativePath = "";
+        var parentParts = TrimJsonRootPrefix(parentPath)
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        for (var index = 1; index < parentParts.Length; index++)
+        {
+            var parentSuffix = string.Join('.', parentParts.Skip(index));
+            if (TryBuildRelativePath(sourcePath, parentSuffix, out relativePath)
+                && !string.IsNullOrWhiteSpace(relativePath))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static bool TryInferObjectContainerPath(

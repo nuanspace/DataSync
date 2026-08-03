@@ -11,10 +11,12 @@ namespace DataSync.LHYY.V2.Services;
 public class MappingPreviewService
 {
     private readonly DictService _dictService;
+    private readonly FilterRuleService _filterRuleService;
 
-    public MappingPreviewService(DictService dictService)
+    public MappingPreviewService(DictService dictService, FilterRuleService filterRuleService)
     {
         _dictService = dictService;
+        _filterRuleService = filterRuleService;
     }
 
     public async Task<MappingSamplePreviewResult> PreviewSampleAsync(
@@ -142,22 +144,76 @@ public class MappingPreviewService
     /// <summary>
     /// 对单条映射规则执行提取预览
     /// </summary>
-    public async Task<MappingPreviewResult> PreviewSingleAsync(JToken body, EsbFieldMapping mapping, string? mainRecordArrayPath = null)
+    public async Task<MappingPreviewResult> PreviewSingleAsync(
+        JToken body,
+        EsbFieldMapping mapping,
+        string? mainRecordArrayPath = null,
+        IReadOnlyList<EsbFieldMapping>? mappings = null,
+        IReadOnlyDictionary<Guid, CardInfo>? cards = null,
+        List<EsbFilterRule>? filterRules = null)
     {
+        var effectiveArrayPath = ResolveEffectiveArrayPath(body, mapping, mappings, cards, mainRecordArrayPath);
+        if (SubCardPathHelper.IsParentRecordScopedPath(mapping.SourcePath))
+        {
+            effectiveArrayPath = ResolveEffectiveParentArrayPath(
+                body,
+                mapping,
+                mappings,
+                cards,
+                mainRecordArrayPath);
+        }
         var result = new MappingPreviewResult
         {
             MappingId = mapping.Id,
-            SourcePath = GetPreviewSourcePath(body, mapping, mainRecordArrayPath) ?? "",
+            SourcePath = GetPreviewSourcePath(body, mapping, mainRecordArrayPath, effectiveArrayPath) ?? "",
             TargetField = mapping.TargetField,
             MappingTarget = mapping.MappingTarget,
             IsRequired = mapping.IsRequired,
             Description = mapping.Description,
         };
 
+        var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
+        var hasArrayItemRules = mapping.MappingTarget == MappingTarget.Question
+                                && SubCardPathHelper.HasArrayWildcard(mapping.SourcePath)
+                                && filterRules?.Any(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter) == true;
+        var mappingRules = hasArrayItemRules
+            ? filterRules?.Where(rule => rule.FilterScope != FilterScope.RowFilter).ToList()
+            : filterRules;
+        if (!_filterRuleService.CheckMappingRules(body, mainContext, mappingRules))
+        {
+            result.IsFiltered = true;
+            result.FilterSummary = "整条映射判断未通过";
+            return result;
+        }
+
         // 提取原始值
         try
         {
-            result.RawValue = ResolvePreviewValue(body, mapping, mainRecordArrayPath);
+            if (hasArrayItemRules)
+            {
+                var filtered = _filterRuleService.FilterMappingArrayValues(
+                    body,
+                    mainContext,
+                    mapping.SourcePath,
+                    filterRules,
+                    mainContext);
+                result.TotalArrayItemCount = filtered.TotalCount;
+                result.MatchedArrayItemCount = filtered.MatchedCount;
+                result.FilterSummary = $"数组项 {filtered.MatchedCount}/{filtered.TotalCount}";
+                if (filtered.MatchedCount == 0)
+                {
+                    result.IsFiltered = true;
+                    return result;
+                }
+
+                result.RawValue = filtered.Values.Count == 0
+                    ? null
+                    : string.Join("；", filtered.Values);
+            }
+            else
+            {
+                result.RawValue = ResolvePreviewValue(body, mapping, mainRecordArrayPath, effectiveArrayPath);
+            }
         }
         catch
         {
@@ -186,7 +242,11 @@ public class MappingPreviewService
         return result;
     }
 
-    private static string? ResolvePreviewValue(JToken body, EsbFieldMapping mapping, string? mainRecordArrayPath)
+    private static string? ResolvePreviewValue(
+        JToken body,
+        EsbFieldMapping mapping,
+        string? mainRecordArrayPath,
+        string? effectiveArrayPath)
     {
         if (mapping.MappingTarget == MappingTarget.Question
             && mapping.SourcePath?.Contains("[]", StringComparison.Ordinal) == true)
@@ -200,10 +260,14 @@ public class MappingPreviewService
             return values.Count == 0 ? null : string.Join(",", values);
         }
 
-        return ResolvePreviewToken(body, mapping, mainRecordArrayPath)?.ToString();
+        return ResolvePreviewToken(body, mapping, mainRecordArrayPath, effectiveArrayPath)?.ToString();
     }
 
-    private static string? GetPreviewSourcePath(JToken body, EsbFieldMapping mapping, string? mainRecordArrayPath)
+    private static string? GetPreviewSourcePath(
+        JToken body,
+        EsbFieldMapping mapping,
+        string? mainRecordArrayPath,
+        string? effectiveArrayPath)
     {
         if (mapping.MappingTarget != MappingTarget.SubCard)
         {
@@ -218,13 +282,17 @@ public class MappingPreviewService
             return normalizedSourcePath;
         }
 
+        if (SubCardPathHelper.IsParentRecordScopedPath(normalizedSourcePath))
+        {
+            normalizedSourcePath = SubCardPathHelper.TrimParentRecordScopePrefix(normalizedSourcePath);
+        }
+
         if (MessageJsonHelper.TryNormalizeMainRecordSourcePath(normalizedSourcePath, mainRecordArrayPath, out var subCardMainScopedPath)
             && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(subCardMainScopedPath)))
         {
             return subCardMainScopedPath;
         }
 
-        var effectiveArrayPath = SubCardPathHelper.ExpandArrayPathToRoot(body, mapping.ArrayPath, mainRecordArrayPath);
         if (SubCardPathHelper.IsAbsoluteJsonPath(normalizedSourcePath)
             || SubCardPathHelper.IsRootScopedPath(normalizedSourcePath, effectiveArrayPath)
             || string.IsNullOrWhiteSpace(effectiveArrayPath))
@@ -235,7 +303,11 @@ public class MappingPreviewService
         return SubCardPathHelper.BuildScopedPath(body, effectiveArrayPath, normalizedSourcePath);
     }
 
-    private static JToken? ResolvePreviewToken(JToken body, EsbFieldMapping mapping, string? mainRecordArrayPath)
+    private static JToken? ResolvePreviewToken(
+        JToken body,
+        EsbFieldMapping mapping,
+        string? mainRecordArrayPath,
+        string? effectiveArrayPath)
     {
         if (string.IsNullOrWhiteSpace(mapping.SourcePath))
         {
@@ -253,12 +325,15 @@ public class MappingPreviewService
             ? subCardMainScopedPath
             : mapping.SourcePath;
 
+        if (SubCardPathHelper.IsParentRecordScopedPath(normalizedSourcePath))
+        {
+            normalizedSourcePath = SubCardPathHelper.TrimParentRecordScopePrefix(normalizedSourcePath);
+        }
+
         if (MessageJsonHelper.IsMainRecordScopedPath(normalizedSourcePath))
         {
             return MessageJsonHelper.ResolveFirstScopedToken(body, mainContext, normalizedSourcePath, mainContext);
         }
-
-        var effectiveArrayPath = SubCardPathHelper.ExpandArrayPathToRoot(body, mapping.ArrayPath, mainRecordArrayPath);
 
         if (SubCardPathHelper.IsAbsoluteJsonPath(normalizedSourcePath)
             || (!string.IsNullOrWhiteSpace(effectiveArrayPath)
@@ -294,14 +369,125 @@ public class MappingPreviewService
     /// <summary>
     /// 批量预览所有映射
     /// </summary>
-    public async Task<List<MappingPreviewResult>> PreviewAllAsync(JToken body, List<EsbFieldMapping> mappings, string? mainRecordArrayPath = null)
+    public async Task<List<MappingPreviewResult>> PreviewAllAsync(
+        JToken body,
+        List<EsbFieldMapping> mappings,
+        string? mainRecordArrayPath = null,
+        IReadOnlyDictionary<Guid, CardInfo>? cards = null,
+        IReadOnlyDictionary<string, List<EsbFilterRule>>? filterRulesByMappingKey = null)
     {
         var results = new List<MappingPreviewResult>();
         foreach (var mapping in mappings)
         {
-            results.Add(await PreviewSingleAsync(body, mapping, mainRecordArrayPath));
+            List<EsbFilterRule>? filterRules = null;
+            filterRulesByMappingKey?.TryGetValue(BuildMappingKey(mapping), out filterRules);
+            results.Add(await PreviewSingleAsync(body, mapping, mainRecordArrayPath, mappings, cards, filterRules));
         }
         return results;
+    }
+
+    public static string BuildMappingKey(EsbFieldMapping mapping) =>
+        mapping.MappingTarget == MappingTarget.SubCard
+            ? $"{mapping.MappingTarget}:{mapping.CardId}:{mapping.TargetField}"
+            : $"{mapping.MappingTarget}:{mapping.TargetField}";
+
+    private static string? ResolveEffectiveArrayPath(
+        JToken body,
+        EsbFieldMapping mapping,
+        IReadOnlyList<EsbFieldMapping>? mappings,
+        IReadOnlyDictionary<Guid, CardInfo>? cards,
+        string? mainRecordArrayPath,
+        HashSet<Guid>? visited = null)
+    {
+        if (mapping.MappingTarget != MappingTarget.SubCard || !mapping.CardId.HasValue)
+        {
+            return null;
+        }
+
+        var effectivePath = SubCardPathHelper.ExpandArrayPathToRoot(body, mapping.ArrayPath, mainRecordArrayPath);
+        if (mappings == null || cards == null)
+        {
+            return effectivePath;
+        }
+
+        visited ??= [];
+        if (!visited.Add(mapping.CardId.Value))
+        {
+            return effectivePath;
+        }
+
+        var mappedCardIds = mappings
+            .Where(item => item.MappingTarget == MappingTarget.SubCard
+                           && !EsbFieldMapping.IsSubCardFilterMapping(item)
+                           && item.CardId.HasValue)
+            .Select(item => item.CardId!.Value)
+            .Distinct();
+        var parentCardId = SubCardHierarchyHelper
+            .BuildMappedParentMap(mappedCardIds, cards)
+            .GetValueOrDefault(mapping.CardId.Value);
+        if (!parentCardId.HasValue)
+        {
+            return effectivePath;
+        }
+
+        var parentMapping = mappings.FirstOrDefault(item =>
+            item.MappingTarget == MappingTarget.SubCard
+            && !EsbFieldMapping.IsSubCardFilterMapping(item)
+            && item.CardId == parentCardId
+            && !string.IsNullOrWhiteSpace(item.ArrayPath));
+        if (parentMapping == null)
+        {
+            return effectivePath;
+        }
+
+        var parentPath = ResolveEffectiveArrayPath(
+            body,
+            parentMapping,
+            mappings,
+            cards,
+            mainRecordArrayPath,
+            visited);
+        return SubCardPathHelper.ExpandNestedArrayPathToRoot(
+            body,
+            mapping.ArrayPath,
+            parentPath,
+            mainRecordArrayPath);
+    }
+
+    private static string? ResolveEffectiveParentArrayPath(
+        JToken body,
+        EsbFieldMapping mapping,
+        IReadOnlyList<EsbFieldMapping>? mappings,
+        IReadOnlyDictionary<Guid, CardInfo>? cards,
+        string? mainRecordArrayPath)
+    {
+        if (!mapping.CardId.HasValue || mappings == null || cards == null)
+        {
+            return null;
+        }
+
+        var mappedCardIds = mappings
+            .Where(item => item.MappingTarget == MappingTarget.SubCard
+                           && !EsbFieldMapping.IsSubCardFilterMapping(item)
+                           && item.CardId.HasValue)
+            .Select(item => item.CardId!.Value)
+            .Distinct();
+        var parentCardId = SubCardHierarchyHelper
+            .BuildMappedParentMap(mappedCardIds, cards)
+            .GetValueOrDefault(mapping.CardId.Value);
+        if (!parentCardId.HasValue)
+        {
+            return null;
+        }
+
+        var parentMapping = mappings.FirstOrDefault(item =>
+            item.MappingTarget == MappingTarget.SubCard
+            && !EsbFieldMapping.IsSubCardFilterMapping(item)
+            && item.CardId == parentCardId
+            && !string.IsNullOrWhiteSpace(item.ArrayPath));
+        return parentMapping == null
+            ? null
+            : ResolveEffectiveArrayPath(body, parentMapping, mappings, cards, mainRecordArrayPath);
     }
 
     private static bool EvaluateMappingFilters(
@@ -328,32 +514,40 @@ public class MappingPreviewService
             return true;
         }
 
-        var passedGroupCount = 0;
-        foreach (var group in enabledRules.GroupBy(r => NormalizeRuleGroup(r.RuleGroup)).OrderBy(g => g.Key))
+        var mappingRules = enabledRules.Where(rule => rule.FilterScope != FilterScope.RowFilter).ToList();
+        var arrayItemRules = enabledRules.Where(rule => rule.FilterScope == FilterScope.RowFilter).ToList();
+        return EvaluateRuleSet(mappingRules) && EvaluateRuleSet(arrayItemRules);
+
+        bool EvaluateRuleSet(List<EsbFilterRule> rules)
         {
-            var groupPassed = true;
-            foreach (var rule in group.OrderBy(r => r.SortOrder))
+            if (rules.Count == 0)
+                return true;
+
+            var passedGroupCount = 0;
+            foreach (var group in rules.GroupBy(r => NormalizeRuleGroup(r.RuleGroup)).OrderBy(g => g.Key))
             {
-                var value = ResolveFilterSampleValue(mapping, rule, sampleValue, filterValues);
-                var matched = FilterRuleService.Evaluate(value, rule.Operator, rule.CompareValue);
-                groupPassed &= matched;
-                result.Steps.Add(new MappingPreviewStep
+                var groupPassed = true;
+                foreach (var rule in group.OrderBy(r => r.SortOrder))
                 {
-                    Name = $"过滤条件 组{NormalizeRuleGroup(rule.RuleGroup)}",
-                    Status = matched ? "通过" : "未通过",
-                    InputValue = value,
-                    OutputValue = matched ? "true" : "false",
-                    Message = BuildRuleMessage(rule)
-                });
+                    var value = ResolveFilterSampleValue(mapping, rule, sampleValue, filterValues);
+                    var matched = FilterRuleService.Evaluate(value, rule.Operator, rule.CompareValue);
+                    groupPassed &= matched;
+                    result.Steps.Add(new MappingPreviewStep
+                    {
+                        Name = $"过滤条件 组{NormalizeRuleGroup(rule.RuleGroup)}",
+                        Status = matched ? "通过" : "未通过",
+                        InputValue = value,
+                        OutputValue = matched ? "true" : "false",
+                        Message = BuildRuleMessage(rule)
+                    });
+                }
+
+                if (groupPassed)
+                    passedGroupCount++;
             }
 
-            if (groupPassed)
-            {
-                passedGroupCount++;
-            }
+            return passedGroupCount > 0;
         }
-
-        return passedGroupCount > 0;
     }
 
     private static string? ResolveFilterSampleValue(
@@ -384,7 +578,8 @@ public class MappingPreviewService
     {
         var compareValue = IsCompareValueDisabled(rule.Operator) ? "" : $" {rule.CompareValue}";
         var description = string.IsNullOrWhiteSpace(rule.Description) ? "" : $"（{rule.Description}）";
-        return $"{rule.SourcePath} {rule.Operator}{compareValue}{description}";
+        var scope = rule.FilterScope == FilterScope.RowFilter ? "数组项过滤" : "整条映射判断";
+        return $"[{scope}] {rule.SourcePath} {rule.Operator}{compareValue}{description}";
     }
 
     private static bool IsCompareValueDisabled(string? op) =>

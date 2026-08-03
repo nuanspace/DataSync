@@ -335,6 +335,11 @@
     overflow-wrap: anywhere;
 }
 
+.message-detail-preview-target {
+    min-width: 180px;
+    font-weight: 600;
+}
+
 .message-detail-preview-value {
     font-family: Consolas, "Courier New", monospace;
     font-weight: 600;

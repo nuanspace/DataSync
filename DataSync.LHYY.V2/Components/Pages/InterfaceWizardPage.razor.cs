@@ -3,8 +3,11 @@ using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
 using DataSync.LHYY.V2.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Routing;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.EntityFrameworkCore;
 using MudBlazor;
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace DataSync.LHYY.V2.Components.Pages;
@@ -30,9 +33,23 @@ public partial class InterfaceWizardPage
 
     private List<EsbInterfaceConfig> _allInterfaces = [];
     private EsbInterfaceConfig? _selectedConfig;
-    private int? _selectedConfigId;
+    private EsbInterfaceConfig? _switchingInterfaceConfig;
+    private EsbInterfaceConfig? _pendingInterfaceConfig;
+    private bool _interfacePickerVisible;
+    private bool _interfaceSwitching;
+    private bool _showEnabledInterfaces = true;
+    private string _interfaceSearchText = "";
+    private int _interfacePickerActiveIndex = -1;
+    private string? _interfaceSwitchError;
+    private bool _unsavedDialogVisible;
+    private bool _unsavedActionBusy;
+    private string? _pendingNavigationTarget;
+    private bool _allowNavigationOnce;
+    private string _savedJsonSnapshot = "";
+    private string _savedWorkbenchSnapshot = "";
     private JToken? _parsedJson;
     private string _editableJson = "";
+    private string _loadedSampleJson = "";
     private string? _jsonValidationError;
     private bool _jsonEditorExpanded;
     private bool _projectDocumentsVisible;
@@ -84,6 +101,7 @@ public partial class InterfaceWizardPage
     private bool _saveJsonConfirmVisible;
     private string? _defaultLicenseCode;
     private bool _sampleAnalysisLoading;
+    private int _sampleAnalysisVersion;
     private string? _sampleAnalysisError;
     private List<string> _sampleMatchedTranCodes = [];
     private bool _sampleSelectedInterfaceMatched;
@@ -92,6 +110,7 @@ public partial class InterfaceWizardPage
 
     private readonly Dictionary<string, QuestionInfo> _questionLookup = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<Guid, string> _cardNameLookup = [];
+    private readonly Dictionary<Guid, CardInfo> _formCardLookup = [];
     private readonly Dictionary<Guid, string?> _subCardArrayPathOverrides = [];
     private readonly Dictionary<Guid, List<EsbFilterRule>> _subCardFilterRulesByCardId = [];
     private readonly HashSet<Guid> _expandedSubCardFilterCards = [];
@@ -155,6 +174,8 @@ public partial class InterfaceWizardPage
         public MappingTarget MappingTarget { get; set; }
         public Guid? CardId { get; set; }
         public string? CardName { get; set; }
+        public Guid? ParentCardId { get; set; }
+        public string? ParentCardName { get; set; }
         public Guid? ScopeCardId { get; set; }
         public string? ScopeCardName { get; set; }
     }
@@ -482,6 +503,26 @@ public partial class InterfaceWizardPage
             return SubCardPathHelper.ResolveFirstToken(mainRecordContext, TrimMainRecordScopePrefix(sourcePath));
         }
 
+        if (SubCardPathHelper.IsParentRecordScopedPath(sourcePath) && cardId.HasValue)
+        {
+            var card = FindAnyCardNode(cardId.Value);
+            var parentSubCardId = card?.ParentSubCardId;
+            if (!parentSubCardId.HasValue)
+            {
+                return null;
+            }
+
+            var parentArrayPath = GetSubCardArrayPath(parentSubCardId.Value);
+            var parentEffectivePath = ExpandSubCardArrayPathToRoot(parentSubCardId, parentArrayPath);
+            var parentContext = SubCardPathHelper.ResolveFirstSubCardContext(_parsedJson, parentEffectivePath);
+            var parentRelativePath = SubCardPathHelper.TrimParentRecordScopePrefix(sourcePath);
+            return parentContext == null
+                ? null
+                : string.IsNullOrWhiteSpace(parentRelativePath)
+                    ? parentContext
+                    : SubCardPathHelper.ResolveFirstToken(parentContext, parentRelativePath);
+        }
+
         var effectiveArrayPath = GetEffectiveArrayPath(cardId, arrayPath, sourcePath);
         if (!string.IsNullOrWhiteSpace(effectiveArrayPath))
         {
@@ -529,6 +570,11 @@ public partial class InterfaceWizardPage
 
     private string GetSubCardArrayPathHelperText()
     {
+        if (CurrentSubCardGroupCard?.ParentSubCardId.HasValue == true)
+        {
+            return "当前为嵌套子卡。这里填写父级当前行内的相对容器路径；与父级共用同一对象时填写 $parent。";
+        }
+
         return string.IsNullOrWhiteSpace(GetMainRecordArrayPath())
             ? "子卡共用容器路径。字段默认填写数组项内相对路径；如需取根级字段，请以 $. 开头。"
             : "子卡共用容器路径。已配置主记录路径时，这里优先填写主记录内相对路径；如需取根级容器，请以 $. 开头。";
@@ -580,8 +626,75 @@ public partial class InterfaceWizardPage
             : normalized;
     }
 
+    private string? NormalizeEditableSubCardArrayPathValue(Guid cardId, string? value)
+    {
+        var normalized = NormalizeEditableSubCardArrayPathValue(value);
+        if (string.IsNullOrWhiteSpace(normalized)
+            || SubCardPathHelper.IsAbsoluteJsonPath(normalized)
+            || SubCardPathHelper.IsMainRecordContainerPath(normalized)
+            || SubCardPathHelper.IsRootContainerPath(normalized)
+            || SubCardPathHelper.IsParentRecordContainerPath(normalized))
+        {
+            return normalized;
+        }
+
+        var parentSubCardId = FindAnyCardNode(cardId)?.ParentSubCardId;
+        if (!parentSubCardId.HasValue)
+        {
+            return normalized;
+        }
+
+        var parentArrayPath = NormalizeEditableSubCardArrayPathValue(GetSubCardArrayPath(parentSubCardId.Value));
+        if (string.IsNullOrWhiteSpace(parentArrayPath))
+        {
+            return normalized;
+        }
+
+        if (SubCardPathHelper.PathsEqual(normalized, parentArrayPath))
+        {
+            return SubCardPathHelper.ParentRecordContainerPath;
+        }
+
+        return SubCardPathHelper.TryBuildRelativePath(normalized, parentArrayPath, out var relativePath)
+               && !string.IsNullOrWhiteSpace(relativePath)
+            ? SubCardPathHelper.NormalizeArrayContainerPath(relativePath)
+            : normalized;
+    }
+
     private string? ExpandSubCardArrayPathToRoot(string? arrayPath)
         => SubCardPathHelper.ExpandArrayPathToRoot(_parsedJson, NormalizeEditableSubCardArrayPathValue(arrayPath), GetMainRecordArrayPath());
+
+    private string? ExpandSubCardArrayPathToRoot(Guid? cardId, string? arrayPath, HashSet<Guid>? visited = null)
+    {
+        if (!cardId.HasValue)
+        {
+            return ExpandSubCardArrayPathToRoot(arrayPath);
+        }
+
+        visited ??= [];
+        if (!visited.Add(cardId.Value))
+        {
+            return ExpandSubCardArrayPathToRoot(arrayPath);
+        }
+
+        var card = FindAnyCardNode(cardId.Value);
+        var parentSubCardId = card?.ParentSubCardId;
+        if (!parentSubCardId.HasValue)
+        {
+            return ExpandSubCardArrayPathToRoot(arrayPath);
+        }
+
+        var parentArrayPath = GetSubCardArrayPath(parentSubCardId.Value);
+        var parentEffectivePath = ExpandSubCardArrayPathToRoot(
+            parentSubCardId,
+            parentArrayPath,
+            visited);
+        return SubCardPathHelper.ExpandNestedArrayPathToRoot(
+            _parsedJson,
+            NormalizeEditableSubCardArrayPathValue(arrayPath),
+            parentEffectivePath,
+            GetMainRecordArrayPath());
+    }
 
     private string NormalizeEditableSourcePath(MappingTarget mappingTarget, Guid? cardId, string? arrayPath, string? value)
     {
@@ -642,7 +755,7 @@ public partial class InterfaceWizardPage
         _existingMappingCount > 0 || _existingInterfaceRuleCount > 0 || _existingSubCardFilterRuleCount > 0;
 
     private bool CanEditInterfaceFilters =>
-        _selectedConfig != null && !string.IsNullOrWhiteSpace(_selectedConfig.SampleJson);
+        _selectedConfig != null && !string.IsNullOrWhiteSpace(_loadedSampleJson);
 
     private int EnabledInterfaceFilterCount =>
         _filterRules.Count(r => r.IsEnabled);
@@ -695,9 +808,51 @@ public partial class InterfaceWizardPage
 
     private bool _canSaveWorkbench =>
         !_saving
+        && !_interfaceSwitching
         && _selectedConfig != null
         && _parsedJson != null
         && (HasCurrentWorkbenchContent || HasPersistedWorkbenchContent);
+
+    private List<EsbInterfaceConfig> VisibleInterfaceOptions
+    {
+        get
+        {
+            IEnumerable<EsbInterfaceConfig> items = _allInterfaces
+                .Where(item => item.IsEnabled == _showEnabledInterfaces);
+
+            if (!string.IsNullOrWhiteSpace(_interfaceSearchText))
+            {
+                var keyword = _interfaceSearchText.Trim();
+                items = items.Where(item =>
+                    item.TranCode.Contains(keyword, StringComparison.OrdinalIgnoreCase)
+                    || (item.TranName?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false));
+            }
+
+            return items
+                .OrderBy(item => item.SortOrder)
+                .ThenBy(item => item.TranCode)
+                .ToList();
+        }
+    }
+
+    private bool IsJsonDirty =>
+        _selectedConfig != null
+        && !string.Equals(_editableJson, _savedJsonSnapshot, StringComparison.Ordinal);
+
+    private bool IsWorkbenchDirty =>
+        _selectedConfig != null
+        && !string.Equals(BuildWorkbenchSnapshot(), _savedWorkbenchSnapshot, StringComparison.Ordinal);
+
+    private bool HasUnsavedChanges => IsJsonDirty || IsWorkbenchDirty;
+
+    private bool CanSavePendingChanges =>
+        _selectedConfig != null
+        && _parsedJson != null
+        && (!IsWorkbenchDirty || _canSaveWorkbench);
+
+    private string PendingActionTitle => _pendingInterfaceConfig != null ? "切换接口" : "离开工作台";
+    private string PendingSaveActionText => _pendingInterfaceConfig != null ? "保存并切换" : "保存并离开";
+    private string PendingDiscardActionText => _pendingInterfaceConfig != null ? "放弃并切换" : "放弃并离开";
 
     protected override async Task OnPageInitializedAsync()
     {
@@ -717,11 +872,15 @@ public partial class InterfaceWizardPage
 
         if (!string.IsNullOrEmpty(QueryTranCode))
         {
-            var cfg = _allInterfaces.FirstOrDefault(c => c.TranCode == QueryTranCode);
+            var cfg = _allInterfaces.FirstOrDefault(c =>
+                string.Equals(c.TranCode, QueryTranCode, StringComparison.OrdinalIgnoreCase));
             if (cfg != null)
             {
-                _selectedConfigId = cfg.Id;
                 await LoadInterfaceData(cfg);
+            }
+            else
+            {
+                inj_snackbar.Add($"未找到接口 {QueryTranCode}，请重新选择。", Severity.Warning);
             }
         }
     }
@@ -758,60 +917,186 @@ public partial class InterfaceWizardPage
             return;
         }
 
+        var persistedSampleJson = cfg.SampleJson ?? "";
         cfg.SampleJson = sampleToken.ToString(Newtonsoft.Json.Formatting.Indented);
-        _selectedConfigId = cfg.Id;
-        await LoadInterfaceData(cfg);
+        try
+        {
+            await LoadInterfaceData(cfg);
+        }
+        finally
+        {
+            cfg.SampleJson = persistedSampleJson;
+        }
+        _savedJsonSnapshot = persistedSampleJson;
         inj_snackbar.Add("已使用当前消息 RawJson 作为工作台样例，点击“保存到数据库”才会覆盖接口模板。", Severity.Info);
     }
 
-    private Task<IEnumerable<EsbInterfaceConfig>> SearchInterfaces(string? search, CancellationToken _)
+    private void OpenInterfacePicker()
     {
-        IEnumerable<EsbInterfaceConfig> items = _allInterfaces;
-        if (!string.IsNullOrWhiteSpace(search))
+        if (_interfaceSwitching || _saving)
         {
-            var keyword = search.Trim();
-            items = items.Where(c =>
-                c.TranCode.Contains(keyword, StringComparison.OrdinalIgnoreCase)
-                || (c.TranName?.Contains(keyword, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-
-        return Task.FromResult(items.Take(80));
-    }
-
-    private static string FormatInterfaceOption(EsbInterfaceConfig? cfg) =>
-        cfg == null ? "" : $"{cfg.TranCode} - {cfg.TranName}";
-
-    private async Task OnInterfaceSelected(EsbInterfaceConfig? cfg)
-    {
-        _selectedConfigId = cfg?.Id;
-        if (cfg == null)
-        {
-            _selectedConfig = null;
-            _editableJson = "";
-            _parsedJson = null;
-            _jsonValidationError = null;
-            _existingMappings = [];
-            _existingMappingCount = 0;
-            _filterRules = [];
-            _existingInterfaceRuleCount = 0;
-            _existingSubCardFilterRuleCount = 0;
-            ResetSampleAnalysis();
-            ResetWorkbenchState();
             return;
         }
 
-        await LoadInterfaceData(cfg);
+        _interfaceSearchText = "";
+        _interfaceSwitchError = null;
+        _showEnabledInterfaces = true;
+        _interfacePickerActiveIndex = VisibleInterfaceOptions.FindIndex(item => item.Id == _selectedConfig?.Id);
+        _interfacePickerVisible = true;
+    }
+
+    private void OnInterfacePickerVisibleChanged(bool visible)
+    {
+        _interfacePickerVisible = visible;
+        if (!visible)
+        {
+            _interfaceSearchText = "";
+            _interfaceSwitchError = null;
+            _interfacePickerActiveIndex = -1;
+        }
+    }
+
+    private void SelectInterfaceTab(bool showEnabled)
+    {
+        _showEnabledInterfaces = showEnabled;
+        _interfaceSwitchError = null;
+        _interfacePickerActiveIndex = -1;
+    }
+
+    private Variant GetInterfaceTabVariant(bool enabled) =>
+        _showEnabledInterfaces == enabled ? Variant.Filled : Variant.Text;
+
+    private string GetInterfacePickerItemClass(bool selected, int index)
+    {
+        var classes = "interface-picker-item";
+        if (selected)
+        {
+            classes += " interface-picker-item-selected";
+        }
+
+        if (index == _interfacePickerActiveIndex)
+        {
+            classes += " interface-picker-item-active";
+        }
+
+        return classes;
+    }
+
+    private void OnInterfaceSearchChanged(string value)
+    {
+        _interfaceSearchText = value;
+        _interfacePickerActiveIndex = -1;
+    }
+
+    private async Task HandleInterfacePickerKeyDown(KeyboardEventArgs args)
+    {
+        var options = VisibleInterfaceOptions;
+        if (args.Key == "Escape")
+        {
+            _interfacePickerVisible = false;
+            return;
+        }
+
+        if (options.Count == 0)
+        {
+            return;
+        }
+
+        if (args.Key == "ArrowDown")
+        {
+            _interfacePickerActiveIndex = (_interfacePickerActiveIndex + 1 + options.Count) % options.Count;
+            return;
+        }
+
+        if (args.Key == "ArrowUp")
+        {
+            _interfacePickerActiveIndex = (_interfacePickerActiveIndex - 1 + options.Count) % options.Count;
+            return;
+        }
+
+        if (args.Key == "Enter")
+        {
+            var index = _interfacePickerActiveIndex < 0 ? 0 : _interfacePickerActiveIndex;
+            await RequestInterfaceSelection(options[index]);
+        }
+    }
+
+    private async Task RequestInterfaceSelection(EsbInterfaceConfig cfg)
+    {
+        if (_interfaceSwitching)
+        {
+            return;
+        }
+
+        _interfacePickerVisible = false;
+        if (_selectedConfig?.Id == cfg.Id)
+        {
+            return;
+        }
+
+        if (HasUnsavedChanges)
+        {
+            _pendingInterfaceConfig = cfg;
+            _pendingNavigationTarget = null;
+            _unsavedDialogVisible = true;
+            return;
+        }
+
+        await SwitchInterfaceAsync(cfg);
+    }
+
+    private async Task SwitchInterfaceAsync(EsbInterfaceConfig cfg)
+    {
+        _interfaceSwitching = true;
+        _switchingInterfaceConfig = cfg;
+        _interfaceSwitchError = null;
+        var loaded = false;
+
+        try
+        {
+            await LoadInterfaceData(cfg);
+            loaded = true;
+        }
+        catch (Exception ex)
+        {
+            _interfaceSwitchError = $"接口加载失败：{ex.Message}";
+            _showEnabledInterfaces = cfg.IsEnabled;
+            _interfacePickerVisible = true;
+            inj_snackbar.Add(_interfaceSwitchError, Severity.Error);
+        }
+        finally
+        {
+            _switchingInterfaceConfig = null;
+            _interfaceSwitching = false;
+        }
+
+        if (!loaded)
+        {
+            return;
+        }
+
+        try
+        {
+            UpdateSelectedInterfaceUrl(cfg.TranCode);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"接口已切换，但地址更新失败：{ex.Message}", Severity.Warning);
+        }
+    }
+
+    private void UpdateSelectedInterfaceUrl(string tranCode)
+    {
+        var uri = inj_navigationManager.GetUriWithQueryParameters(new Dictionary<string, object?>
+        {
+            ["tranCode"] = tranCode,
+            ["messageId"] = null,
+        });
+        inj_navigationManager.NavigateTo(uri, replace: true);
     }
 
     private async Task LoadInterfaceData(EsbInterfaceConfig cfg)
     {
-        _selectedConfig = cfg;
-        _editableJson = cfg.SampleJson ?? "";
-        _jsonValidationError = null;
-        _jsonEditorExpanded = string.IsNullOrWhiteSpace(_editableJson);
-        ResetWorkbenchState();
-        ValidateJson(_editableJson);
-
         await using var db = await ContextFactory.CreateDbContextAsync();
 
         var allMappings = await db.EsbFieldMappings
@@ -819,7 +1104,7 @@ public partial class InterfaceWizardPage
             .OrderBy(m => m.SortOrder)
             .ToListAsync();
 
-        _existingMappings = allMappings
+        var existingMappings = allMappings
             .Where(m => !EsbFieldMapping.IsSubCardFilterMapping(m))
             .ToList();
 
@@ -839,12 +1124,21 @@ public partial class InterfaceWizardPage
                 .ToDictionary(g => g.Key, g => g.ToList());
         }
 
-        _filterRules = await db.EsbFilterRules
+        var filterRules = await db.EsbFilterRules
             .Where(r => r.TranCode == cfg.TranCode && r.MappingId == null && r.IntegrationProjectCode == cfg.IntegrationProjectCode)
             .OrderBy(r => r.RuleGroup)
             .ThenBy(r => r.SortOrder)
             .ToListAsync();
 
+        _selectedConfig = cfg;
+        _loadedSampleJson = cfg.SampleJson ?? "";
+        _editableJson = _loadedSampleJson;
+        _jsonValidationError = null;
+        _jsonEditorExpanded = string.IsNullOrWhiteSpace(_editableJson);
+        ResetWorkbenchState();
+        ResetSampleAnalysis();
+        _existingMappings = existingMappings;
+        _filterRules = filterRules;
         _existingMappingCount = _existingMappings.Count;
         _existingInterfaceRuleCount = _filterRules.Count;
         _isRebuildMode = _existingMappingCount == 0;
@@ -852,6 +1146,9 @@ public partial class InterfaceWizardPage
         PreloadSubCardFilterRules(allMappings, mappingRuleMap);
         _existingSubCardFilterRuleCount = _subCardFilterRulesByCardId.Values.Sum(rules => rules.Count);
         PreloadExistingMappings(mappingRuleMap);
+        ValidateJson(_editableJson);
+        _ = BuildMappingsForSave();
+        CaptureSavedState();
     }
 
     private void ResetWorkbenchState()
@@ -898,6 +1195,187 @@ public partial class InterfaceWizardPage
         _selectedQuestionField = null;
     }
 
+    private string BuildWorkbenchSnapshot()
+    {
+        var snapshot = new
+        {
+            Mappings = _mappingRows.Select((row, index) => new
+            {
+                Index = index,
+                row.MappingTarget,
+                row.SourcePath,
+                row.TargetField,
+                row.DictCode,
+                DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(row.DictMatchMode),
+                row.DefaultValue,
+                row.ValueExpression,
+                row.CardId,
+                row.ArrayPath,
+                row.IsRequired,
+                row.IsEnabled,
+                Rules = BuildFilterRuleSnapshot(row.FilterRules),
+            }),
+            InterfaceRules = BuildFilterRuleSnapshot(_filterRules),
+            SubCardRules = _subCardFilterRulesByCardId
+                .OrderBy(pair => pair.Key)
+                .Select(pair => new
+                {
+                    CardId = pair.Key,
+                    ArrayPath = GetSubCardArrayPath(pair.Key),
+                    Rules = BuildFilterRuleSnapshot(pair.Value),
+                }),
+        };
+
+        return JsonConvert.SerializeObject(snapshot);
+    }
+
+    private static IEnumerable<object> BuildFilterRuleSnapshot(IEnumerable<EsbFilterRule> rules) =>
+        rules.Select((rule, index) => (object)new
+        {
+            Index = index,
+            rule.SourcePath,
+            rule.Operator,
+            rule.CompareValue,
+            rule.RuleGroup,
+            rule.FilterScope,
+            rule.IsEnabled,
+            rule.Description,
+        });
+
+    private void CaptureSavedState()
+    {
+        _savedJsonSnapshot = _editableJson;
+        CaptureSavedWorkbenchState();
+    }
+
+    private void CaptureSavedWorkbenchState() =>
+        _savedWorkbenchSnapshot = BuildWorkbenchSnapshot();
+
+    private void CaptureSavedJsonState() =>
+        _savedJsonSnapshot = _editableJson;
+
+    private Task HandleBeforeInternalNavigation(LocationChangingContext context)
+    {
+        if (_allowNavigationOnce)
+        {
+            _allowNavigationOnce = false;
+            return Task.CompletedTask;
+        }
+
+        if (!HasUnsavedChanges)
+        {
+            return Task.CompletedTask;
+        }
+
+        context.PreventNavigation();
+        if (_unsavedDialogVisible)
+        {
+            return Task.CompletedTask;
+        }
+
+        _pendingNavigationTarget = context.TargetLocation;
+        _pendingInterfaceConfig = null;
+        _unsavedDialogVisible = true;
+        return Task.CompletedTask;
+    }
+
+    private void OnUnsavedDialogVisibleChanged(bool visible)
+    {
+        _unsavedDialogVisible = visible;
+        if (!visible && !_unsavedActionBusy)
+        {
+            ClearPendingAction();
+        }
+    }
+
+    private void CancelPendingAction()
+    {
+        _unsavedDialogVisible = false;
+        ClearPendingAction();
+    }
+
+    private async Task SaveAndContinuePendingAction()
+    {
+        if (_unsavedActionBusy)
+        {
+            return;
+        }
+
+        _unsavedActionBusy = true;
+        try
+        {
+            if (!await SavePendingChangesAsync())
+            {
+                return;
+            }
+
+            await ExecutePendingActionAsync();
+        }
+        finally
+        {
+            _unsavedActionBusy = false;
+        }
+    }
+
+    private async Task DiscardAndContinuePendingAction()
+    {
+        if (_unsavedActionBusy)
+        {
+            return;
+        }
+
+        _unsavedActionBusy = true;
+        try
+        {
+            await ExecutePendingActionAsync();
+        }
+        finally
+        {
+            _unsavedActionBusy = false;
+        }
+    }
+
+    private async Task<bool> SavePendingChangesAsync()
+    {
+        if (IsWorkbenchDirty && !await SaveAllAsync())
+        {
+            return false;
+        }
+
+        if (IsJsonDirty && !await SaveJsonToDatabaseCoreAsync())
+        {
+            return false;
+        }
+
+        return !HasUnsavedChanges;
+    }
+
+    private async Task ExecutePendingActionAsync()
+    {
+        var targetInterface = _pendingInterfaceConfig;
+        var targetLocation = _pendingNavigationTarget;
+        _unsavedDialogVisible = false;
+        ClearPendingAction();
+
+        if (targetInterface != null)
+        {
+            await SwitchInterfaceAsync(targetInterface);
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(targetLocation))
+        {
+            _allowNavigationOnce = true;
+            inj_navigationManager.NavigateTo(targetLocation);
+        }
+    }
+
+    private void ClearPendingAction()
+    {
+        _pendingInterfaceConfig = null;
+        _pendingNavigationTarget = null;
+    }
+
     private Task OnProjectDocumentsVisibleChanged(bool visible)
     {
         _projectDocumentsVisible = visible;
@@ -906,6 +1384,7 @@ public partial class InterfaceWizardPage
 
     private void ResetSampleAnalysis()
     {
+        _sampleAnalysisVersion++;
         _sampleAnalysisLoading = false;
         _sampleAnalysisError = null;
         _sampleMatchedTranCodes = [];
@@ -977,6 +1456,9 @@ public partial class InterfaceWizardPage
             return;
         }
 
+        var version = ++_sampleAnalysisVersion;
+        var selectedConfig = _selectedConfig;
+        var parsedJson = _parsedJson;
         _sampleAnalysisLoading = true;
         _sampleAnalysisError = null;
         _sampleMatchedTranCodes = [];
@@ -986,33 +1468,49 @@ public partial class InterfaceWizardPage
 
         try
         {
-            var matches = await InterfaceRecognitionService.ResolveAsync(_parsedJson, false);
+            var matches = await InterfaceRecognitionService.ResolveAsync(parsedJson, false);
             var currentProjectTranCodes = _allInterfaces
                 .Select(i => i.TranCode)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            _sampleMatchedTranCodes = matches
+            var matchedTranCodes = matches
                 .Select(m => m.Config.TranCode)
                 .Where(currentProjectTranCodes.Contains)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(code => code, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            var sourceMessageId = IdempotentKeyService.ResolveSourceMessageId(parsedJson, selectedConfig);
+            var idempotentKey = await IdempotentKeyService.BuildIdempotentKeyAsync(parsedJson, selectedConfig, false);
 
-            _sampleSelectedInterfaceMatched = _sampleMatchedTranCodes
-                .Contains(_selectedConfig.TranCode, StringComparer.OrdinalIgnoreCase);
+            if (!IsCurrentSampleAnalysis(version, selectedConfig.Id))
+            {
+                return;
+            }
 
-            _sampleSourceMessageId = IdempotentKeyService.ResolveSourceMessageId(_parsedJson, _selectedConfig);
-            _sampleIdempotentKey = await IdempotentKeyService.BuildIdempotentKeyAsync(_parsedJson, _selectedConfig, false);
+            _sampleMatchedTranCodes = matchedTranCodes;
+            _sampleSelectedInterfaceMatched = matchedTranCodes
+                .Contains(selectedConfig.TranCode, StringComparer.OrdinalIgnoreCase);
+            _sampleSourceMessageId = sourceMessageId;
+            _sampleIdempotentKey = idempotentKey;
         }
         catch (Exception ex)
         {
-            _sampleAnalysisError = ex.Message;
+            if (IsCurrentSampleAnalysis(version, selectedConfig.Id))
+            {
+                _sampleAnalysisError = ex.Message;
+            }
         }
         finally
         {
-            _sampleAnalysisLoading = false;
-            await InvokeAsync(StateHasChanged);
+            if (IsCurrentSampleAnalysis(version, selectedConfig.Id))
+            {
+                _sampleAnalysisLoading = false;
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
+
+    private bool IsCurrentSampleAnalysis(int version, int interfaceId) =>
+        version == _sampleAnalysisVersion && _selectedConfig?.Id == interfaceId;
 
     private void FormatJson()
     {
@@ -1026,7 +1524,7 @@ public partial class InterfaceWizardPage
     {
         if (_selectedConfig != null)
         {
-            _editableJson = _selectedConfig.SampleJson ?? "";
+            _editableJson = _loadedSampleJson;
             ValidateJson(_editableJson);
         }
     }
@@ -1039,9 +1537,15 @@ public partial class InterfaceWizardPage
     private async Task ConfirmSaveJsonToDatabase()
     {
         _saveJsonConfirmVisible = false;
+        await SaveJsonToDatabaseCoreAsync();
+    }
+
+    private async Task<bool> SaveJsonToDatabaseCoreAsync()
+    {
         if (_selectedConfig == null || _parsedJson == null)
         {
-            return;
+            inj_snackbar.Add("当前 JSON 无效，无法保存。", Severity.Warning);
+            return false;
         }
 
         try
@@ -1053,12 +1557,19 @@ public partial class InterfaceWizardPage
                 entity.SampleJson = _editableJson;
                 await db.SaveChangesAsync();
                 _selectedConfig.SampleJson = _editableJson;
+                _loadedSampleJson = _editableJson;
+                CaptureSavedJsonState();
                 inj_snackbar.Add("JSON 已保存到数据库", Severity.Success);
+                return true;
             }
+
+            inj_snackbar.Add("当前接口不存在，JSON 未保存。", Severity.Error);
+            return false;
         }
         catch (Exception ex)
         {
             inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+            return false;
         }
     }
 
@@ -1124,6 +1635,7 @@ public partial class InterfaceWizardPage
             }
 
             _formTreeTabs = [];
+            _formCardLookup.Clear();
             foreach (var (eventType, formSetId) in eventTypes)
             {
                 var questionDict = await BioCoreService.GetFormQuestionDictByFormSetAsync(formSetId);
@@ -1131,6 +1643,10 @@ public partial class InterfaceWizardPage
                     .Select(FormBrowserHelper.BuildQuestionInfo)
                     .ToList();
                 var cards = await BioCoreService.GetAllCardListByFormSetAsync(formSetId);
+                foreach (var (cardId, cardInfo) in cards)
+                {
+                    _formCardLookup[cardId] = cardInfo;
+                }
                 var formInfo = await BioCoreService.GetFormListByFormSetAsync(formSetId);
                 var forms = FormBrowserHelper.BuildTree(questions, cards, formInfo);
                 _formTreeTabs.Add((eventType, forms));
@@ -1576,7 +2092,8 @@ public partial class InterfaceWizardPage
     private IEnumerable<TargetFieldDescriptor> EnumerateQuestionFieldsForNode(
         CardNode card,
         CardNode? subCardAncestor,
-        bool includeDescendants)
+        bool includeDescendants,
+        bool stopAtNestedSubCard = false)
     {
         var isSubCard = IsSubCardNode(card);
         var currentSubCard = isSubCard ? card : subCardAncestor;
@@ -1594,7 +2111,16 @@ public partial class InterfaceWizardPage
                 continue;
             }
 
-            foreach (var childField in EnumerateQuestionFieldsForNode(child.Card, currentSubCard, includeDescendants: true))
+            if (stopAtNestedSubCard && IsSubCardNode(child.Card))
+            {
+                continue;
+            }
+
+            foreach (var childField in EnumerateQuestionFieldsForNode(
+                         child.Card,
+                         currentSubCard,
+                         includeDescendants: true,
+                         stopAtNestedSubCard))
             {
                 yield return childField;
             }
@@ -1616,6 +2142,8 @@ public partial class InterfaceWizardPage
             MappingTarget = mappingTarget,
             CardId = mappingTarget == MappingTarget.SubCard ? subCardContext?.CardId : null,
             CardName = mappingTarget == MappingTarget.SubCard ? subCardContext?.Name : null,
+            ParentCardId = mappingTarget == MappingTarget.SubCard ? subCardContext?.ParentSubCardId : null,
+            ParentCardName = mappingTarget == MappingTarget.SubCard ? subCardContext?.ParentSubCardName : null,
             ScopeCardId = ownerCard.CardId,
             ScopeCardName = ownerCard.Name,
         };
@@ -2599,7 +3127,9 @@ public partial class InterfaceWizardPage
 
     private IEnumerable<TargetFieldDescriptor> GetCardStatusFields(CardNode card, CardNode? subCardAncestor)
     {
-        return EnumerateQuestionFieldsForNode(card, subCardAncestor, includeDescendants: false);
+        return IsSubCardNode(card)
+            ? EnumerateQuestionFieldsForNode(card, subCardAncestor, includeDescendants: true, stopAtNestedSubCard: true)
+            : EnumerateQuestionFieldsForNode(card, subCardAncestor, includeDescendants: false);
     }
 
     private bool IsQuestionTreeQuestionVisible(QuestionInfo question, CardNode ownerCard, CardNode? subCardContext)
@@ -3097,6 +3627,7 @@ public partial class InterfaceWizardPage
             return false;
         }
 
+        var cardNode = row.CardId.HasValue ? FindAnyCardNode(row.CardId.Value) : null;
         targetField = new TargetFieldInfo
         {
             FieldId = row.TargetField,
@@ -3106,6 +3637,8 @@ public partial class InterfaceWizardPage
             SemanticHint = ResolveTargetFieldSemanticHint(row.MappingTarget, row.TargetField),
             CardId = row.MappingTarget == MappingTarget.SubCard ? row.CardId : null,
             CardName = row.MappingTarget == MappingTarget.SubCard ? row.CardName : null,
+            ParentCardId = row.MappingTarget == MappingTarget.SubCard ? cardNode?.ParentSubCardId : null,
+            ParentCardName = row.MappingTarget == MappingTarget.SubCard ? cardNode?.ParentSubCardName : null,
         };
 
         return true;
@@ -3130,6 +3663,8 @@ public partial class InterfaceWizardPage
                 : field.SemanticHint,
             CardId = field.MappingTarget == MappingTarget.SubCard ? field.CardId : null,
             CardName = field.MappingTarget == MappingTarget.SubCard ? field.CardName : null,
+            ParentCardId = field.MappingTarget == MappingTarget.SubCard ? field.ParentCardId : null,
+            ParentCardName = field.MappingTarget == MappingTarget.SubCard ? field.ParentCardName : null,
         };
 
         return true;
@@ -3182,10 +3717,29 @@ public partial class InterfaceWizardPage
                     : f.SemanticHint,
                 CardId = f.CardId,
                 CardName = f.CardName,
+                ParentCardId = f.ParentCardId,
+                ParentCardName = f.ParentCardName,
             })
             .ToList();
 
         return Task.FromResult(fields);
+    }
+
+    private CardNode? FindAnyCardNode(Guid cardId)
+    {
+        foreach (var (_, forms) in _formTreeTabs)
+        {
+            foreach (var form in forms)
+            {
+                var card = FindCardNode(form.Cards, cardId);
+                if (card != null)
+                {
+                    return card;
+                }
+            }
+        }
+
+        return null;
     }
 
     private IEnumerable<TargetFieldDescriptor> GetCurrentQuestionScopeTargetFields()
@@ -3196,7 +3750,13 @@ public partial class InterfaceWizardPage
         }
 
         var subCardAncestor = FindSubCardAncestor(SelectedScopeCard, ActiveForm.Cards);
-        return EnumerateQuestionFieldsForNode(SelectedScopeCard, subCardAncestor, includeDescendants: false);
+        return IsSubCardNode(SelectedScopeCard)
+            ? EnumerateQuestionFieldsForNode(
+                SelectedScopeCard,
+                subCardAncestor,
+                includeDescendants: true,
+                stopAtNestedSubCard: true)
+            : EnumerateQuestionFieldsForNode(SelectedScopeCard, subCardAncestor, includeDescendants: false);
     }
 
     private CardNode? GetCurrentSubCardGroupCard()
@@ -3227,7 +3787,11 @@ public partial class InterfaceWizardPage
             return Enumerable.Empty<TargetFieldDescriptor>();
         }
 
-        return EnumerateQuestionFieldsForNode(subCard, subCard, includeDescendants: false);
+        return EnumerateQuestionFieldsForNode(
+            subCard,
+            subCard,
+            includeDescendants: true,
+            stopAtNestedSubCard: true);
     }
 
     private List<SuggestionGroupViewModel> GetCurrentSuggestionGroups()
@@ -4000,7 +4564,7 @@ public partial class InterfaceWizardPage
     {
         if (!string.IsNullOrWhiteSpace(arrayPath))
         {
-            return ExpandSubCardArrayPathToRoot(arrayPath);
+            return ExpandSubCardArrayPathToRoot(cardId, arrayPath);
         }
 
         if (TryInferSubCardArrayPathFromSourcePath(sourcePath, out var parsedArrayPath))
@@ -4022,7 +4586,9 @@ public partial class InterfaceWizardPage
             }
         }
 
-        return cardId.HasValue ? ExpandSubCardArrayPathToRoot(GetSubCardArrayPath(cardId.Value)) : null;
+        return cardId.HasValue
+            ? ExpandSubCardArrayPathToRoot(cardId, GetSubCardArrayPath(cardId.Value))
+            : null;
     }
 
     private string? ResolveSuggestionEffectiveArrayPath(LlmSuggestionItem suggestion)
@@ -4065,9 +4631,14 @@ public partial class InterfaceWizardPage
         && HasValueSource(row)
         && (!row.CardId.HasValue || string.IsNullOrWhiteSpace(GetPendingSubCardArrayPath(row)));
 
-    private bool IsSubCardArrayPathValid(string? arrayPath)
+    private bool IsSubCardArrayPathValid(string? arrayPath, Guid? cardId = null)
     {
-        var effectiveArrayPath = ExpandSubCardArrayPathToRoot(arrayPath);
+        if (SubCardPathHelper.IsParentRecordContainerPath(arrayPath))
+        {
+            return cardId.HasValue && FindAnyCardNode(cardId.Value)?.ParentSubCardId.HasValue == true;
+        }
+
+        var effectiveArrayPath = ExpandSubCardArrayPathToRoot(cardId, arrayPath);
         if (string.IsNullOrWhiteSpace(effectiveArrayPath) || _parsedJson == null)
         {
             return false;
@@ -4085,7 +4656,7 @@ public partial class InterfaceWizardPage
         }
 
         var pendingArrayPath = GetPendingSubCardArrayPath(row);
-        return !string.IsNullOrWhiteSpace(pendingArrayPath) && !IsSubCardArrayPathValid(pendingArrayPath);
+        return !string.IsNullOrWhiteSpace(pendingArrayPath) && !IsSubCardArrayPathValid(pendingArrayPath, row.CardId);
     }
 
     private bool HasInvalidSubCardArrayPath(Guid cardId)
@@ -4096,7 +4667,7 @@ public partial class InterfaceWizardPage
         }
 
         return !string.IsNullOrWhiteSpace(GetSubCardArrayPath(cardId))
-            && !IsSubCardArrayPathValid(GetSubCardArrayPath(cardId));
+            && !IsSubCardArrayPathValid(GetSubCardArrayPath(cardId), cardId);
     }
 
     private string GetSubCardArrayPathIssueText(Guid cardId)
@@ -4112,7 +4683,15 @@ public partial class InterfaceWizardPage
             return "容器路径待校验";
         }
 
-        var token = SubCardPathHelper.ResolveSubCardContainer(_parsedJson, ExpandSubCardArrayPathToRoot(arrayPath));
+        if (SubCardPathHelper.IsParentRecordContainerPath(arrayPath)
+            && FindAnyCardNode(cardId)?.ParentSubCardId.HasValue == true)
+        {
+            return "使用父级当前行";
+        }
+
+        var token = SubCardPathHelper.ResolveSubCardContainer(
+            _parsedJson,
+            ExpandSubCardArrayPathToRoot(cardId, arrayPath));
         return token switch
         {
             null => "容器路径未匹配",
@@ -4909,7 +5488,7 @@ public partial class InterfaceWizardPage
 
     private void SetSubCardArrayPath(Guid cardId, string? value)
     {
-        var normalized = NormalizeEditableSubCardArrayPathValue(value);
+        var normalized = NormalizeEditableSubCardArrayPathValue(cardId, value);
         _subCardArrayPathOverrides[cardId] = normalized;
 
         foreach (var row in _mappingRows.Where(r => r.MappingTarget == MappingTarget.SubCard && r.CardId == cardId))
@@ -4997,6 +5576,14 @@ public partial class InterfaceWizardPage
     }
 
     private List<EsbFieldMapping> BuildPreviewMappings() => BuildMappings(includeDisabled: false);
+
+    private Dictionary<string, List<EsbFilterRule>> BuildPreviewFilterRules() =>
+        _mappingRows
+            .Where(row => row.IsEnabled && row.FilterRules.Count > 0)
+            .ToDictionary(
+                GetMappingKey,
+                row => CloneFilterRules(row.FilterRules),
+                StringComparer.OrdinalIgnoreCase);
 
     private List<EsbFieldMapping> BuildMappingsForSave() => BuildMappings(includeDisabled: true);
 
@@ -5312,25 +5899,27 @@ public partial class InterfaceWizardPage
         return result;
     }
 
-    private async Task SaveAll()
+    private Task SaveAll() => SaveAllAsync();
+
+    private async Task<bool> SaveAllAsync()
     {
         if (_selectedConfig == null)
         {
             inj_snackbar.Add("请先选择接口。", Severity.Warning);
-            return;
+            return false;
         }
 
         if (_parsedJson == null)
         {
             inj_snackbar.Add("当前 JSON 无效，无法保存。", Severity.Warning);
-            return;
+            return false;
         }
 
         var incompleteRows = _mappingRows.Where(r => r.IsEnabled && !HasValueSource(r)).ToList();
         if (incompleteRows.Count > 0)
         {
             inj_snackbar.Add($"仍有 {incompleteRows.Count} 条映射既没有源路径也没有默认值，请先补全。", Severity.Warning);
-            return;
+            return false;
         }
 
         var incompleteSubCards = _mappingRows
@@ -5339,24 +5928,24 @@ public partial class InterfaceWizardPage
         if (incompleteSubCards.Count > 0)
         {
             inj_snackbar.Add("子卡映射缺少 CardId 或 ArrayPath，请先补全。", Severity.Warning);
-            return;
+            return false;
         }
 
         if (!await ConfirmSubCardPathNormalizationAsync())
         {
-            return;
+            return false;
         }
 
         if (!TryBuildNormalizedSavePayload(out var finalMappings, out var normalizedRuleMap, out var saveError))
         {
             inj_snackbar.Add(saveError ?? "子卡路径归一化失败，请检查配置。", Severity.Warning);
-            return;
+            return false;
         }
 
         if (finalMappings.Count == 0 && _filterRules.Count == 0 && !HasPersistedWorkbenchContent)
         {
             inj_snackbar.Add("没有可保存的内容。", Severity.Warning);
-            return;
+            return false;
         }
 
         _saving = true;
@@ -5528,11 +6117,14 @@ public partial class InterfaceWizardPage
             }
 
             ConfigSvc.ClearCache();
+            CaptureSavedWorkbenchState();
             inj_snackbar.Add("保存成功。", Severity.Success);
+            return true;
         }
         catch (Exception ex)
         {
             inj_snackbar.Add($"保存失败: {ex.Message}", Severity.Error);
+            return false;
         }
         finally
         {

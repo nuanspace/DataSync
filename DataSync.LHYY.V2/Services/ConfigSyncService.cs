@@ -671,6 +671,8 @@ public sealed class ConfigSyncService
         EventStartTimeSourcePath = config.EventStartTimeSourcePath,
         VisitNoSourcePath = config.VisitNoSourcePath,
         InpatientNoSourcePath = config.InpatientNoSourcePath,
+        CombinedVisitIdentitySourcePath = config.CombinedVisitIdentitySourcePath,
+        CombinedVisitIdentityFormat = config.CombinedVisitIdentityFormat,
         SourceMessageIdPath = config.SourceMessageIdPath,
         MainRecordArrayPath = config.MainRecordArrayPath,
         AllowMissingEventTime = config.AllowMissingEventTime,
@@ -754,6 +756,8 @@ public sealed class ConfigSyncService
         entity.EventStartTimeSourcePath = item.EventStartTimeSourcePath;
         entity.VisitNoSourcePath = item.VisitNoSourcePath;
         entity.InpatientNoSourcePath = item.InpatientNoSourcePath;
+        entity.CombinedVisitIdentitySourcePath = item.CombinedVisitIdentitySourcePath;
+        entity.CombinedVisitIdentityFormat = item.CombinedVisitIdentityFormat;
         entity.SourceMessageIdPath = item.SourceMessageIdPath;
         entity.MainRecordArrayPath = item.MainRecordArrayPath;
         entity.AllowMissingEventTime = item.AllowMissingEventTime;
@@ -942,6 +946,8 @@ public sealed class ConfigSyncService
         item.EventStartTimeSourcePath,
         item.VisitNoSourcePath,
         item.InpatientNoSourcePath,
+        item.CombinedVisitIdentitySourcePath,
+        item.CombinedVisitIdentityFormat,
         item.SourceMessageIdPath,
         item.MainRecordArrayPath,
         item.AllowMissingEventTime,

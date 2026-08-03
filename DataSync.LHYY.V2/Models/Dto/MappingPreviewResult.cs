@@ -20,6 +20,11 @@ public class MappingPreviewResult
     public bool IsRequired { get; set; }
     /// <summary>值为空</summary>
     public bool IsMissing { get; set; }
+    /// <summary>过滤未通过，正式执行时跳过该映射</summary>
+    public bool IsFiltered { get; set; }
+    public string? FilterSummary { get; set; }
+    public int? TotalArrayItemCount { get; set; }
+    public int? MatchedArrayItemCount { get; set; }
     public string? Description { get; set; }
 }
 

@@ -12,6 +12,13 @@
         </MudButton>
     </div>
 
+    @if (ShowScope && UseMappingScopeLabels)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+            整条映射判断未通过时跳过 Question；数组项过滤只保留同一数组中符合条件的值，并按原顺序使用中文分号拼接，零匹配时同样跳过。
+        </MudAlert>
+    }
+
     @if (Rules.Count == 0)
     {
         <div class="filter-rule-empty">
@@ -95,12 +102,12 @@
                                               HelperText="多值用逗号分隔" />
                             </div>
 
-                            @if (ShowScope && rule.SourcePath.Contains("[]"))
+                            @if (ShowScope && SubCardPathHelper.HasArrayWildcard(rule.SourcePath))
                             {
                                 <div class="filter-rule-scope">
                                     <MudSelect T="FilterScope" @bind-Value="rule.FilterScope" Label="作用范围" Dense="true" Margin="Margin.Dense">
-                                        <MudSelectItem Value="FilterScope.MessageCheck">消息判断</MudSelectItem>
-                                        <MudSelectItem Value="FilterScope.RowFilter">行过滤</MudSelectItem>
+                                        <MudSelectItem Value="FilterScope.MessageCheck">@(UseMappingScopeLabels ? "整条映射判断" : "消息判断")</MudSelectItem>
+                                        <MudSelectItem Value="FilterScope.RowFilter">@(UseMappingScopeLabels ? "数组项过滤" : "行过滤")</MudSelectItem>
                                     </MudSelect>
                                 </div>
                             }
@@ -146,6 +153,9 @@
     /// </summary>
     [Parameter]
     public bool ShowScope { get; set; } = true;
+
+    [Parameter]
+    public bool UseMappingScopeLabels { get; set; }
 
     /// <summary>
     /// SidePanel 模式下请求左侧树选路径的回调（传入规则索引）
@@ -206,7 +216,13 @@
 
     private async Task AddRule()
     {
-        Rules.Add(new EsbFilterRule { Operator = "eq", RuleGroup = 1, IsEnabled = true });
+        Rules.Add(new EsbFilterRule
+        {
+            Operator = "eq",
+            RuleGroup = 1,
+            FilterScope = FilterScope.MessageCheck,
+            IsEnabled = true
+        });
         await RulesChanged.InvokeAsync(Rules);
     }
 

@@ -14,6 +14,19 @@
     margin: 0;
 }
 
+.json-tree-sample-hint {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin: 0 2px 8px;
+    padding: 6px 8px;
+    border-left: 2px solid rgba(15, 107, 125, 0.45);
+    background: rgba(15, 107, 125, 0.06);
+    color: var(--mud-palette-text-secondary);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
 .json-tree-list {
     display: flex;
     flex-direction: column;
@@ -34,8 +47,12 @@
     min-width: 0;
     padding: 4px 6px;
     border-radius: 6px;
-    cursor: pointer;
+    cursor: default;
     transition: background-color 0.15s ease;
+}
+
+.json-tree-node-row.is-selectable {
+    cursor: pointer;
 }
 
 .json-tree-node-row:hover {
@@ -179,18 +196,18 @@
 
 .json-tree-node-line {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     min-width: 0;
 }
 
 .json-tree-node-row.allow-value-wrap .json-tree-node-line {
     align-items: flex-start;
-    flex-wrap: wrap;
 }
 
 .json-tree-node-key {
     color: #111827;
+    line-height: 1.5;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -202,15 +219,37 @@
 }
 
 .json-tree-node-value {
+    display: -webkit-box;
+    overflow: hidden;
     color: #334155;
-    line-height: 1.55;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
 }
 
 .json-tree-node-meta {
     color: #64748b;
 }
 
-.json-tree-node-row.allow-value-wrap .json-tree-node-value,
+.json-tree-node-separator {
+    flex: 0 0 auto;
+    color: #94a3b8;
+    font-family: Consolas, "Courier New", monospace;
+    font-weight: 700;
+    line-height: 1.5;
+}
+
+.json-tree-node-row.allow-value-wrap .json-tree-node-value {
+    display: block;
+    overflow: visible;
+    white-space: normal;
+    -webkit-line-clamp: unset;
+}
+
 .json-tree-node-row.allow-value-wrap .json-tree-node-meta {
     white-space: normal;
     overflow: visible;
@@ -267,8 +306,24 @@
     color: #6b7280;
 }
 
+.json-tree-node-row.type-string .json-tree-node-value {
+    color: #166534;
+}
+
+.json-tree-node-row.type-number .json-tree-node-value {
+    color: #6d28d9;
+}
+
+.json-tree-node-row.type-boolean .json-tree-node-value {
+    color: #0369a1;
+}
+
+.json-tree-node-row.type-array .json-tree-node-value {
+    color: #15803d;
+}
+
 .json-tree-node-row.type-null .json-tree-node-value {
-    color: #9ca3af;
+    color: #6b7280;
     font-style: italic;
 }
 
@@ -276,4 +331,14 @@
     margin-left: 13px;
     padding-left: 13px;
     border-left-color: #e5e7eb;
+}
+
+.json-tree-viewer-root ::deep .json-tree-search-mark {
+    padding: 0 1px;
+    border-radius: 2px;
+    background: #fde68a;
+    color: #713f12;
+    font-weight: 700;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
 }

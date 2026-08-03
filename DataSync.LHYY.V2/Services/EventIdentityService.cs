@@ -65,6 +65,46 @@ public class EventIdentityService
         return null;
     }
 
+    public async Task<(EsbEventIdentity? Identity, bool IsAmbiguous)> FindByCombinedVisitIdentityAsync(
+        string? integrationProjectCode,
+        string? combinedValue,
+        CombinedVisitIdentityFormat format,
+        string? mrn = null,
+        string? eventTypeName = null)
+    {
+        if (string.IsNullOrWhiteSpace(combinedValue) || format == CombinedVisitIdentityFormat.None)
+            return (null, false);
+
+        await using var db = await _contextFactory.CreateDbContextAsync();
+        var query = db.EsbEventIdentities
+            .AsNoTracking()
+            .Where(x =>
+                x.IntegrationProjectCode == integrationProjectCode &&
+                x.VisitNo != null);
+
+        if (!string.IsNullOrWhiteSpace(mrn))
+            query = query.Where(x => x.Mrn == mrn);
+
+        if (!string.IsNullOrWhiteSpace(eventTypeName))
+            query = query.Where(x => x.EventTypeName == eventTypeName);
+
+        query = format switch
+        {
+            CombinedVisitIdentityFormat.MrnUnderscoreVisitNo =>
+                query.Where(x => x.Mrn + "_" + x.VisitNo == combinedValue),
+            CombinedVisitIdentityFormat.MrnVisitNo =>
+                query.Where(x => x.Mrn + x.VisitNo == combinedValue),
+            _ => query.Where(_ => false)
+        };
+
+        var matches = await query
+            .OrderByDescending(x => x.UpdatedAt)
+            .Take(2)
+            .ToListAsync();
+
+        return (matches.FirstOrDefault(), matches.Count > 1);
+    }
+
     public async Task UpsertAsync(
         string? integrationProjectCode,
         string tranCode,

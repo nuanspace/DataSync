@@ -179,7 +179,7 @@ else
             </aside>
 
             <main class="message-detail-main">
-                <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false"
+                <MudTabs @bind-ActivePanelIndex="_activeTabIndex" Elevation="0" Rounded="false" ApplyEffectsToContainer="false"
                          Class="message-detail-tabs" PanelClass="message-detail-tab-panel">
                     <MudTabPanel Text="处理轨迹" Icon="@Icons.Material.Filled.Route">
                 @if (_requestLogDetail?.Items.Count > 1)
@@ -349,7 +349,7 @@ else
                                                     <thead>
                                                         <tr>
                                                             <th>目标</th>
-                                                            <th>名称</th>
+                                                            <th>题目类型</th>
                                                             <th>结果值</th>
                                                             <th>说明</th>
                                                         </tr>
@@ -358,8 +358,8 @@ else
                                                         @foreach (var row in group)
                                                         {
                                                             <tr class="@(row.IsWarning ? "message-detail-preview-warning-row" : "")">
-                                                                <td>@row.Target</td>
-                                                                <td>@(string.IsNullOrWhiteSpace(row.DisplayName) ? "-" : row.DisplayName)</td>
+                                                                <td class="message-detail-preview-target">@GetPreviewTarget(row)</td>
+                                                                <td>@FormatEmpty(row.QuestionType)</td>
                                                                 <td class="message-detail-preview-value">@FormatPreviewValue(row.Value)</td>
                                                                 <td>@(string.IsNullOrWhiteSpace(row.Note) ? "-" : row.Note)</td>
                                                             </tr>
@@ -375,7 +375,7 @@ else
                                             <thead>
                                                 <tr>
                                                     <th>目标</th>
-                                                    <th>名称</th>
+                                                    <th>题目类型</th>
                                                     <th>结果值</th>
                                                     <th>说明</th>
                                                 </tr>
@@ -384,8 +384,8 @@ else
                                                 @foreach (var row in section.Rows)
                                                 {
                                                     <tr class="@(row.IsWarning ? "message-detail-preview-warning-row" : "")">
-                                                        <td>@row.Target</td>
-                                                        <td>@(string.IsNullOrWhiteSpace(row.DisplayName) ? "-" : row.DisplayName)</td>
+                                                        <td class="message-detail-preview-target">@GetPreviewTarget(row)</td>
+                                                        <td>@FormatEmpty(row.QuestionType)</td>
                                                         <td class="message-detail-preview-value">@FormatPreviewValue(row.Value)</td>
                                                         <td>@(string.IsNullOrWhiteSpace(row.Note) ? "-" : row.Note)</td>
                                                     </tr>
@@ -446,6 +446,7 @@ else
     private bool _retrying;
     private bool _processingNow;
     private bool _mappingPreviewLoading;
+    private int _activeTabIndex = 1;
     private bool _contextPanelCollapsed;
     private bool _jsonDialogVisible;
     private string _jsonDialogTitle = "";
@@ -466,6 +467,7 @@ else
     protected override async Task OnPageInitializedAsync()
     {
         await LoadMessageDetailAsync();
+        await PreviewMappingEffect();
     }
 
     private async Task LoadMessageDetailAsync()
@@ -689,6 +691,9 @@ else
 
         return value.Length == 0 ? "（空字符串）" : value;
     }
+
+    private static string GetPreviewTarget(MessageMappingPreviewRow row) =>
+        string.IsNullOrWhiteSpace(row.DisplayName) ? row.Target : row.DisplayName;
 
     private static bool HasGroupedRows(MessageMappingPreviewSection section) =>
         section.Rows.Any(row => !string.IsNullOrWhiteSpace(row.GroupName));

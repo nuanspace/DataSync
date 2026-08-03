@@ -3,25 +3,67 @@
 
 <PageTitle>接口映射工作台 - LHYY V2</PageTitle>
 
+<NavigationLock OnBeforeInternalNavigation="HandleBeforeInternalNavigation"
+                ConfirmExternalNavigation="@HasUnsavedChanges" />
+
 <div class="workbench-root" @onclick="HandleWorkbenchBackgroundClick">
 <MudPaper Elevation="0" Class="workbench-toolbar-shell mb-1">
-    <div class="workbench-toolbar-main">
+    <div class="workbench-toolbar-primary">
         <div class="workbench-toolbar-heading">
             <MudText Typo="Typo.h6">接口映射工作台</MudText>
         </div>
 
-        <div class="workbench-toolbar-stage">
-            <div class="workbench-toolbar-select">
-                <MudAutocomplete T="EsbInterfaceConfig" Value="_selectedConfig" ValueChanged="OnInterfaceSelected"
-                                 SearchFunc="SearchInterfaces" ToStringFunc="FormatInterfaceOption"
-                                 Label="选择接口" Placeholder="输入代码或名称检索"
-                                 Clearable="true" CoerceText="false" CoerceValue="false" Strict="true"
-                                 MaxItems="80" HelperText="@($"共 {_allInterfaces.Count} 个接口")" />
-            </div>
+        <div class="workbench-interface-select-shell">
+            <MudButton Variant="Variant.Outlined" Color="Color.Default"
+                       Class="workbench-interface-trigger"
+                       Disabled="@(_interfaceSwitching || _saving)"
+                       OnClick="OpenInterfacePicker">
+                @if (_interfaceSwitching && _switchingInterfaceConfig != null)
+                {
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                    <span class="workbench-interface-code">@_switchingInterfaceConfig.TranCode</span>
+                    <span class="workbench-interface-divider"></span>
+                    <span class="workbench-interface-name">@(string.IsNullOrWhiteSpace(_switchingInterfaceConfig.TranName) ? "未命名接口" : _switchingInterfaceConfig.TranName)</span>
+                    <span class="workbench-interface-loading">正在加载</span>
+                }
+                else if (_selectedConfig != null)
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.SwapHoriz" Size="Size.Small" />
+                    <span class="workbench-interface-code">@_selectedConfig.TranCode</span>
+                    <span class="workbench-interface-divider"></span>
+                    <span class="workbench-interface-name">@(string.IsNullOrWhiteSpace(_selectedConfig.TranName) ? "未命名接口" : _selectedConfig.TranName)</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Class="workbench-interface-chevron" />
+                }
+                else
+                {
+                    <MudIcon Icon="@Icons.Material.Filled.AddCircleOutline" Size="Size.Small" />
+                    <span class="workbench-interface-placeholder">选择接口</span>
+                    <span class="workbench-interface-hint">按代码或名称查找</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" Class="workbench-interface-chevron" />
+                }
+            </MudButton>
 
+            @if (_selectedConfig?.IsEnabled == false)
+            {
+                <span class="workbench-interface-disabled">已停用</span>
+            }
+
+            @if (HasUnsavedChanges)
+            {
+                <span class="workbench-unsaved-indicator"><span></span>未保存</span>
+            }
+        </div>
+
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save"
+                   Class="workbench-save-button" Disabled="@(!_canSaveWorkbench)" OnClick="SaveAll">
+            @(_saving ? "保存中..." : "保存工作台")
+        </MudButton>
+    </div>
+
+    <div class="workbench-toolbar-secondary">
+        <div class="workbench-toolbar-status">
             @if (_selectedConfig != null)
             {
-                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info" Class="workbench-toolbar-selected-chip">@_selectedConfig.TranCode</MudChip>
                 <div class="workbench-toolbar-counts">
                     <span>已有 @_existingMappingCount</span>
                     <span>有效 @ConfiguredMappingCount</span>
@@ -40,13 +82,12 @@
                     <MudButton Variant="Variant.Text" Color="Color.Default" StartIcon="@Icons.Material.Filled.FilterAlt" Disabled="@(!CanEditInterfaceFilters)" OnClick="@(() => _interfaceFilterDialogVisible = true)">接口过滤</MudButton>
                 </div>
             }
+        </div>
 
-            <div class="workbench-toolbar-actions">
-                <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="@(() => _projectDocumentsVisible = true)">项目文档</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Tune" Disabled="@(_selectedConfig == null)" OnClick="@(() => _settingsDialogVisible = true)">工作台设置</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Preview" Disabled="@(BuildPreviewMappings().Count == 0)" OnClick="@(() => _previewDialogVisible = true)">整体预览</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Save" Disabled="@(!_canSaveWorkbench)" OnClick="SaveAll">@(_saving ? "保存中..." : "保存工作台")</MudButton>
-            </div>
+        <div class="workbench-toolbar-actions">
+            <MudButton Variant="Variant.Outlined" Color="Color.Info" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="@(() => _projectDocumentsVisible = true)">项目文档</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Tune" Disabled="@(_selectedConfig == null || _interfaceSwitching)" OnClick="@(() => _settingsDialogVisible = true)">工作台设置</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" StartIcon="@Icons.Material.Filled.Preview" Disabled="@(_interfaceSwitching || BuildPreviewMappings().Count == 0)" OnClick="@(() => _previewDialogVisible = true)">整体预览</MudButton>
         </div>
     </div>
     @if (_selectedConfig != null)
@@ -84,10 +125,11 @@
     <div class="workbench-empty-state">
         <MudIcon Icon="@Icons.Material.Filled.TouchApp" Style="font-size:64px;" Color="Color.Secondary" />
         <MudText Typo="Typo.h6" Color="Color.Secondary">请选择接口</MudText>
-        <MudText Typo="Typo.caption" Color="Color.Secondary">从上方下拉框选择一个接口后即可开始配置映射。</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">选择一个接口后即可开始配置映射。</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SwapHoriz" OnClick="OpenInterfacePicker">选择接口</MudButton>
     </div>
 }
-else if (string.IsNullOrWhiteSpace(_selectedConfig.SampleJson))
+else if (string.IsNullOrWhiteSpace(_loadedSampleJson))
 {
     <div class="workbench-empty-state">
         <MudIcon Icon="@Icons.Material.Filled.Warning" Style="font-size:64px;" Color="Color.Warning" />
@@ -104,6 +146,93 @@ else
         <div class="workbench-col workbench-col-detail">@RenderDetailPanel()</div>
     </div>
 }
+
+<MudDialog Visible="_interfacePickerVisible" VisibleChanged="OnInterfacePickerVisibleChanged"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true, CloseButton = true })">
+    <TitleContent>
+        <div class="interface-picker-title">
+            <MudText Typo="Typo.h6">选择接口</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">按代码或名称快速查找当前项目接口</MudText>
+        </div>
+    </TitleContent>
+    <DialogContent>
+        <MudTextField T="string" Value="_interfaceSearchText" ValueChanged="OnInterfaceSearchChanged"
+                      Immediate="true" AutoFocus="true" OnKeyDown="HandleInterfacePickerKeyDown"
+                      Placeholder="输入接口代码或名称" Variant="Variant.Outlined" Margin="Margin.Dense"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Class="interface-picker-search" />
+
+        <div class="interface-picker-tabs">
+            <MudButton Variant="@GetInterfaceTabVariant(true)" Color="Color.Primary" Size="Size.Small"
+                       OnClick="@(() => SelectInterfaceTab(true))">
+                启用接口 @_allInterfaces.Count(item => item.IsEnabled)
+            </MudButton>
+            <MudButton Variant="@GetInterfaceTabVariant(false)" Color="Color.Default" Size="Size.Small"
+                       OnClick="@(() => SelectInterfaceTab(false))">
+                停用接口 @_allInterfaces.Count(item => !item.IsEnabled)
+            </MudButton>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(_interfaceSwitchError))
+        {
+            <MudAlert Severity="Severity.Error" Dense="true" Class="mb-2">@_interfaceSwitchError</MudAlert>
+        }
+
+        <div class="interface-picker-list">
+            @{ var visibleOptions = VisibleInterfaceOptions; }
+            @if (visibleOptions.Count == 0)
+            {
+                <div class="interface-picker-empty">
+                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Color="Color.Secondary" />
+                    <MudText Typo="Typo.body2">没有匹配的接口</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">请更换代码、名称或接口状态后重试。</MudText>
+                </div>
+            }
+            else
+            {
+                @for (var index = 0; index < visibleOptions.Count; index++)
+                {
+                    var item = visibleOptions[index];
+                    var selected = item.Id == _selectedConfig?.Id;
+                    <button type="button"
+                            class="@GetInterfacePickerItemClass(selected, index)"
+                            disabled="@_interfaceSwitching"
+                            @onclick="@(() => RequestInterfaceSelection(item))">
+                        <span class="interface-picker-item-code">@item.TranCode</span>
+                        <span class="interface-picker-item-name">@(string.IsNullOrWhiteSpace(item.TranName) ? "未命名接口" : item.TranName)</span>
+                        <span class="interface-picker-item-state">
+                            @if (selected)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Primary" Size="Size.Small" />
+                            }
+                        </span>
+                    </button>
+                }
+            }
+        </div>
+    </DialogContent>
+</MudDialog>
+
+<MudDialog Visible="_unsavedDialogVisible" VisibleChanged="OnUnsavedDialogVisibleChanged"
+           Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true, BackdropClick = false })">
+    <TitleContent><MudText Typo="Typo.h6">@PendingActionTitle</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2">当前接口存在未保存修改。你可以先保存，也可以放弃这些修改后继续。</MudText>
+        @if (IsJsonDirty)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                样例 JSON 也已修改，“@PendingSaveActionText”会覆盖数据库中的 sample_json。
+            </MudAlert>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton Disabled="@_unsavedActionBusy" OnClick="CancelPendingAction">取消</MudButton>
+        <MudButton Disabled="@_unsavedActionBusy" Color="Color.Warning" Variant="Variant.Outlined" OnClick="DiscardAndContinuePendingAction">@PendingDiscardActionText</MudButton>
+        <MudButton Disabled="@(_unsavedActionBusy || !CanSavePendingChanges)" Color="Color.Primary" Variant="Variant.Filled" OnClick="SaveAndContinuePendingAction">
+            @(_unsavedActionBusy ? "处理中..." : PendingSaveActionText)
+        </MudButton>
+    </DialogActions>
+</MudDialog>
 
 <MappingEditDialog Visible="_editDialogVisible" VisibleChanged="OnEditDialogVisibleChanged" EditItem="_editDialogItem" Title="编辑映射" JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" JsonTreeLayout="JsonTreeLayout.SidePanel" DialogMaxWidth="MaxWidth.Large" MappingTargetEditable="false" UseTargetFieldSelector="false" LicenseCode="@_defaultLicenseCode" ShowIsRequired="true" ShowIsEnabled="true" ShowFilterRules="true" ShowSubCardArrayPathEditor="false" FilterRules="_editDialogFilterRules" FilterRulesChanged="v => _editDialogFilterRules = v" OnSave="OnEditDialogSave" />
 
@@ -255,7 +384,7 @@ else
 <MudDialog @bind-Visible="_previewDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraLarge, FullWidth = true })">
     <TitleContent><MudText Typo="Typo.h6">整体预览</MudText></TitleContent>
     <DialogContent>
-        @if (_parsedJson != null && BuildPreviewMappings().Count > 0) { <MappingPreviewPanel JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" Mappings="BuildPreviewMappings()" /> }
+        @if (_parsedJson != null && BuildPreviewMappings().Count > 0) { <MappingPreviewPanel JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" Mappings="BuildPreviewMappings()" MappingFilterRules="BuildPreviewFilterRules()" FormCards="_formCardLookup" /> }
         else { <MudAlert Severity="Severity.Info" Dense="true">当前没有可预览的有效映射。</MudAlert> }
     </DialogContent>
     <DialogActions><MudButton OnClick="@(() => _previewDialogVisible = false)">关闭</MudButton></DialogActions>
@@ -734,7 +863,7 @@ else
                                     <MudText Typo="Typo.subtitle2">过滤条件</MudText>
                                     <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">过滤 @filterCount</MudChip>
                                 </div>
-                                <FilterRuleEditor Rules="@GetQuestionFieldFilterRules(field)" RulesChanged="rules => OnQuestionFieldFilterRulesChanged(field, rules)" ShowScope="false" OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, idx => ActivateQuestionFieldFilterRulePath(field, idx)))" ActivePickIndex="@GetQuestionFieldActiveFilterPickIndex(field)" />
+                                <FilterRuleEditor Rules="@GetQuestionFieldFilterRules(field)" RulesChanged="rules => OnQuestionFieldFilterRulesChanged(field, rules)" ShowScope="@(field.MappingTarget == MappingTarget.Question && SubCardPathHelper.HasArrayWildcard(sourcePath))" UseMappingScopeLabels="true" OnRequestPathPick="@(EventCallback.Factory.Create<int>(this, idx => ActivateQuestionFieldFilterRulePath(field, idx)))" ActivePickIndex="@GetQuestionFieldActiveFilterPickIndex(field)" />
                             </MudPaper>
                         </div>
                     }
@@ -806,7 +935,7 @@ else
                                 <MudText Typo="Typo.subtitle2">过滤条件</MudText>
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">过滤 @filterCount</MudChip>
                             </div>
-                            <FilterRuleEditor Rules="@GetActiveStandaloneFilterRules()" RulesChanged="OnActiveRowFilterRulesChanged" ShowScope="false" />
+                            <FilterRuleEditor Rules="@GetActiveStandaloneFilterRules()" RulesChanged="OnActiveRowFilterRulesChanged" ShowScope="@(field.MappingTarget == MappingTarget.Question && SubCardPathHelper.HasArrayWildcard(GetActiveStandaloneSourcePath()))" UseMappingScopeLabels="true" />
                         </MudPaper>
                     </div>
                 }

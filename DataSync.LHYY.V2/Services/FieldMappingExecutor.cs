@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using DataSync.LHYY.V2.Data;
+using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -151,7 +152,8 @@ public class FieldMappingExecutor
         string tranCode,
         Dictionary<string, List<int>>? rowFilterResults = null,
         string? integrationProjectCode = null,
-        string? mainRecordArrayPath = null)
+        string? mainRecordArrayPath = null,
+        IReadOnlyDictionary<Guid, CardInfo>? cards = null)
     {
         var mappings = await LoadMappingsAsync(tranCode, MappingTarget.SubCard, integrationProjectCode);
         if (mappings.Count == 0)
@@ -165,111 +167,296 @@ public class FieldMappingExecutor
             .ToDictionary(g => g.Key, g => g.OrderBy(m => m.SortOrder).First());
         var groups = mappings
             .Where(m => !EsbFieldMapping.IsSubCardFilterMapping(m) && m.CardId.HasValue)
-            .GroupBy(m => m.CardId!.Value);
+            .GroupBy(m => m.CardId!.Value)
+            .Select(group =>
+            {
+                var cardId = group.Key;
+                var cardMappings = group.ToList();
+                subCardFilterMappings.TryGetValue(cardId, out var filterMapping);
+                var arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(
+                    cardMappings.FirstOrDefault(mapping => !string.IsNullOrEmpty(mapping.ArrayPath))?.ArrayPath
+                    ?? filterMapping?.ArrayPath);
+                return new SubCardMappingGroup(cardId, cardMappings, filterMapping, arrayPath);
+            })
+            .Where(group =>
+            {
+                if (!string.IsNullOrWhiteSpace(group.ArrayPath))
+                {
+                    return true;
+                }
+
+                _logger.LogWarning("SubCard CardId={CardId} 未配置 ArrayPath", group.CardId);
+                return false;
+            })
+            .ToDictionary(group => group.CardId);
+
+        if (groups.Count == 0)
+            return [];
+
+        var parentMap = SubCardHierarchyHelper.BuildMappedParentMap(groups.Keys, cards);
+        var childMap = parentMap
+            .Where(pair => pair.Value.HasValue)
+            .GroupBy(pair => pair.Value!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(pair => pair.Key).ToList());
         var result = new List<SubCardData>();
         var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
 
-        foreach (var group in groups)
+        foreach (var rootGroup in groups.Values.Where(group => !parentMap.GetValueOrDefault(group.CardId).HasValue))
         {
-            var cardId = group.Key;
-            var cardMappings = group.ToList();
-            subCardFilterMappings.TryGetValue(cardId, out var subCardFilterMapping);
-            var arrayPath = SubCardPathHelper.NormalizeArrayContainerPath(
-                cardMappings.FirstOrDefault(m => !string.IsNullOrEmpty(m.ArrayPath))?.ArrayPath
-                ?? subCardFilterMapping?.ArrayPath);
-            if (string.IsNullOrEmpty(arrayPath))
-            {
-                _logger.LogWarning("SubCard CardId={CardId} 未配置 ArrayPath", cardId);
-                continue;
-            }
-
-            var useMainContextRoot = !SubCardPathHelper.IsAbsoluteJsonPath(arrayPath);
-            var containerRoot = useMainContextRoot ? mainContext : body;
-            var containerToken = SubCardPathHelper.ResolveSubCardContainer(containerRoot, arrayPath)
-                ?? (useMainContextRoot ? SubCardPathHelper.ResolveSubCardContainer(body, arrayPath) : null);
-            if (!SubCardPathHelper.IsSupportedSubCardContainer(containerToken))
-                continue;
-
-            var rowContexts = SubCardPathHelper.ResolveSubCardContexts(containerRoot, arrayPath);
-            if (rowContexts.Count == 0 && useMainContextRoot)
-                rowContexts = SubCardPathHelper.ResolveSubCardContexts(body, arrayPath);
-            if (rowContexts.Count == 0)
-                continue;
-
-            if (containerToken is JArray
-                && rowFilterResults != null
-                && rowFilterResults.TryGetValue(arrayPath, out var filterIndices))
-            {
-                rowContexts = filterIndices
-                    .Where(idx => idx >= 0 && idx < rowContexts.Count)
-                    .Select(idx => rowContexts[idx])
-                    .ToList();
-
-                if (rowContexts.Count == 0)
-                    continue;
-            }
-
-            var subCardRules = subCardFilterMapping != null && rulesMap.TryGetValue(subCardFilterMapping.Id, out var filterRules)
-                ? filterRules
-                : null;
-            if (subCardRules?.Count > 0)
-            {
-                rowContexts = rowContexts
-                    .Where(item => _filterRuleService.CheckMappingRules(body, item, subCardRules, arrayPath, mainContext))
-                    .ToList();
-
-                if (rowContexts.Count == 0)
-                    continue;
-            }
-
-            var subCard = new SubCardData { CardId = cardId };
-
-            foreach (var item in rowContexts)
-            {
-                var rowValues = new List<QuestionValue>();
-
-                foreach (var mapping in cardMappings)
-                {
-                    JToken? source = null;
-                    if (!string.IsNullOrWhiteSpace(mapping.SourcePath))
-                    {
-                        var useAbsoluteRoot = mapping.SourcePath.StartsWith("$.", StringComparison.Ordinal);
-                        var useMainScope = MessageJsonHelper.IsMainRecordScopedPath(mapping.SourcePath);
-                        var useLocalRoot = !useAbsoluteRoot
-                            && !useMainScope
-                            && SubCardPathHelper.IsRootScopedPath(mapping.SourcePath, arrayPath);
-
-                        source = useAbsoluteRoot
-                            ? SubCardPathHelper.ResolveFirstToken(body, mapping.SourcePath)
-                            : useMainScope
-                                ? MessageJsonHelper.ResolveFirstScopedToken(body, item, mapping.SourcePath, mainContext)
-                            : useLocalRoot
-                                ? MessageJsonHelper.ResolveFirstScopedToken(body, mainContext, mapping.SourcePath)
-                                : MessageJsonHelper.ResolveFirstScopedToken(mainContext, item, mapping.SourcePath);
-                    }
-
-                    var value = await ApplyMappingValueAsync(source?.ToString(), mapping);
-
-                    if (value.Value == null)
-                        continue;
-
-                    rulesMap.TryGetValue(mapping.Id, out var mappingRules);
-                    if (!_filterRuleService.CheckMappingRules(body, item, mappingRules, arrayPath, mainContext))
-                        continue;
-
-                    if (Guid.TryParse(mapping.TargetField, out var questionId))
-                        rowValues.Add(new QuestionValue(questionId, value.Value, value.IsDictMiss));
-                }
-
-                if (rowValues.Count > 0)
-                    subCard.Rows.Add(rowValues);
-            }
-
-            if (subCard.Rows.Count > 0)
+            var subCard = await ExtractSubCardNodeAsync(
+                body,
+                mainContext,
+                rootGroup,
+                groups,
+                childMap,
+                rulesMap,
+                rowFilterResults,
+                mainRecordArrayPath,
+                null,
+                null);
+            if (subCard != null)
                 result.Add(subCard);
         }
 
         return result;
+    }
+
+    public async Task<bool> HasNestedSubCardMappingsAsync(
+        string tranCode,
+        string? integrationProjectCode,
+        IReadOnlyDictionary<Guid, CardInfo>? cards)
+    {
+        var mappings = await LoadMappingsAsync(tranCode, MappingTarget.SubCard, integrationProjectCode);
+        var cardIds = mappings
+            .Where(mapping => !EsbFieldMapping.IsSubCardFilterMapping(mapping) && mapping.CardId.HasValue)
+            .Select(mapping => mapping.CardId!.Value)
+            .Distinct()
+            .ToList();
+        return SubCardHierarchyHelper.BuildMappedParentMap(cardIds, cards).Values.Any(parentId => parentId.HasValue);
+    }
+
+    private async Task<SubCardData?> ExtractSubCardNodeAsync(
+        JToken body,
+        JToken mainContext,
+        SubCardMappingGroup group,
+        IReadOnlyDictionary<Guid, SubCardMappingGroup> groups,
+        IReadOnlyDictionary<Guid, List<Guid>> childMap,
+        IReadOnlyDictionary<int, List<EsbFilterRule>> rulesMap,
+        Dictionary<string, List<int>>? rowFilterResults,
+        string? mainRecordArrayPath,
+        JToken? parentContext,
+        string? parentArrayPath)
+    {
+        var (rowContexts, isArray, effectiveArrayPath) = ResolveSubCardRowContexts(
+            body,
+            mainContext,
+            group.ArrayPath,
+            mainRecordArrayPath,
+            parentContext,
+            parentArrayPath);
+        if (rowContexts.Count == 0)
+            return null;
+
+        if (isArray && rowFilterResults != null)
+        {
+            var filterIndices = rowFilterResults.GetValueOrDefault(group.ArrayPath)
+                                ?? rowFilterResults.GetValueOrDefault(effectiveArrayPath ?? "");
+            if (filterIndices != null)
+            {
+                rowContexts = filterIndices
+                    .Where(index => index >= 0 && index < rowContexts.Count)
+                    .Select(index => rowContexts[index])
+                    .ToList();
+            }
+        }
+
+        var subCardRules = group.FilterMapping != null
+                           && rulesMap.TryGetValue(group.FilterMapping.Id, out var filterRules)
+            ? filterRules
+            : null;
+        if (subCardRules?.Count > 0)
+        {
+            rowContexts = rowContexts
+                .Where(item => _filterRuleService.CheckMappingRules(
+                    body,
+                    item,
+                    subCardRules,
+                    effectiveArrayPath ?? group.ArrayPath,
+                    mainContext))
+                .ToList();
+        }
+
+        var subCard = new SubCardData { CardId = group.CardId };
+        foreach (var item in rowContexts)
+        {
+            var row = new SubCardRowData();
+            foreach (var mapping in group.Mappings)
+            {
+                var source = ResolveSubCardSource(
+                    body,
+                    mainContext,
+                    item,
+                    parentContext,
+                    mapping.SourcePath,
+                    group.ArrayPath,
+                    effectiveArrayPath);
+                var value = await ApplyMappingValueAsync(source?.ToString(), mapping);
+                if (value.Value == null)
+                    continue;
+
+                rulesMap.TryGetValue(mapping.Id, out var mappingRules);
+                if (!_filterRuleService.CheckMappingRules(
+                        body,
+                        item,
+                        mappingRules,
+                        effectiveArrayPath ?? group.ArrayPath,
+                        mainContext))
+                {
+                    continue;
+                }
+
+                if (Guid.TryParse(mapping.TargetField, out var questionId))
+                {
+                    row.Values.Add(new QuestionValue(questionId, value.Value, value.IsDictMiss));
+                }
+            }
+
+            if (childMap.TryGetValue(group.CardId, out var childCardIds))
+            {
+                foreach (var childCardId in childCardIds)
+                {
+                    if (!groups.TryGetValue(childCardId, out var childGroup))
+                        continue;
+
+                    var child = await ExtractSubCardNodeAsync(
+                        body,
+                        mainContext,
+                        childGroup,
+                        groups,
+                        childMap,
+                        rulesMap,
+                        rowFilterResults,
+                        mainRecordArrayPath,
+                        item,
+                        effectiveArrayPath ?? group.ArrayPath);
+                    if (child != null)
+                    {
+                        row.Children.Add(child);
+                    }
+                }
+            }
+
+            if (row.Values.Count > 0 || row.Children.Count > 0)
+            {
+                subCard.Rows.Add(row);
+            }
+        }
+
+        return subCard.Rows.Count == 0 ? null : subCard;
+    }
+
+    private static (List<JToken> Contexts, bool IsArray, string? EffectiveArrayPath) ResolveSubCardRowContexts(
+        JToken body,
+        JToken mainContext,
+        string arrayPath,
+        string? mainRecordArrayPath,
+        JToken? parentContext,
+        string? parentArrayPath)
+    {
+        var effectiveArrayPath = parentContext == null
+            ? SubCardPathHelper.ExpandArrayPathToRoot(body, arrayPath, mainRecordArrayPath)
+            : SubCardPathHelper.ExpandNestedArrayPathToRoot(body, arrayPath, parentArrayPath, mainRecordArrayPath);
+
+        if (parentContext != null
+            && (SubCardPathHelper.IsParentRecordContainerPath(arrayPath)
+                || SubCardPathHelper.PathsEqual(effectiveArrayPath, parentArrayPath)))
+        {
+            return ([parentContext], false, effectiveArrayPath ?? parentArrayPath);
+        }
+
+        if (parentContext != null
+            && !SubCardPathHelper.IsAbsoluteJsonPath(arrayPath)
+            && !SubCardPathHelper.IsMainRecordContainerPath(arrayPath))
+        {
+            var relativePath = arrayPath;
+            if (!string.IsNullOrWhiteSpace(effectiveArrayPath)
+                && !string.IsNullOrWhiteSpace(parentArrayPath)
+                && SubCardPathHelper.TryBuildRelativePath(effectiveArrayPath, parentArrayPath, out var relative))
+            {
+                relativePath = relative;
+            }
+
+            if (string.IsNullOrWhiteSpace(relativePath)
+                || SubCardPathHelper.IsRootContainerPath(relativePath))
+            {
+                return ([parentContext], false, effectiveArrayPath ?? parentArrayPath);
+            }
+
+            var nestedContainer = SubCardPathHelper.ResolveSubCardContainer(parentContext, relativePath);
+            if (SubCardPathHelper.IsSupportedSubCardContainer(nestedContainer))
+            {
+                return (ToContexts(nestedContainer), nestedContainer is JArray, effectiveArrayPath);
+            }
+        }
+
+        var useMainContextRoot = !SubCardPathHelper.IsAbsoluteJsonPath(arrayPath);
+        var containerRoot = useMainContextRoot ? mainContext : body;
+        var containerPath = SubCardPathHelper.IsMainRecordContainerPath(arrayPath)
+            ? SubCardPathHelper.RootContainerPath
+            : arrayPath;
+        var containerToken = SubCardPathHelper.ResolveSubCardContainer(containerRoot, containerPath)
+                             ?? (useMainContextRoot
+                                 ? SubCardPathHelper.ResolveSubCardContainer(body, effectiveArrayPath ?? arrayPath)
+                                 : null);
+        return SubCardPathHelper.IsSupportedSubCardContainer(containerToken)
+            ? (ToContexts(containerToken), containerToken is JArray, effectiveArrayPath)
+            : ([], false, effectiveArrayPath);
+    }
+
+    private static List<JToken> ToContexts(JToken? container) => container switch
+    {
+        JArray array when array.Count > 0 => array.Children().ToList(),
+        JObject obj => [obj],
+        _ => [],
+    };
+
+    private static JToken? ResolveSubCardSource(
+        JToken body,
+        JToken mainContext,
+        JToken rowContext,
+        JToken? parentContext,
+        string? sourcePath,
+        string arrayPath,
+        string? effectiveArrayPath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath))
+            return null;
+
+        if (SubCardPathHelper.IsParentRecordScopedPath(sourcePath))
+        {
+            var parentRelativePath = SubCardPathHelper.TrimParentRecordScopePrefix(sourcePath);
+            return parentContext == null
+                ? null
+                : string.IsNullOrWhiteSpace(parentRelativePath)
+                    ? parentContext
+                    : SubCardPathHelper.ResolveFirstToken(parentContext, parentRelativePath);
+        }
+
+        if (SubCardPathHelper.IsAbsoluteJsonPath(sourcePath))
+            return SubCardPathHelper.ResolveFirstToken(body, sourcePath);
+
+        if (MessageJsonHelper.IsMainRecordScopedPath(sourcePath))
+            return MessageJsonHelper.ResolveFirstScopedToken(body, rowContext, sourcePath, mainContext);
+
+        if (SubCardPathHelper.IsRootScopedPath(sourcePath, effectiveArrayPath ?? arrayPath)
+            && SubCardPathHelper.TryBuildRelativePath(sourcePath, effectiveArrayPath ?? arrayPath, out var relativePath))
+        {
+            return string.IsNullOrWhiteSpace(relativePath)
+                ? rowContext
+                : SubCardPathHelper.ResolveFirstToken(rowContext, relativePath);
+        }
+
+        return MessageJsonHelper.ResolveFirstScopedToken(mainContext, rowContext, sourcePath);
     }
 
     private async Task<MappedValue> ExtractValueAsync(
@@ -279,10 +466,35 @@ public class FieldMappingExecutor
         List<EsbFilterRule>? rules,
         bool collectArrayValues = false)
     {
-        if (!_filterRuleService.CheckMappingRules(body, context, rules))
+        var hasArraySource = collectArrayValues
+                             && SubCardPathHelper.HasArrayWildcard(mapping.SourcePath);
+        var hasArrayItemRules = hasArraySource
+                                && rules?.Any(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter) == true;
+        var mappingRules = hasArrayItemRules
+            ? rules?.Where(rule => rule.FilterScope != FilterScope.RowFilter).ToList()
+            : rules;
+
+        if (!_filterRuleService.CheckMappingRules(body, context, mappingRules))
             return new MappedValue(null, false);
 
-        var sourceValue = ResolveSourceValue(body, context, mapping.SourcePath, collectArrayValues);
+        string? sourceValue;
+        if (hasArrayItemRules)
+        {
+            var filtered = _filterRuleService.FilterMappingArrayValues(
+                body,
+                context,
+                mapping.SourcePath,
+                rules,
+                context);
+            if (filtered.MatchedCount == 0)
+                return new MappedValue(null, false);
+
+            sourceValue = filtered.Values.Count == 0 ? null : string.Join("；", filtered.Values);
+        }
+        else
+        {
+            sourceValue = ResolveSourceValue(body, context, mapping.SourcePath, collectArrayValues);
+        }
 
         if (sourceValue == null && mapping.IsRequired)
         {
@@ -403,6 +615,12 @@ public class FieldMappingExecutor
     }
 
     private readonly record struct MappedValue(string? Value, bool IsDictMiss);
+
+    private sealed record SubCardMappingGroup(
+        Guid CardId,
+        List<EsbFieldMapping> Mappings,
+        EsbFieldMapping? FilterMapping,
+        string ArrayPath);
 }
 
 public sealed class QuestionValue
@@ -428,5 +646,11 @@ public sealed class QuestionValue
 public class SubCardData
 {
     public Guid CardId { get; set; }
-    public List<List<QuestionValue>> Rows { get; set; } = [];
+    public List<SubCardRowData> Rows { get; set; } = [];
+}
+
+public class SubCardRowData
+{
+    public List<QuestionValue> Values { get; set; } = [];
+    public List<SubCardData> Children { get; set; } = [];
 }

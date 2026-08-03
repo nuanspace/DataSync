@@ -377,9 +377,7 @@ else
                     g => g.Key,
                     g => g.OrderBy(i => i.SortOrder).ThenBy(i => i.TranCode).ToList(),
                     StringComparer.OrdinalIgnoreCase);
-            var productEventTypes = (await LoadCurrentProjectEventTypesAsync(defaultProjectId))
-                .Where(e => IsVisibleProductEventType(e.Name))
-                .ToList();
+            var productEventTypes = await LoadCurrentProjectEventTypesAsync(defaultProjectId);
 
             foreach (var eventType in productEventTypes)
             {
@@ -505,9 +503,6 @@ else
 
     private static string GetEventTypeTabText(EventTypeTabData tab) =>
         string.IsNullOrWhiteSpace(tab.DisplayName) ? tab.EventTypeName : tab.DisplayName;
-
-    private static bool IsVisibleProductEventType(string eventTypeName) =>
-        eventTypeName is "住院" or "手术";
 
     #region 导出
 
@@ -793,7 +788,7 @@ else
                     formName,
                     string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath,
                     child.Question.Title ?? "",
-                    child.Question.DataType ?? "",
+                    GetQuestionDataType(child.Question),
                     mappings.Count > 0 ? "★ 已配置" : "未配置",
                     BuildExportMappingsText(mappings, true));
             }
@@ -805,7 +800,7 @@ else
                     formName,
                     string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath,
                     child.Question.Title ?? "",
-                    child.Question.DataType ?? "",
+                    GetQuestionDataType(child.Question),
                     mappings.Count > 0 ? "★ 已配置" : "未配置");
             }
         }
@@ -948,7 +943,7 @@ else
         sb.Append("<td>").Append(Html(formName)).Append("</td>");
         sb.Append("<td>").Append(Html(string.IsNullOrWhiteSpace(cardPath) ? "-" : cardPath)).Append("</td>");
         sb.Append("<td>").Append(Html(question.Title ?? "")).Append("</td>");
-        sb.Append("<td>").Append(Html(question.DataType ?? "")).Append("</td>");
+        sb.Append("<td>").Append(Html(GetQuestionDataType(question))).Append("</td>");
         sb.Append("<td");
         if (configured)
             sb.Append(" class=\"status\"");
@@ -1657,7 +1652,7 @@ else
                                      Style="height:18px;font-size:10px;">已配置</MudChip>
                         }
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Default"
-                                 Style="height:18px;font-size:10px;">@q.DataType</MudChip>
+                                 Style="height:18px;font-size:10px;">@GetQuestionDataType(q)</MudChip>
                         @if (subCardContext != null)
                         {
                             <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning"
@@ -1863,7 +1858,15 @@ else
     {
         return (q.Title?.ToLower().Contains(search) == true) ||
                q.Id.Contains(search) ||
-               (q.DataType?.ToLower().Contains(search) == true);
+               GetQuestionDataType(q).ToLower().Contains(search);
+    }
+
+    private static string GetQuestionDataType(QuestionInfo question)
+    {
+        if (!string.Equals(question.DataType, "选择", StringComparison.Ordinal))
+            return question.DataType ?? "";
+
+        return question.SelectInfo?.StartsWith("多选", StringComparison.Ordinal) == true ? "多选" : "单选";
     }
 
     private static void SetCardExpanded(List<CardNode> cards, bool expanded)

@@ -79,6 +79,13 @@ public class EsbInterfaceConfig
     [MaxLength(500)]
     public string? InpatientNoSourcePath { get; set; }
 
+    [Column("combined_visit_identity_source_path")]
+    [MaxLength(500)]
+    public string? CombinedVisitIdentitySourcePath { get; set; }
+
+    [Column("combined_visit_identity_format")]
+    public CombinedVisitIdentityFormat CombinedVisitIdentityFormat { get; set; }
+
     [Column("source_message_id_path")]
     [MaxLength(500)]
     public string? SourceMessageIdPath { get; set; }

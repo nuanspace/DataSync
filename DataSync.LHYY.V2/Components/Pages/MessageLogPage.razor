@@ -11,7 +11,7 @@
         <div class="message-log-header-actions">
             <MudButton Variant="Variant.Filled" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay"
                        OnClick="BatchRetry" Disabled="@(!CanBatchRetry)">
-                批量重试失败消息
+                批量重试消息
             </MudButton>
         </div>
     </header>
@@ -34,6 +34,7 @@
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Failed)">失败</MudSelectItem>
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Filtered)">已过滤</MudSelectItem>
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.Unmatched)">未匹配</MudSelectItem>
+                    <MudSelectItem Value="@((MessageStatus?)MessageStatus.PartialSuccess)">部分成功</MudSelectItem>
                     <MudSelectItem Value="@((MessageStatus?)MessageStatus.WaitingIdentity)">待身份绑定</MudSelectItem>
                 </MudSelect>
                 <MudTextField T="string" Label="病案号" Value="_filterMrn" ValueChanged="OnMrnChanged"
@@ -82,6 +83,12 @@
         <MudTable T="EsbMessageListItem" ServerData="ServerReload" @ref="_table" Dense="true" Hover="true" Bordered="false" Striped="true"
                   Loading="_loading" RowsPerPage="20" Class="message-log-table">
     <HeaderContent>
+        <MudTh Class="message-log-selection-cell">
+            <MudCheckBox T="bool" Value="@AreAllCurrentPageMessagesSelected"
+                         ValueChanged="ToggleCurrentPageSelection"
+                         Disabled="@(_batchRetrying || !HasRetryableCurrentPageMessages)"
+                         Dense="true" Color="Color.Primary" />
+        </MudTh>
         <MudTh>ID</MudTh>
         <MudTh>事件代码</MudTh>
         <MudTh>事件名称</MudTh>
@@ -100,6 +107,12 @@
         <MudTh>操作</MudTh>
     </HeaderContent>
     <RowTemplate>
+        <MudTd DataLabel="选择" Class="message-log-selection-cell">
+            <MudCheckBox T="bool" Value="@_selectedMessageIds.Contains(context.Id)"
+                         ValueChanged="@(value => SetMessageSelection(context, value))"
+                         Disabled="@(_batchRetrying || !MessageQueryService.CanBatchRetry(context.Status))"
+                         Dense="true" Color="Color.Primary" />
+        </MudTd>
         <MudTd>@context.Id</MudTd>
         <MudTd>@context.TranCode</MudTd>
         <MudTd>@context.TranName</MudTd>
@@ -172,6 +185,8 @@
     private bool _batchRetrying;
     private int _hotRetentionDays = 30;
     private List<string> _tranCodes = [];
+    private IReadOnlyList<EsbMessageListItem> _currentPageMessages = [];
+    private readonly HashSet<long> _selectedMessageIds = [];
     private string? _lastTranCodeRangeSignature;
 
     private string? _filterTranCode;
@@ -186,7 +201,12 @@
     private string? _lastQuerySignature;
 
     private bool ShowFailureReasonColumn => _filterStatus == MessageStatus.Failed;
-    private bool CanBatchRetry => !_batchRetrying && (!_filterStatus.HasValue || _filterStatus == MessageStatus.Failed);
+    private bool CanBatchRetry => !_batchRetrying && _selectedMessageIds.Count > 0;
+    private bool HasRetryableCurrentPageMessages => _currentPageMessages.Any(message => MessageQueryService.CanBatchRetry(message.Status));
+    private bool AreAllCurrentPageMessagesSelected => HasRetryableCurrentPageMessages
+        && _currentPageMessages
+            .Where(message => MessageQueryService.CanBatchRetry(message.Status))
+            .All(message => _selectedMessageIds.Contains(message.Id));
 
     protected override async Task OnPageInitializedAsync()
     {
@@ -212,6 +232,8 @@
 
     private async Task<TableData<EsbMessageListItem>> ServerReload(TableState state, CancellationToken ct)
     {
+        _selectedMessageIds.Clear();
+        _currentPageMessages = [];
         _loading = true;
         try
         {
@@ -228,6 +250,7 @@
                 _filterEventStartTime,
                 _filterEventEndTime);
 
+            _currentPageMessages = items;
             return new TableData<EsbMessageListItem> { Items = items, TotalItems = totalCount };
         }
         finally
@@ -354,34 +377,64 @@
 
     private async Task BatchRetry()
     {
-        if (!CanBatchRetry) return;
-
-        var confirmed = await inj_dialogService.ShowMessageBox(
-            "批量重试",
-            $"确定要将{GetBatchRetryScopeText()}重新提交处理吗？",
-            yesText: "确认重试",
-            cancelText: "取消");
-
-        if (confirmed != true) return;
+        if (!CanBatchRetry)
+            return;
 
         _batchRetrying = true;
         try
         {
-            var count = await QueryService.BatchRetryAsync(
-                _filterTranCode,
-                _filterStatus,
-                _filterStartTime,
-                _filterEndTime,
-                _filterMrn,
-                _filterInpatientNo,
-                _filterVisitNo,
-                _filterEventStartTime,
-                _filterEventEndTime);
-            inj_snackbar.Add(
-                count > 0
-                    ? $"已将 {count} 条失败消息重新提交处理"
-                    : "当前筛选范围内没有可重试的失败消息",
-                count > 0 ? Severity.Success : Severity.Info);
+            var selectedIds = _selectedMessageIds.ToArray();
+            var preview = await QueryService.PreviewBatchRetryAsync(selectedIds);
+            if (preview.ValidCount == 0)
+            {
+                var skippedReasons = BuildSkippedReasonSummary(preview.SkippedItems.Select(item => item.Reason));
+                inj_snackbar.Add(
+                    string.IsNullOrWhiteSpace(skippedReasons)
+                        ? "所选消息当前均不可重试"
+                        : $"所选消息当前均不可重试：{skippedReasons}",
+                    Severity.Info);
+                _selectedMessageIds.Clear();
+                if (_table != null)
+                    await _table.ReloadServerData();
+                return;
+            }
+
+            var statusDistribution = preview.StatusCounts.Count == 0
+                ? "无"
+                : string.Join("、", preview.StatusCounts
+                    .OrderBy(item => item.Key)
+                    .Select(item => $"{item.Key.ToDisplayText()} {item.Value} 条"));
+            var confirmationMessage = new Microsoft.AspNetCore.Components.MarkupString($"""
+                <div>
+                    <p>已选择 <strong>{preview.SelectedCount}</strong> 条消息，本次可提交 <strong>{preview.ValidCount}</strong> 条。</p>
+                    <ul>
+                        <li>状态分布：{statusDistribution}</li>
+                        <li>热表消息：{preview.HotCount} 条</li>
+                        <li>归档消息：{preview.ArchiveCount} 条</li>
+                        <li>跳过消息：{preview.SkippedItems.Count} 条</li>
+                    </ul>
+                    <p style="color:#b42318;"><strong>强制重放风险：</strong>本次将清除幂等回执并完整重新执行，可能造成重复推送或重复写入业务数据。</p>
+                </div>
+                """);
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "确认批量重试消息",
+                confirmationMessage,
+                yesText: "确认重试",
+                cancelText: "取消");
+            if (confirmed != true)
+                return;
+
+            var result = await QueryService.BatchRetryAsync(selectedIds);
+            var resultMessage = $"已提交 {result.SubmittedCount} 条，恢复归档消息 {result.RestoredArchiveCount} 条，跳过 {result.SkippedItems.Count} 条";
+            if (result.SkippedItems.Count > 0)
+            {
+                var skippedReasons = BuildSkippedReasonSummary(result.SkippedItems.Select(item => item.Reason));
+                if (!string.IsNullOrWhiteSpace(skippedReasons))
+                    resultMessage += $"；跳过原因：{skippedReasons}";
+            }
+
+            inj_snackbar.Add(resultMessage, result.SubmittedCount > 0 ? Severity.Success : Severity.Info);
+            _selectedMessageIds.Clear();
 
             if (_table != null)
                 await _table.ReloadServerData();
@@ -394,6 +447,31 @@
         {
             _batchRetrying = false;
         }
+    }
+
+    private void ToggleCurrentPageSelection(bool selected)
+    {
+        if (_batchRetrying)
+            return;
+
+        foreach (var message in _currentPageMessages.Where(message => MessageQueryService.CanBatchRetry(message.Status)))
+        {
+            if (selected)
+                _selectedMessageIds.Add(message.Id);
+            else
+                _selectedMessageIds.Remove(message.Id);
+        }
+    }
+
+    private void SetMessageSelection(EsbMessageListItem message, bool selected)
+    {
+        if (_batchRetrying || !MessageQueryService.CanBatchRetry(message.Status))
+            return;
+
+        if (selected)
+            _selectedMessageIds.Add(message.Id);
+        else
+            _selectedMessageIds.Remove(message.Id);
     }
 
     private async Task SearchMessages()
@@ -454,32 +532,6 @@
 
         _tranCodes = await QueryService.GetDistinctTranCodesAsync(_filterStartTime, _filterEndTime);
         _lastTranCodeRangeSignature = signature;
-    }
-
-    private string GetBatchRetryScopeText()
-    {
-        var scopes = new List<string>();
-
-        if (_filterStartTime.HasValue || _filterEndTime.HasValue)
-            scopes.Add($"{FormatDateTime(_filterStartTime)} 至 {FormatDateTime(_filterEndTime)} 的");
-
-        if (!string.IsNullOrWhiteSpace(_filterTranCode))
-            scopes.Add($"TranCode={_filterTranCode} 的");
-
-        if (!string.IsNullOrWhiteSpace(_filterMrn))
-            scopes.Add($"病案号={_filterMrn} 的");
-
-        if (!string.IsNullOrWhiteSpace(_filterInpatientNo))
-            scopes.Add($"住院号/就诊号={_filterInpatientNo} 的");
-
-        if (!string.IsNullOrWhiteSpace(_filterVisitNo))
-            scopes.Add($"住院次数={_filterVisitNo} 的");
-
-        if (_filterEventStartTime.HasValue || _filterEventEndTime.HasValue)
-            scopes.Add($"事件开始时间 {FormatDateTime(_filterEventStartTime)} 至 {FormatDateTime(_filterEventEndTime)} 的");
-
-        scopes.Add("当前筛选范围内的失败消息");
-        return string.Concat(scopes);
     }
 
     private string GetMessageDetailUrl(long id)
@@ -565,7 +617,12 @@
             : null;
     }
 
-    private static string FormatDateTime(DateTime? value) => value?.ToString("yyyy-MM-dd HH:mm") ?? "未设置";
+    private static string BuildSkippedReasonSummary(IEnumerable<string> reasons) => string.Join(
+        "；",
+        reasons
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .GroupBy(reason => reason)
+            .Select(group => $"{group.Key} {group.Count()} 条"));
 
     private static string GetErrorSummary(string? errorMessage)
     {

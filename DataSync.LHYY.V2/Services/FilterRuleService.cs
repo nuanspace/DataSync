@@ -192,6 +192,90 @@ public class FilterRuleService
         }
     }
 
+    /// <summary>
+    /// 按数组项过滤 Question 多值源路径，并保留与源值同一数组项内满足条件的值。
+    /// </summary>
+    public MappingArrayFilterResult FilterMappingArrayValues(
+        JToken body,
+        JToken context,
+        string sourcePath,
+        List<EsbFilterRule>? rules,
+        JToken? mainContext = null)
+    {
+        var sourceItems = ResolvePath(body, context, sourcePath, mainContext);
+        var rowRules = rules?
+            .Where(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter)
+            .OrderBy(rule => NormalizeRuleGroup(rule.RuleGroup))
+            .ThenBy(rule => rule.SortOrder)
+            .ToList() ?? [];
+
+        if (rowRules.Count == 0)
+        {
+            return new MappingArrayFilterResult(
+                sourceItems.Select(item => item.value).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList(),
+                sourceItems.Count,
+                sourceItems.Count);
+        }
+
+        if (!SubCardPathHelper.TrySplitWildcardPath(sourcePath, out var sourceArrayPath, out _))
+            return new MappingArrayFilterResult([], sourceItems.Count, 0);
+
+        var matchedItems = sourceItems
+            .Where(item => CheckArrayItemRules(item.context, sourceArrayPath, rowRules))
+            .ToList();
+
+        return new MappingArrayFilterResult(
+            matchedItems.Select(item => item.value).Where(value => !string.IsNullOrWhiteSpace(value)).Cast<string>().ToList(),
+            sourceItems.Count,
+            matchedItems.Count);
+    }
+
+    private static bool CheckArrayItemRules(
+        JToken itemContext,
+        string sourceArrayPath,
+        List<EsbFilterRule> rules)
+    {
+        return rules
+            .GroupBy(rule => NormalizeRuleGroup(rule.RuleGroup))
+            .OrderBy(group => group.Key)
+            .Any(group => group.OrderBy(rule => rule.SortOrder).All(rule => IsArrayItemRuleMatched(itemContext, sourceArrayPath, rule)));
+    }
+
+    private static bool IsArrayItemRuleMatched(
+        JToken itemContext,
+        string sourceArrayPath,
+        EsbFilterRule rule)
+    {
+        var rulePath = rule.SourcePath?.Trim() ?? "";
+        if (string.IsNullOrWhiteSpace(rulePath))
+            return Evaluate(null, rule.Operator, rule.CompareValue);
+
+        string relativePath;
+        if (SubCardPathHelper.TrySplitWildcardPath(rulePath, out var ruleArrayPath, out var ruleRelativePath))
+        {
+            if (!SubCardPathHelper.PathsEqual(sourceArrayPath, ruleArrayPath))
+                return false;
+
+            relativePath = ruleRelativePath;
+        }
+        else
+        {
+            relativePath = rulePath;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return Evaluate(itemContext.ToString(), rule.Operator, rule.CompareValue);
+
+        if (SubCardPathHelper.HasArrayWildcard(relativePath))
+        {
+            var values = ResolvePath(itemContext, relativePath);
+            return values.Any(value => Evaluate(value.value, rule.Operator, rule.CompareValue));
+        }
+
+        var token = SubCardPathHelper.SafeSelectToken(itemContext, relativePath);
+        return Evaluate(token?.ToString(), rule.Operator, rule.CompareValue);
+    }
+
     public static List<(JToken context, string? value)> ResolvePath(JToken root, string path)
     {
         if (!path.Contains("[]", StringComparison.Ordinal))
@@ -357,3 +441,8 @@ public class FilterRuleService
     private static IEnumerable<string> SplitCompareValues(string compareValue) =>
         compareValue.Split(ListValueSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
+
+public readonly record struct MappingArrayFilterResult(
+    IReadOnlyList<string> Values,
+    int TotalCount,
+    int MatchedCount);

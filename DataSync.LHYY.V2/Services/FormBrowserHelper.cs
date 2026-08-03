@@ -172,6 +172,12 @@ public static class FormBrowserHelper
 
             var cardNodes = new Dictionary<Guid, CardNode>();
 
+            foreach (var cardInfo in cardDict.Values.Where(card =>
+                         CardBelongsToForm(card, formGroup.FormId, formGroup.FormName)))
+            {
+                GetOrCreateCardNode(cardInfo.Id, cardInfo, cardNodes, cardDict);
+            }
+
             foreach (var cardGroup in withCard)
             {
                 var cardId = cardGroup.Key;
@@ -198,7 +204,7 @@ public static class FormBrowserHelper
             result.Add(formNode);
         }
 
-        return result;
+        return ExpandRelatedForms(result, cardDict, formDict);
     }
 
     /// <summary>
@@ -309,6 +315,8 @@ public static class FormBrowserHelper
             CardId = cardId,
             Name = cardInfo?.Name ?? cardId.ToString(),
             CardType = cardInfo?.CardType ?? "default",
+            FormId = cardInfo?.FormId,
+            RelatedFormId = cardInfo?.RelatedFormId,
             PreUid = cardInfo?.PreUid,
         };
         cardNodes[cardId] = node;
@@ -322,4 +330,113 @@ public static class FormBrowserHelper
 
         return node;
     }
+
+    private static bool CardBelongsToForm(CardInfo card, Guid? formId, string formName)
+    {
+        if (formId.HasValue)
+        {
+            return card.FormId == formId;
+        }
+
+        return !card.FormId.HasValue
+               && card.FormName.Equals(formName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static List<FormNode> ExpandRelatedForms(
+        List<FormNode> forms,
+        IReadOnlyDictionary<Guid, CardInfo> cardDict,
+        IReadOnlyDictionary<Guid, FormInfo>? formDict)
+    {
+        var sourceForms = forms
+            .Where(form => Guid.TryParse(form.Id, out _))
+            .ToDictionary(
+                form => Guid.Parse(form.Id),
+                form => new FormNode
+                {
+                    Id = form.Id,
+                    Name = form.Name,
+                    Cards = form.Cards.Select(CloneCardNode).ToList(),
+                    OrphanQuestions = form.OrphanQuestions.ToList(),
+                });
+        var referencedFormIds = cardDict.Values
+            .Where(card => card.RelatedFormId.HasValue)
+            .Select(card => card.RelatedFormId!.Value)
+            .ToHashSet();
+
+        foreach (var form in forms)
+        {
+            var formPath = Guid.TryParse(form.Id, out var currentFormId)
+                ? new HashSet<Guid> { currentFormId }
+                : [];
+            foreach (var card in form.Cards)
+            {
+                ExpandRelatedCards(card, sourceForms, new HashSet<Guid>(formPath));
+            }
+
+            AssignParentSubCards(form.Cards, null);
+            form.QuestionCount = CountQuestions(form.Cards) + form.OrphanQuestions.Count;
+        }
+
+        return forms
+            .Where(form => !Guid.TryParse(form.Id, out var formId)
+                           || !referencedFormIds.Contains(formId)
+                           || formDict?.GetValueOrDefault(formId)?.IsHidden != true)
+            .ToList();
+    }
+
+    private static void ExpandRelatedCards(
+        CardNode card,
+        IReadOnlyDictionary<Guid, FormNode> sourceForms,
+        HashSet<Guid> formPath)
+    {
+        foreach (var child in card.SubCards.ToList())
+        {
+            ExpandRelatedCards(child, sourceForms, new HashSet<Guid>(formPath));
+        }
+
+        if (!card.RelatedFormId.HasValue
+            || formPath.Contains(card.RelatedFormId.Value)
+            || !sourceForms.TryGetValue(card.RelatedFormId.Value, out var relatedForm))
+        {
+            return;
+        }
+
+        var relatedPath = new HashSet<Guid>(formPath) { card.RelatedFormId.Value };
+        card.Questions.AddRange(relatedForm.OrphanQuestions);
+        foreach (var relatedRoot in relatedForm.Cards)
+        {
+            var clone = CloneCardNode(relatedRoot);
+            ExpandRelatedCards(clone, sourceForms, new HashSet<Guid>(relatedPath));
+            card.SubCards.Add(clone);
+        }
+
+        SortCardChildrenRecursive([card]);
+    }
+
+    private static CardNode CloneCardNode(CardNode source) => new()
+    {
+        CardId = source.CardId,
+        Name = source.Name,
+        CardType = source.CardType,
+        FormId = source.FormId,
+        RelatedFormId = source.RelatedFormId,
+        PreUid = source.PreUid,
+        IsExpanded = source.IsExpanded,
+        Questions = source.Questions.ToList(),
+        SubCards = source.SubCards.Select(CloneCardNode).ToList(),
+    };
+
+    private static void AssignParentSubCards(IEnumerable<CardNode> cards, CardNode? parentSubCard)
+    {
+        foreach (var card in cards)
+        {
+            card.ParentSubCardId = parentSubCard?.CardId;
+            card.ParentSubCardName = parentSubCard?.Name;
+            var currentSubCard = card.CardType is "multiple" or "table" ? card : parentSubCard;
+            AssignParentSubCards(card.SubCards, currentSubCard);
+        }
+    }
+
+    private static int CountQuestions(IEnumerable<CardNode> cards) =>
+        cards.Sum(card => card.Questions.Count + CountQuestions(card.SubCards));
 }

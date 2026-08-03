@@ -239,18 +239,38 @@ public class ConfigService
             !string.IsNullOrWhiteSpace(config.EventTypeName) ||
             !string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) ||
             !string.IsNullOrWhiteSpace(config.VisitNoSourcePath) ||
-            !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath);
+            !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath) ||
+            !string.IsNullOrWhiteSpace(config.CombinedVisitIdentitySourcePath);
         var hasMrnPath = !string.IsNullOrWhiteSpace(config.MrnSourcePath);
+        var hasCombinedIdentityPath = !string.IsNullOrWhiteSpace(config.CombinedVisitIdentitySourcePath);
+        var hasCombinedIdentityFormat = config.CombinedVisitIdentityFormat is
+            CombinedVisitIdentityFormat.MrnUnderscoreVisitNo or
+            CombinedVisitIdentityFormat.MrnVisitNo;
+        var hasCombinedIdentity = hasCombinedIdentityPath && hasCombinedIdentityFormat;
+
+        if (!Enum.IsDefined(config.CombinedVisitIdentityFormat))
+            errors.Add("病案号+住院次数组合格式无效");
         var hasVisitIdentityPath =
             !string.IsNullOrWhiteSpace(config.VisitNoSourcePath) ||
-            !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath);
+            !string.IsNullOrWhiteSpace(config.InpatientNoSourcePath) ||
+            hasCombinedIdentity;
+
+        if (hasCombinedIdentityPath && !hasCombinedIdentityFormat)
+            errors.Add("已配置病案号+住院次数路径，请选择组合格式");
+
+        if (!hasCombinedIdentityPath && hasCombinedIdentityFormat)
+            errors.Add("已选择病案号+住院次数组合格式，请配置组合标识路径");
 
         if (config.HandlerType == HandlerType.GenericQuestionWriteBack)
         {
             if (!hasMrnPath && !hasVisitIdentityPath)
-                errors.Add("未配置病案号路径、就诊号/住院号路径或住院次数路径");
+                errors.Add("未配置病案号路径、就诊号/住院号路径、住院次数路径或病案号+住院次数组合标识");
         }
-        else if (!hasMrnPath)
+        else if (config.HandlerType == HandlerType.Generic && !hasMrnPath && !hasCombinedIdentity)
+        {
+            errors.Add("未配置病案号路径或病案号+住院次数组合标识");
+        }
+        else if (config.HandlerType != HandlerType.Generic && !hasMrnPath)
         {
             errors.Add("未配置病案号路径（MrnSourcePath）");
         }
@@ -259,9 +279,10 @@ public class ConfigService
             hasEventIntent &&
             string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) &&
             string.IsNullOrWhiteSpace(config.VisitNoSourcePath) &&
-            string.IsNullOrWhiteSpace(config.InpatientNoSourcePath))
+            string.IsNullOrWhiteSpace(config.InpatientNoSourcePath) &&
+            !hasCombinedIdentity)
         {
-            errors.Add("已配置事件处理时，至少需要配置事件开始时间路径、就诊号/住院号路径或住院次数路径之一");
+            errors.Add("已配置事件处理时，至少需要配置事件开始时间路径、就诊号/住院号路径、住院次数路径或病案号+住院次数组合标识之一");
         }
 
         if (hasEventIntent &&
@@ -275,9 +296,10 @@ public class ConfigService
         if (config.AllowMissingEventTime &&
             string.IsNullOrWhiteSpace(config.EventStartTimeSourcePath) &&
             string.IsNullOrWhiteSpace(config.VisitNoSourcePath) &&
-            string.IsNullOrWhiteSpace(config.InpatientNoSourcePath))
+            string.IsNullOrWhiteSpace(config.InpatientNoSourcePath) &&
+            !hasCombinedIdentity)
         {
-            errors.Add("允许缺少事件时间时，至少需要配置就诊号/住院号路径或住院次数路径");
+            errors.Add("允许缺少事件时间时，至少需要配置就诊号/住院号路径、住院次数路径或病案号+住院次数组合标识");
         }
 
         if (config.ReceiveMode == ReceiveMode.Direct &&

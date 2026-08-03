@@ -18,6 +18,7 @@ public class GenericQuestionWriteBackProcessor
     private readonly ConfigService _configService;
     private readonly EventIdentityService _eventIdentityService;
     private readonly DirectTargetWriteService _directTargetWriteService;
+    private readonly NestedFormWriteService _nestedFormWriteService;
     private readonly ILogger<GenericQuestionWriteBackProcessor> _logger;
 
     public GenericQuestionWriteBackProcessor(
@@ -27,6 +28,7 @@ public class GenericQuestionWriteBackProcessor
         ConfigService configService,
         EventIdentityService eventIdentityService,
         DirectTargetWriteService directTargetWriteService,
+        NestedFormWriteService nestedFormWriteService,
         ILogger<GenericQuestionWriteBackProcessor> logger)
     {
         _bioCore = bioCore;
@@ -35,6 +37,7 @@ public class GenericQuestionWriteBackProcessor
         _configService = configService;
         _eventIdentityService = eventIdentityService;
         _directTargetWriteService = directTargetWriteService;
+        _nestedFormWriteService = nestedFormWriteService;
         _logger = logger;
     }
 
@@ -59,13 +62,15 @@ public class GenericQuestionWriteBackProcessor
             : MessageJsonHelper.ReadString(root, config.MrnSourcePath, mainContext);
         var visitNo = MessageJsonHelper.ReadString(root, config.VisitNoSourcePath, mainContext);
         var inpatientNo = MessageJsonHelper.ReadString(root, config.InpatientNoSourcePath, mainContext);
+        var combinedVisitIdentity = MessageJsonHelper.ReadString(root, config.CombinedVisitIdentitySourcePath, mainContext);
         var eventStartTime = MessageJsonHelper.ReadDateTime(root, config.EventStartTimeSourcePath, mainContext);
 
         if (string.IsNullOrWhiteSpace(mrn) &&
             string.IsNullOrWhiteSpace(visitNo) &&
-            string.IsNullOrWhiteSpace(inpatientNo))
+            string.IsNullOrWhiteSpace(inpatientNo) &&
+            string.IsNullOrWhiteSpace(combinedVisitIdentity))
         {
-            return ProcessResult.Fail("未提取到病案号，也未提取到就诊号/住院号或住院次数");
+            return ProcessResult.Fail("未提取到病案号、就诊号/住院号、住院次数或病案号+住院次数组合标识");
         }
 
         var licenseCode = string.IsNullOrWhiteSpace(config.LicenseCode)
@@ -82,6 +87,31 @@ public class GenericQuestionWriteBackProcessor
             return ProcessResult.Fail($"未找到 FormSet: LicenseCode={licenseCode}, EventType={config.EventTypeName}");
 
         EsbEventIdentity? visitIdentity = null;
+        if (!string.IsNullOrWhiteSpace(combinedVisitIdentity))
+        {
+            var lookup = await result.LogStepAsync("按病案号+住院次数组合标识定位患者事件",
+                () => _eventIdentityService.FindByCombinedVisitIdentityAsync(
+                    config.IntegrationProjectCode,
+                    combinedVisitIdentity,
+                    config.CombinedVisitIdentityFormat,
+                    mrn,
+                    config.EventTypeName));
+
+            if (lookup.IsAmbiguous)
+                return ProcessResult.Fail($"病案号+住院次数组合标识匹配到多条住院事件：{combinedVisitIdentity}");
+
+            visitIdentity = lookup.Identity;
+            if (visitIdentity != null)
+            {
+                mrn ??= visitIdentity.Mrn;
+                inpatientNo ??= visitIdentity.InpatientNo;
+                visitNo ??= visitIdentity.VisitNo;
+                message.Mrn ??= visitIdentity.Mrn;
+                message.InpatientNo ??= visitIdentity.InpatientNo;
+                message.VisitNo ??= visitIdentity.VisitNo;
+            }
+        }
+
         patient? dbPatient;
         if (!string.IsNullOrWhiteSpace(mrn))
         {
@@ -90,7 +120,7 @@ public class GenericQuestionWriteBackProcessor
         }
         else
         {
-            visitIdentity = await result.LogStepAsync("按就诊标识定位患者事件",
+            visitIdentity ??= await result.LogStepAsync("按就诊标识定位患者事件",
                 () => _eventIdentityService.FindByVisitIdentityAsync(
                     config.IntegrationProjectCode,
                     null,
@@ -99,7 +129,7 @@ public class GenericQuestionWriteBackProcessor
                     config.EventTypeName));
 
             if (visitIdentity == null)
-                return BuildMissingVisitIdentityResult(config, "未提取到病案号且未能按就诊号/住院号或住院次数定位患者事件");
+                return BuildMissingVisitIdentityResult(config, "未提取到病案号且未能按就诊号/住院号、住院次数或组合标识定位患者事件");
 
             mrn = visitIdentity.Mrn;
             dbPatient = await result.LogStepAsync("按事件身份获取已有患者",
@@ -157,6 +187,52 @@ public class GenericQuestionWriteBackProcessor
             message.TranCode,
             config.IntegrationProjectCode,
             MappingTarget.SubCard);
+        var formCardDict = hasSubCardMappings
+            ? await _bioCore.GetAllCardListByFormSetAsync(formSet.id)
+            : [];
+        var hasNestedSubCardMappings = hasSubCardMappings
+                                       && await _mappingExecutor.HasNestedSubCardMappingsAsync(
+                                           message.TranCode,
+                                           config.IntegrationProjectCode,
+                                           formCardDict);
+
+        if (hasNestedSubCardMappings)
+        {
+            try
+            {
+                var questionValues = await result.ExtractWithLogAsync(
+                    "提取Question映射",
+                    () => _mappingExecutor.ExtractQuestionValuesAsync(
+                        root,
+                        message.TranCode,
+                        config.IntegrationProjectCode,
+                        config.MainRecordArrayPath));
+                var subCardData = await result.ExtractWithLogAsync(
+                    "提取SubCard映射",
+                    () => _mappingExecutor.ExtractSubCardDataAsync(
+                        root,
+                        message.TranCode,
+                        filterResult.RowFilterResults,
+                        config.IntegrationProjectCode,
+                        config.MainRecordArrayPath,
+                        formCardDict));
+                var writeResult = await _nestedFormWriteService.WriteAsync(
+                    dbEvent.Event.id,
+                    formQuestionDict,
+                    questionValues,
+                    subCardData);
+                result.AddStep("写入Question", true, $"成功写入 {writeResult.QuestionCount} 个问题答案");
+                result.AddStep("写入嵌套SubCard", true, $"成功写入 {writeResult.SubCardCount} 行子卡片");
+
+                var nestedResult = ProcessResult.Success("处理成功", dbPatient.id, dbEvent.Event.id);
+                nestedResult.Steps = result.Steps;
+                return nestedResult;
+            }
+            catch (Exception ex)
+            {
+                return ProcessResult.Fail($"写入嵌套 SubCard 失败: {ex.Message}");
+            }
+        }
 
         IFormsetImportService importService;
         try
@@ -173,6 +249,7 @@ public class GenericQuestionWriteBackProcessor
                 filterResult,
                 result,
                 formQuestionDict,
+                formCardDict,
                 dbPatient,
                 dbEvent.Event,
                 hasSubCardMappings);
@@ -226,6 +303,7 @@ public class GenericQuestionWriteBackProcessor
                         filterResult,
                         result,
                         formQuestionDict,
+                        formCardDict,
                         dbPatient,
                         dbEvent.Event,
                         importService);
@@ -262,6 +340,7 @@ public class GenericQuestionWriteBackProcessor
         FilterResult filterResult,
         ProcessResult result,
         Dictionary<Guid, form_question> formQuestionDict,
+        IReadOnlyDictionary<Guid, CardInfo> formCardDict,
         patient dbPatient,
         patient_event dbEvent,
         bool hasSubCardMappings)
@@ -305,6 +384,7 @@ public class GenericQuestionWriteBackProcessor
                     filterResult,
                     result,
                     formQuestionDict,
+                    formCardDict,
                     dbPatient,
                     dbEvent);
             }
@@ -328,6 +408,7 @@ public class GenericQuestionWriteBackProcessor
         FilterResult filterResult,
         ProcessResult result,
         Dictionary<Guid, form_question> formQuestionDict,
+        IReadOnlyDictionary<Guid, CardInfo> formCardDict,
         patient dbPatient,
         patient_event dbEvent,
         IFormsetImportService importService)
@@ -339,7 +420,8 @@ public class GenericQuestionWriteBackProcessor
                 message.TranCode,
                 filterResult.RowFilterResults,
                 config.IntegrationProjectCode,
-                config.MainRecordArrayPath));
+                config.MainRecordArrayPath,
+                formCardDict));
 
         var subCardCount = 0;
         foreach (var subCardData in subCardDataList)
@@ -351,7 +433,7 @@ public class GenericQuestionWriteBackProcessor
                     var subCardId = Guid.Empty;
                     var written = false;
 
-                    foreach (var questionValue in row)
+                    foreach (var questionValue in row.Values)
                     {
                         var questionId = questionValue.QuestionId;
                         if (!formQuestionDict.TryGetValue(questionId, out var question))
@@ -421,6 +503,7 @@ public class GenericQuestionWriteBackProcessor
         FilterResult filterResult,
         ProcessResult result,
         Dictionary<Guid, form_question> formQuestionDict,
+        IReadOnlyDictionary<Guid, CardInfo> formCardDict,
         patient dbPatient,
         patient_event dbEvent)
     {
@@ -431,7 +514,8 @@ public class GenericQuestionWriteBackProcessor
                 message.TranCode,
                 filterResult.RowFilterResults,
                 config.IntegrationProjectCode,
-                config.MainRecordArrayPath));
+                config.MainRecordArrayPath,
+                formCardDict));
 
         var subCardCount = 0;
         foreach (var subCardData in subCardDataList)
@@ -441,7 +525,7 @@ public class GenericQuestionWriteBackProcessor
                 var subCardId = Guid.NewGuid();
                 var written = false;
 
-                foreach (var questionValue in row)
+                foreach (var questionValue in row.Values)
                 {
                     var questionId = questionValue.QuestionId;
                     if (!formQuestionDict.TryGetValue(questionId, out var question))
@@ -547,8 +631,8 @@ public class GenericQuestionWriteBackProcessor
 
         return config.MissingEventIdentityPolicy switch
         {
-            MissingEventIdentityPolicy.Pending => (null, ProcessResult.WaitingIdentity("缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间")),
-            _ => (null, ProcessResult.Fail("缺少事件时间且未能按就诊号/住院号或住院次数定位住院时间"))
+            MissingEventIdentityPolicy.Pending => (null, ProcessResult.WaitingIdentity("缺少事件时间且未能按就诊号/住院号、住院次数或组合标识定位住院时间")),
+            _ => (null, ProcessResult.Fail("缺少事件时间且未能按就诊号/住院号、住院次数或组合标识定位住院时间"))
         };
     }
 

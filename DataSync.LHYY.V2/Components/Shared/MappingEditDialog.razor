@@ -431,7 +431,8 @@
                     <MudText Typo="Typo.subtitle2" Class="mb-2">过滤条件</MudText>
                     <FilterRuleEditor Rules="FilterRules" RulesChanged="OnFilterRulesChanged"
                                       JsonText="@(JsonTreeLayout == JsonTreeLayout.SidePanel ? null : JsonText)"
-                                      ShowScope="false"
+                                      ShowScope="@(EditItem?.MappingTarget == MappingTarget.Question && SubCardPathHelper.HasArrayWildcard(EditItem.SourcePath))"
+                                      UseMappingScopeLabels="true"
                                       OnRequestPathPick="@(JsonTreeLayout == JsonTreeLayout.SidePanel ? _filterRulePathPickCallback : default(EventCallback<int>))"
                                       ActivePickIndex="@(_pathPickTarget == PathPickTarget.FilterRuleSourcePath ? _pickFilterRuleIndex : -1)" />
                 </MudItem>

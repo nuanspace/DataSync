@@ -45,6 +45,8 @@ public sealed class ConfigSyncInterfaceConfig
     public string? EventStartTimeSourcePath { get; set; }
     public string? VisitNoSourcePath { get; set; }
     public string? InpatientNoSourcePath { get; set; }
+    public string? CombinedVisitIdentitySourcePath { get; set; }
+    public CombinedVisitIdentityFormat CombinedVisitIdentityFormat { get; set; }
     public string? SourceMessageIdPath { get; set; }
     public string? MainRecordArrayPath { get; set; }
     public bool AllowMissingEventTime { get; set; }

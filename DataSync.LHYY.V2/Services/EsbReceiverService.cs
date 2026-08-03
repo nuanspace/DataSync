@@ -120,6 +120,55 @@ public class EsbReceiverService
             cancellationToken);
     }
 
+    public async Task<List<MessageReceiptKey>> ResolveReplayReceiptKeysAsync(
+        EsbMessage message,
+        CancellationToken cancellationToken = default)
+    {
+        var projectCode = message.IntegrationProjectCode
+            ?? await _integrationProjectService.GetCurrentProjectCodeAsync();
+        var keys = new HashSet<MessageReceiptKey>();
+
+        void AddKey(string tranCode, string? sourceMessageId, string? idempotentKey)
+        {
+            if (string.IsNullOrWhiteSpace(tranCode) ||
+                string.IsNullOrWhiteSpace(sourceMessageId) && string.IsNullOrWhiteSpace(idempotentKey))
+                return;
+
+            keys.Add(new MessageReceiptKey(projectCode, tranCode, sourceMessageId, idempotentKey));
+        }
+
+        AddKey(message.TranCode, message.SourceMessageId, message.IdempotentKey);
+
+        if (!MessageJsonHelper.TryParseToken(message.RawJson, out var root, out _))
+            return keys.ToList();
+
+        var analysis = await AnalyzeRequestAsync(root, message.RawJson, projectCode);
+        foreach (var item in analysis.Items.Where(i => i.Payload != null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var match in item.Matches)
+            {
+                if (!TryBuildPayloadSlices(
+                        item.Payload!,
+                        item.RawJson ?? item.Payload!.ToString(Newtonsoft.Json.Formatting.None),
+                        match.Config,
+                        item.RecordIndex,
+                        out var slices,
+                        out _))
+                    continue;
+
+                foreach (var slice in slices)
+                {
+                    var sourceMessageId = _idempotentKeyService.ResolveSourceMessageId(slice.Payload, match.Config);
+                    var idempotentKey = await _idempotentKeyService.BuildIdempotentKeyAsync(slice.Payload, match.Config);
+                    AddKey(match.Config.TranCode, sourceMessageId, idempotentKey);
+                }
+            }
+        }
+
+        return keys.ToList();
+    }
+
     private async Task<HandleMessageResult> ProcessRequestMessageAsync(
         long messageId,
         string currentProjectCode,
@@ -526,16 +575,19 @@ public class EsbReceiverService
             return null;
 
         var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lockKey = AdvisoryLockKeyHelper.Build(
-            "esb-receipt",
+        var lockKeys = MessageReceiptService.BuildAdvisoryLockKeys(
             integrationProjectCode,
             tranCode,
-            string.IsNullOrWhiteSpace(sourceMessageId) ? null : "source:" + sourceMessageId,
-            string.IsNullOrWhiteSpace(idempotentKey) ? null : "key:" + idempotentKey);
-        await db.Database.ExecuteSqlRawAsync(
-            "SELECT pg_advisory_xact_lock({0})",
-            new object[] { lockKey },
-            cancellationToken);
+            sourceMessageId,
+            idempotentKey);
+        foreach (var lockKey in lockKeys)
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "SELECT pg_advisory_xact_lock({0})",
+                new object[] { lockKey },
+                cancellationToken);
+        }
+
         return transaction;
     }
 
@@ -1702,3 +1754,9 @@ public class EsbReceiverService
         public bool UseEsbResponse => IsLegacyEsb || ResponseMode == ApiResponseMode.Esb;
     }
 }
+
+public readonly record struct MessageReceiptKey(
+    string IntegrationProjectCode,
+    string TranCode,
+    string? SourceMessageId,
+    string? IdempotentKey);
