@@ -28,6 +28,10 @@
 **/publish
 **/publish-*
 **/datasyn-cyyy.*
+**/docker包
+**/*.tar
+**/*.rar
+**/*.zip
 **/ApiDataCollector
 LICENSE
 README.md
