@@ -6,7 +6,7 @@
 
 主要入口：
 
-- 采集：`IngestionService`、`IngestionWorker`、`DataLakeClient`、`SqlServerQueryService`。
+- 采集：`IngestionService`、`IngestionWorker`、`DataLakeClient`、`SqlServerQueryService`。数据库查询服务支持 SQL Server、Oracle、MySQL 和 Doris（MySQL 协议）；MySQL 与 Doris 分别使用 3306 和 9030 默认端口。
 - 编排：`SyncOrchestrator`、`SyncWorker`、`PendingSyncService`、`SyncLogService`。
 - 推送：`ApiPushService`、`DatabasePushService`、`PushServiceFactory`。
 - 本地查询：`LocalQueryService`。
@@ -28,12 +28,14 @@
 ## 采集和推送流程
 
 1. Worker 读取启用采集源。
-2. 数据湖来源通过 OAuth Token 调用 REST JSON；数据库来源执行配置 SQL。
+2. 数据湖来源通过 OAuth Token 调用 REST JSON；数据库来源执行配置 SQL。MySQL/Doris 来源只允许 `SELECT`/`WITH`，并要求数据库账号具备只读权限。
 3. 采集结果写入 `cyyy.dl_*` 数据池并记录采集日志。
 4. 同步任务根据触发字段生成或领取 `pending_sync_items`。
 5. `PushServiceFactory` 按任务配置选择 API 或 PostgreSQL 推送。
 6. API 主路径把包含接口编码和业务数据的消息推到 LHYY `/api/esb`。
 7. 记录成功、失败和重试状态；不得以最大水位永久跳过本地失败项。
+
+同一业务主键重新采集时，快照内容未变化则保留成功状态；内容变化则清除成功状态并重新进入待同步队列，使源端更新能够继续传递到下游。
 
 ## 补数据规则
 
@@ -51,4 +53,4 @@
 
 - 数据库结构变更遵循 `DataSync.CYYY/AGENTS.md`，并增加对应迁移文件。
 - 修改采集源、过滤字段、触发条件、推送报文或重试水位时更新本文件。
-- 至少验证受影响来源的查询、队列状态迁移、重复执行和下游报文结构。
+- 至少验证受影响来源的查询、队列状态迁移、重复执行、内容更新重新入队和下游报文结构。

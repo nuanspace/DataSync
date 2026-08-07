@@ -9,7 +9,7 @@ DataSync 是面向多医院、多来源和多协议的 ntcare 集成适配平台
 ## 项目职责
 
 - `DataSync.Common`：面向 .NET 9/10 的共享协议和基础能力，包括 OCR 契约与 FollowUp 医院包协议；不承载应用编排。
-- `DataSync.CYYY`：主动采集与同步编排。采集数据湖、SQL Server、Oracle 等来源，落本地数据池，生成待处理队列，再推送 API 或 PostgreSQL。
+- `DataSync.CYYY`：主动采集与同步编排。采集数据湖、SQL Server、Oracle、MySQL、Doris（MySQL 协议）等来源，落本地数据池，生成待处理队列，再推送 API 或 PostgreSQL。
 - `DataSync.LHYY.V2`：统一接收、接口识别、配置映射、消息处理及 Bio.Core/目标表写入；同时承载医院包校验、导入、恢复和数据库运维入口。
 - 两个应用通过 DataSync 管理库共享配置/状态；当前常规 ntcare 路径是 CYYY 推送 `/api/esb`，再由 LHYY 写入产品库。
 

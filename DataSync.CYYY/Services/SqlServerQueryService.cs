@@ -2,6 +2,7 @@ using System.Data;
 using System.Data.Common;
 using System.Text.RegularExpressions;
 using Microsoft.Data.SqlClient;
+using MySqlConnector;
 using Oracle.ManagedDataAccess.Client;
 
 namespace DataSync.CYYY.Services;
@@ -202,6 +203,12 @@ public class DatabaseQueryService
             if (IngestionService.IsOracleDatabaseType(databaseType))
                 return ResolveOracleConnectionString(host, database, username, password);
 
+            if (IngestionService.IsDorisDatabaseType(databaseType))
+                return ResolveDorisConnectionString(host, database, username, password);
+
+            if (IngestionService.IsMySqlDatabaseType(databaseType))
+                return ResolveMySqlConnectionString(host, database, username, password);
+
             if (string.IsNullOrWhiteSpace(database))
                 throw new InvalidOperationException("SQL Server 连接配置缺少数据库");
             if (string.IsNullOrWhiteSpace(username))
@@ -229,6 +236,110 @@ public class DatabaseQueryService
             return connectionStringName;
 
         throw new InvalidOperationException($"未找到 {databaseType} 连接串：{connectionStringName}");
+    }
+
+    internal static string ResolveDorisConnectionString(
+        string host,
+        string? database,
+        string? username,
+        string? password)
+        => ResolveMySqlProtocolConnectionString(
+            host,
+            database,
+            username,
+            password,
+            "Doris",
+            "FE 主机",
+            9030,
+            MySqlSslMode.None);
+
+    internal static string ResolveMySqlConnectionString(
+        string host,
+        string? database,
+        string? username,
+        string? password)
+        => ResolveMySqlProtocolConnectionString(
+            host,
+            database,
+            username,
+            password,
+            "MySQL",
+            "主机",
+            3306,
+            MySqlSslMode.Preferred);
+
+    private static string ResolveMySqlProtocolConnectionString(
+        string host,
+        string? database,
+        string? username,
+        string? password,
+        string displayName,
+        string hostLabel,
+        uint defaultPort,
+        MySqlSslMode sslMode)
+    {
+        if (string.IsNullOrWhiteSpace(database))
+            throw new InvalidOperationException($"{displayName} 连接配置缺少数据库");
+        if (string.IsNullOrWhiteSpace(username))
+            throw new InvalidOperationException($"{displayName} 连接配置缺少用户名");
+
+        var (server, port) = ParseMySqlProtocolEndpoint(host, displayName, hostLabel, defaultPort);
+        var builder = new MySqlConnectionStringBuilder
+        {
+            Server = server,
+            Port = port,
+            Database = database.Trim(),
+            UserID = username.Trim(),
+            Password = password ?? "",
+            SslMode = sslMode,
+            ConnectionTimeout = 15,
+            AllowUserVariables = false,
+            AllowZeroDateTime = true
+        };
+        return builder.ConnectionString;
+    }
+
+    private static (string Server, uint Port) ParseMySqlProtocolEndpoint(
+        string host,
+        string displayName,
+        string hostLabel,
+        uint defaultPort)
+    {
+        var value = host.Trim();
+        if (value.Length == 0)
+            throw new InvalidOperationException($"{displayName} 连接配置缺少{hostLabel}");
+
+        if (value.StartsWith('['))
+        {
+            var closingBracket = value.IndexOf(']');
+            if (closingBracket < 2)
+                throw new InvalidOperationException($"{displayName} {hostLabel}格式无效");
+
+            var server = value[1..closingBracket];
+            if (closingBracket == value.Length - 1)
+                return (server, defaultPort);
+
+            if (value[closingBracket + 1] != ':' ||
+                !uint.TryParse(value[(closingBracket + 2)..], out var ipv6Port) ||
+                ipv6Port == 0 || ipv6Port > 65535)
+            {
+                throw new InvalidOperationException($"{displayName} 端口格式无效");
+            }
+
+            return (server, ipv6Port);
+        }
+
+        var firstColon = value.IndexOf(':');
+        var lastColon = value.LastIndexOf(':');
+        if (firstColon > 0 && firstColon == lastColon)
+        {
+            if (!uint.TryParse(value[(firstColon + 1)..], out var port) || port == 0 || port > 65535)
+                throw new InvalidOperationException($"{displayName} 端口格式无效");
+
+            return (value[..firstColon], port);
+        }
+
+        return (value, defaultPort);
     }
 
     private static string ResolveOracleConnectionString(
@@ -266,11 +377,14 @@ public class DatabaseQueryService
 
     private static DbConnection CreateConnection(string databaseType, string connectionString)
     {
-        return IngestionService.IsOracleDatabaseType(databaseType)
-            ? new OracleConnection(connectionString)
+        if (IngestionService.IsOracleDatabaseType(databaseType))
+            return new OracleConnection(connectionString)
             {
                 UseHourOffsetForUnsupportedTimezone = true
-            }
+            };
+
+        return IngestionService.IsMySqlProtocolDatabaseType(databaseType)
+            ? new MySqlConnection(connectionString)
             : new SqlConnection(connectionString);
     }
 
@@ -298,6 +412,14 @@ public class DatabaseQueryService
             return;
         }
 
+        if (IngestionService.IsMySqlProtocolDatabaseType(databaseType))
+        {
+            var mySqlCommand = (MySqlCommand)cmd;
+            mySqlCommand.Parameters.Add("@from", MySqlDbType.DateTime).Value = from;
+            mySqlCommand.Parameters.Add("@to", MySqlDbType.DateTime).Value = to;
+            return;
+        }
+
         var sqlCommand = (SqlCommand)cmd;
         sqlCommand.Parameters.Add("@from", SqlDbType.DateTime2).Value = from;
         sqlCommand.Parameters.Add("@to", SqlDbType.DateTime2).Value = to;
@@ -315,6 +437,12 @@ public class DatabaseQueryService
             return;
         }
 
+        if (IngestionService.IsMySqlProtocolDatabaseType(databaseType))
+        {
+            ((MySqlCommand)cmd).Parameters.Add($"@{name}", MySqlDbType.VarChar).Value = value;
+            return;
+        }
+
         ((SqlCommand)cmd).Parameters.Add($"@{name}", SqlDbType.NVarChar).Value = value;
     }
 
@@ -322,13 +450,13 @@ public class DatabaseQueryService
     {
         if (value is DateTime dateTime)
         {
-            AddDateTimeParameter(cmd, IngestionService.IsOracleDatabaseType(databaseType), name, dateTime);
+            AddDateTimeParameter(cmd, databaseType, name, dateTime);
             return;
         }
 
         if (value is DateTimeOffset dateTimeOffset)
         {
-            AddDateTimeParameter(cmd, IngestionService.IsOracleDatabaseType(databaseType), name, dateTimeOffset.DateTime);
+            AddDateTimeParameter(cmd, databaseType, name, dateTimeOffset.DateTime);
             return;
         }
 
@@ -342,17 +470,23 @@ public class DatabaseQueryService
         var toName = isOracle ? OracleToParameter : "to";
 
         if (ContainsNamedParameter(cmd.CommandText, isOracle ? ':' : '@', fromName))
-            AddDateTimeParameter(cmd, isOracle, fromName, new DateTime(1753, 1, 1));
+            AddDateTimeParameter(cmd, databaseType, fromName, new DateTime(1753, 1, 1));
 
         if (ContainsNamedParameter(cmd.CommandText, isOracle ? ':' : '@', toName))
-            AddDateTimeParameter(cmd, isOracle, toName, new DateTime(9999, 12, 31, 23, 59, 59));
+            AddDateTimeParameter(cmd, databaseType, toName, new DateTime(9999, 12, 31, 23, 59, 59));
     }
 
-    private static void AddDateTimeParameter(DbCommand cmd, bool isOracle, string name, DateTime value)
+    private static void AddDateTimeParameter(DbCommand cmd, string databaseType, string name, DateTime value)
     {
-        if (isOracle)
+        if (IngestionService.IsOracleDatabaseType(databaseType))
         {
             ((OracleCommand)cmd).Parameters.Add(name, OracleDbType.TimeStamp).Value = value;
+            return;
+        }
+
+        if (IngestionService.IsMySqlProtocolDatabaseType(databaseType))
+        {
+            ((MySqlCommand)cmd).Parameters.Add($"@{name}", MySqlDbType.DateTime).Value = value;
             return;
         }
 
@@ -413,7 +547,7 @@ public class DatabaseQueryService
             RegexOptions.IgnoreCase);
     }
 
-    private static void ValidateSelectSql(string sql, string databaseType)
+    internal static void ValidateSelectSql(string sql, string databaseType)
     {
         if (string.IsNullOrWhiteSpace(sql))
             throw new InvalidOperationException($"{databaseType} 查询 SQL 不能为空");
@@ -427,6 +561,15 @@ public class DatabaseQueryService
 
         if (trimmed.Contains(';'))
             throw new InvalidOperationException($"{databaseType} 查询不允许包含分号");
+
+        var sqlWithoutLiterals = Regex.Replace(trimmed, @"'(?:''|[^'])*'", "''");
+        if (Regex.IsMatch(
+                sqlWithoutLiterals,
+                @"\b(INSERT|UPDATE|DELETE|MERGE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE|CALL|EXEC|EXECUTE|LOAD)\b|\bINTO\s+OUTFILE\b",
+                RegexOptions.IgnoreCase))
+        {
+            throw new InvalidOperationException($"{databaseType} 查询包含非只读关键字");
+        }
     }
 
     private static string BuildValueQuerySql(string sql, string databaseType, string? queryField)
@@ -468,10 +611,10 @@ public class DatabaseQueryService
         return $"SELECT * FROM ({trimmed}) q WHERE {string.Join(" AND ", conditions)}";
     }
 
-    private static string BuildParameterReference(string databaseType, string name) =>
+    internal static string BuildParameterReference(string databaseType, string name) =>
         IngestionService.IsOracleDatabaseType(databaseType) ? $":{name}" : $"@{name}";
 
-    private static string BuildColumnReference(string databaseType, string queryField)
+    internal static string BuildColumnReference(string databaseType, string queryField)
     {
         var field = queryField.Trim();
         if (field.Length == 0 ||
@@ -482,6 +625,8 @@ public class DatabaseQueryService
 
         return IngestionService.IsOracleDatabaseType(databaseType)
             ? $"q.{field}"
+            : IngestionService.IsMySqlProtocolDatabaseType(databaseType)
+                ? $"q.`{field}`"
             : $"q.[{field.Replace("]", "]]", StringComparison.Ordinal)}]";
     }
 

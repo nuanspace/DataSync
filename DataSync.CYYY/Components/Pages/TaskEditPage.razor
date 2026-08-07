@@ -1315,10 +1315,18 @@
     private bool IsOracleDatabase(SyncTaskInterface iface) =>
         IngestionService.IsOracleDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
 
+    private bool IsDorisDatabase(SyncTaskInterface iface) =>
+        IngestionService.IsDorisDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
+
+    private bool IsMySqlDatabase(SyncTaskInterface iface) =>
+        IngestionService.IsMySqlDatabaseType(GetEffectiveDatabaseResource(iface)?.DatabaseType ?? iface.DatabaseType);
+
     private string GetSqlTemplateHelperText(SyncTaskInterface iface) =>
         IsOracleDatabase(iface)
             ? "参数可写 :queryValue，也兼容 @queryValue"
-            : "参数使用 @queryValue";
+            : IsDorisDatabase(iface) || IsMySqlDatabase(iface)
+                ? "参数使用 @queryValue；仅允许 SELECT 或 WITH 查询"
+                : "参数使用 @queryValue";
 
     private static string GetDatabaseResourceOption(DatabaseResource resource) =>
         $"{resource.Name}（{resource.DatabaseType} {resource.Host}/{resource.DatabaseName}）";
