@@ -13,6 +13,7 @@ public sealed class FollowUpPackageImportService(
     IOptions<FollowUpPackageImportOptions> options,
     FollowUpPackageVerifyService verifyService,
     FollowUpPackageSchemaCheckService schemaCheckService,
+    FollowUpPatientIdentityService patientIdentityService,
     FollowUpTargetAdaptationService targetAdaptationService,
     FollowUpEdcScopeService edcScopeService,
     FollowUpPackageBackupService backupService,
@@ -58,6 +59,8 @@ public sealed class FollowUpPackageImportService(
         var commitOutcomeUnknown = false;
         var installedAttachments = new List<FollowUpAttachmentMutation>();
         var attachmentRestoreFailed = false;
+        FollowUpPatientIdentityMap[] patientMappings = [];
+        Dictionary<string, int> committedCounts = [];
         try
         {
             await repository.MarkAsync(state.HospitalCode, state.PackageId, "Validating", null, null, cancellationToken: cancellationToken);
@@ -169,11 +172,25 @@ public sealed class FollowUpPackageImportService(
                 }
             }
 
+            FollowUpPatientIdentityScope patientIdentityScope;
+            FollowUpPatientIdentityPlan patientIdentityPlan;
             FollowUpEdcScopePlan edcScopePlan;
             try
             {
-                await targetAdaptationService.EnsureReadyAsync(cancellationToken);
-                edcScopePlan = await edcScopeService.PrepareAsync(package, approvedDecision, cancellationToken);
+                await patientIdentityService.EnsureReadyAsync(cancellationToken);
+                patientIdentityScope = await patientIdentityService.ReadScopeAsync(
+                    package,
+                    approvedDecision,
+                    cancellationToken);
+                patientIdentityPlan = await patientIdentityService.PrepareAsync(
+                    patientIdentityScope,
+                    cancellationToken);
+                patientMappings = patientIdentityPlan.Patients.Values.ToArray();
+                edcScopePlan = await edcScopeService.PrepareAsync(
+                    package,
+                    approvedDecision,
+                    patientIdentityPlan.PatientIdMap,
+                    cancellationToken);
             }
             catch (FollowUpPackageException ex) when (ex.ErrorCode == FollowUpErrorCodes.SchemaReviewRequired)
             {
@@ -205,6 +222,8 @@ public sealed class FollowUpPackageImportService(
                         schemaCheck.TableColumnScopes ?? [],
                         targetQuestionScopeGuard,
                         packageQuestionProjectGuard,
+                        patientIdentityScope,
+                        patientIdentityPlan,
                         edcScopePlan,
                         async () =>
                         {
@@ -269,10 +288,11 @@ public sealed class FollowUpPackageImportService(
                 },
                 async counts =>
                 {
-                    await repository.MarkAsync(
+                    committedCounts = new Dictionary<string, int>(counts, StringComparer.OrdinalIgnoreCase);
+                    await repository.CompleteImportAsync(
                         state.HospitalCode,
                         state.PackageId,
-                        "Imported",
+                        patientMappings,
                         NTCareRestartRequiredCode,
                         NTCareRestartRequiredMessage,
                         new { tables = counts.Count, records = counts.Values.Sum(), counts, ntcareAction = "restart-required" },
@@ -334,9 +354,22 @@ public sealed class FollowUpPackageImportService(
                 logger.LogCritical(ex, "FollowUp 数据和附件已提交，但写入导入成功状态或 ACK 失败，禁止降级为失败。PackageId={PackageId}", state.PackageId);
                 try
                 {
-                    await repository.MarkAsync(state.HospitalCode, state.PackageId, "Imported", NTCareRestartRequiredCode,
+                    await repository.CompleteImportAsync(
+                        state.HospitalCode,
+                        state.PackageId,
+                        patientMappings,
+                        NTCareRestartRequiredCode,
                         $"{NTCareRestartRequiredMessage} 成功状态或 ACK 首次写入失败，请检查日志并重试状态同步。",
-                        new { committed = true, statusWriteError = ex.Message, ntcareAction = "restart-required" }, CancellationToken.None);
+                        new
+                        {
+                            committed = true,
+                            tables = committedCounts.Count,
+                            records = committedCounts.Values.Sum(),
+                            counts = committedCounts,
+                            statusWriteError = ex.Message,
+                            ntcareAction = "restart-required"
+                        },
+                        CancellationToken.None);
                     if (package is not null)
                         await EnqueueAckAsync(
                             package,
@@ -529,6 +562,8 @@ public sealed class FollowUpPackageImportService(
         IReadOnlyCollection<FollowUpTableColumnScope> columnScopes,
         TargetQuestionScopeGuard? targetQuestionScopeGuard,
         PackageQuestionProjectGuard? packageQuestionProjectGuard,
+        FollowUpPatientIdentityScope patientIdentityScope,
+        FollowUpPatientIdentityPlan expectedPatientIdentityPlan,
         FollowUpEdcScopePlan edcScopePlan,
         Func<Task> beforeCommit,
         Action onCommitAttempted,
@@ -546,6 +581,12 @@ public sealed class FollowUpPackageImportService(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
+            var patientIdentityPlan = await patientIdentityService.VerifyWithLockAsync(
+                connection,
+                transaction,
+                patientIdentityScope,
+                expectedPatientIdentityPlan,
+                cancellationToken);
             if (targetQuestionScopeGuard is not null)
                 await FollowUpPackageSchemaCheckService.LockTargetQuestionScopeAsync(
                     connection,
@@ -556,7 +597,6 @@ public sealed class FollowUpPackageImportService(
                     connection,
                     transaction,
                     cancellationToken);
-            var followUpPatients = new Dictionary<Guid, FollowUpPatientSource>();
             var basePatientEventTypes = await ResolveBasePatientEventTypesAsync(
                 package,
                 connection,
@@ -694,11 +734,11 @@ public sealed class FollowUpPackageImportService(
                         mappedLine,
                         columnScope?.FileQuestionTargetColumns ?? [],
                         fileQuestionAttachmentPaths);
-                    if (FollowUpTargetAdaptationService.ReadPatientSource(
-                            targetTable.Schema,
-                            targetTable.TableName,
-                            mappedLine) is { } patientSource)
-                        followUpPatients[patientSource.PatientId] = patientSource;
+                    var identityAdaptation = patientIdentityPlan.AdaptRow(
+                        targetTable.Schema,
+                        targetTable.TableName,
+                        mappedLine);
+                    mappedLine = identityAdaptation.Row;
                     var adaptedLine = await targetAdaptationService.AdaptRowAsync(
                         connection,
                         transaction,
@@ -708,7 +748,11 @@ public sealed class FollowUpPackageImportService(
                         basePatientEventTypes,
                         patientEventMappingCache,
                         cancellationToken);
-                    if (table.ImportPolicy is "UseExistingById" or "RejectIfMissing")
+                    if (identityAdaptation.SkipWrite)
+                    {
+                        // 复用院端 unique_patient 或自然人匹配后的 patient，院端现有患者字段保持不变。
+                    }
+                    else if (table.ImportPolicy is "UseExistingById" or "RejectIfMissing")
                     {
                         if (!await ExistsAsync(connection, transaction, targetTable.Schema, targetTable.TableName, primaryKey, adaptedLine, cancellationToken))
                             throw new InvalidOperationException($"{table.ImportPolicy} 要求的基础记录不存在：{targetTable.Schema}.{targetTable.TableName}");
@@ -726,16 +770,11 @@ public sealed class FollowUpPackageImportService(
                     throw new InvalidDataException($"表 {table.Schema}.{table.TableName} 记录数与清单不一致。");
                 result[$"{targetTable.Schema}.{targetTable.TableName}"] = count;
             }
-            var sourceMapCount = await targetAdaptationService.ApplySourceMapAsync(
+            var scopeMapCount = await edcScopeService.ApplyAsync(
                 connection,
                 transaction,
-                followUpPatients.Values.ToArray(),
-                package.Manifest.HospitalCode,
-                package.Manifest.PackageId,
+                patientIdentityPlan.Remap(edcScopePlan),
                 cancellationToken);
-            if (sourceMapCount > 0)
-                result["datasync.followup_patient_source_map"] = sourceMapCount;
-            var scopeMapCount = await edcScopeService.ApplyAsync(connection, transaction, edcScopePlan, cancellationToken);
             if (scopeMapCount > 0)
                 result["public.patient_data_scope_map"] = scopeMapCount;
             // 附件先原子替换，随后提交数据库；提交开始前失败时由上层按已安装路径恢复附件。
@@ -1046,7 +1085,7 @@ public sealed class FollowUpPackageImportService(
                 targetAdaptation = new
                 {
                     patientSourceType = "care",
-                    sourceMarker = "datasync.followup_patient_source_map"
+                    sourceMarker = "lhyy.followup_patient_identity_map@DataSyncDb"
                 },
                 code = status == "Imported" ? NTCareRestartRequiredCode : null,
                 ntcareAction = status == "Imported" ? "restart-required" : null

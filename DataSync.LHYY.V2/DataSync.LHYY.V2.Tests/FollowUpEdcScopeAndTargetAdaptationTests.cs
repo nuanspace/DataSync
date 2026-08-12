@@ -92,7 +92,8 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
 
         Assert.Contains("p.id = ANY(@patient_ids)", sql);
         Assert.Contains("pe.project_id = ANY(@edc_project_ids)", sql);
-        Assert.Contains("datasync.followup_patient_source_map", sql);
+        Assert.Contains("p.id = ANY(@mapped_patient_ids)", sql);
+        Assert.DoesNotContain("datasync.followup_patient_source_map", sql);
         Assert.Contains("p.project_id", sql);
         Assert.Contains("UNION", sql, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("p.source_type = 'followup'", sql);
@@ -116,12 +117,8 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
         var sourceTypeJson = originalSourceType is null ? "null" : $"\"{originalSourceType}\"";
         var source = $"{{\"id\":\"{patientId}\",\"source_type\":{sourceTypeJson},\"name\":\"患者\"}}";
 
-        var patientSource = FollowUpTargetAdaptationService.ReadPatientSource("public", "patient", source);
         var adapted = FollowUpTargetAdaptationService.AdaptRow("public", "patient", source);
 
-        Assert.NotNull(patientSource);
-        Assert.Equal(patientId, patientSource.PatientId);
-        Assert.Equal(originalSourceType, patientSource.OriginalSourceType);
         using var document = JsonDocument.Parse(adapted);
         Assert.Equal("care", document.RootElement.GetProperty("source_type").GetString());
     }
@@ -167,13 +164,7 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
     [Fact]
     public async Task 已有表单患者事件不查询目标映射且保持原始字段()
     {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
-            })
-            .Build();
-        var service = new FollowUpTargetAdaptationService(configuration);
+        var service = new FollowUpTargetAdaptationService();
         var source = PatientEventJson("随访", "已审核", null);
 
         var adapted = await service.AdaptRowAsync(
@@ -368,15 +359,20 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
     }
 
     [Fact]
-    public void 来源映射SQL按患者主键幂等记录包与医院信息()
+    public void 患者身份映射SQL只写入DataSyncDb并保持幂等()
     {
-        var sql = FollowUpTargetAdaptationService.BuildSourceMapUpsertSql();
+        var sql = FollowUpPackageImportRepository.BuildPatientIdentityMapUpsertSql();
 
-        Assert.Contains("INSERT INTO datasync.followup_patient_source_map", sql);
-        Assert.Contains("ON CONFLICT (patient_id) DO UPDATE", sql);
-        Assert.Contains("@hospital_code", sql);
-        Assert.Contains("@package_id", sql);
+        Assert.Contains("INSERT INTO lhyy.followup_patient_identity_map", sql);
+        Assert.Contains("source_patient_id", sql);
+        Assert.Contains("target_patient_id", sql);
+        Assert.Contains("target_unique_patient_id", sql);
+        Assert.Contains("identity_match_basis", sql);
+        Assert.Contains("ON CONFLICT (hospital_code, source_patient_id) DO UPDATE", sql);
+        Assert.Contains("@hospitalCode", sql);
+        Assert.Contains("@packageId", sql);
         Assert.Contains("original_source_type", sql);
+        Assert.DoesNotContain("datasync.followup_patient_source_map", sql);
     }
 
     [Fact]
@@ -484,11 +480,12 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
+                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused",
+                ["ConnectionStrings:DataSyncDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
             })
             .Build();
         var service = new FollowUpEdcScopeService(configuration);
-        var plan = new FollowUpEdcScopePlan([Guid.NewGuid()], [], ShouldApply: false);
+        var plan = new FollowUpEdcScopePlan([Guid.NewGuid()], [], [], ShouldApply: false);
 
         var count = await service.ApplyAsync(null!, null!, plan, CancellationToken.None);
 
@@ -678,7 +675,8 @@ public sealed class FollowUpEdcScopeAndTargetAdaptationTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
+                ["ConnectionStrings:CubeDb"] = "Host=unused;Database=unused;Username=unused;Password=unused",
+                ["ConnectionStrings:DataSyncDb"] = "Host=unused;Database=unused;Username=unused;Password=unused"
             })
             .Build();
         return new FollowUpEdcScopeService(configuration);

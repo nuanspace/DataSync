@@ -29,6 +29,7 @@ DataSync 是面向多医院、多来源和多协议的 ntcare 集成适配平台
 - CYYY 不引用 Bio.Core，通常不直接写 ntcare；`DatabasePushService` 是独立 PostgreSQL 直写通道，不代表当前启用任务都采用它。
 - LHYY 的普通统一处理链以 JSON 为中心；SOAP 入口先把 XML 转为 JSON，再复用同一处理链。
 - 医院包协议位于 `DataSync.Common/FollowUp`，不是对 FollowUp 仓库程序集的引用。
+- FollowUp 医院包的患者身份合并由 LHYY 在 CubeDb 导入事务中完成；云端包协议和 CYYY 转发链路不改写患者 ID。映射状态只保存在 DataSyncDb 的 `lhyy.followup_patient_identity_map`，普通 ESB 与医院本地导入链不得读写；合并冲突使用 `PATIENT_IDENTITY_CONFLICT`，旧映射未迁移使用 `PATIENT_IDENTITY_BOOTSTRAP_REQUIRED`。
 - 运行配置、数据库记录数、启用任务和现场连接均为动态状态，回答前必须实时检查并脱敏。
 
 ## 变更影响判断

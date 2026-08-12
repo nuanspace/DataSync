@@ -74,8 +74,12 @@ public sealed class FollowUpPackageRestoreService(
             restoredAt = DateTimeOffset.Now;
             reconciliationMarker = reconciliationMarker with { RestoredAt = restoredAt };
             await completionStore.SaveAsync(reconciliationMarker, CancellationToken.None);
-            await repository.MarkAsync(state.HospitalCode, state.PackageId, "Restored", null, null,
-                new { backup.RecordId, restoredAt }, cancellationToken);
+            await repository.CompleteRestoreAsync(
+                state.HospitalCode,
+                state.PackageId,
+                null,
+                new { backup.RecordId, restoredAt },
+                cancellationToken);
             await repository.FinishRestoreAsync(restoreId.Value, "Completed", new { backup.RecordId }, null, null, cancellationToken);
             await repository.AddRestoreCompletionLogAsync(reconciliationMarker, cancellationToken);
             await completionStore.DeleteAsync(restoreId.Value, CancellationToken.None);
@@ -125,19 +129,34 @@ public sealed class FollowUpPackageRestoreService(
                 {
                     try
                     {
-                        await repository.MarkAsync(state.HospitalCode, state.PackageId, terminalStatus,
-                            restoreCompleted ? null : FollowUpErrorCodes.InternalError,
-                            restoreCompleted
-                                ? restoreCleanupFailed
-                                    ? "数据库和附件已恢复，但临时快照清理失败，必须人工清理残留；不得重复恢复。"
-                                    : "数据库和附件已恢复，审计记录补写失败。"
-                                : ex.Message,
-                            restoreCompleted
-                                ? restoreCleanupFailed
-                                    ? new { restoredAt, cleanupError = ex.Message }
-                                    : new { restoredAt, auditError = ex.Message }
-                                : null,
-                            CancellationToken.None);
+                        if (restoreCompleted)
+                        {
+                            var restoreMessage = restoreCleanupFailed
+                                ? "数据库和附件已恢复，但临时快照清理失败，必须人工清理残留；不得重复恢复。"
+                                : "数据库和附件已恢复，审计记录补写失败。";
+                            var restoreSummary = new
+                            {
+                                restoredAt,
+                                cleanupError = restoreCleanupFailed ? ex.Message : null,
+                                auditError = restoreCleanupFailed ? null : ex.Message
+                            };
+                            await repository.CompleteRestoreAsync(
+                                state.HospitalCode,
+                                state.PackageId,
+                                restoreMessage,
+                                restoreSummary,
+                                CancellationToken.None);
+                        }
+                        else
+                        {
+                            await repository.MarkAsync(
+                                state.HospitalCode,
+                                state.PackageId,
+                                terminalStatus,
+                                FollowUpErrorCodes.InternalError,
+                                ex.Message,
+                                cancellationToken: CancellationToken.None);
+                        }
                         stateWritten = true;
                     }
                     catch (Exception stateException)

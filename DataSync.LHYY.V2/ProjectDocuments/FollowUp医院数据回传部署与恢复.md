@@ -25,11 +25,16 @@
 
 合并脚本使用 `IF NOT EXISTS` 和条件约束创建，适合重复检查和执行；正式环境仍应先在同版本测试库演练并核对备份文件。
 
-目标业务库还需要单独执行以下 CubeDb 专用迁移：
+本次升级禁止对 CubeDb 执行 `20260722.sql`、旧版 `20260810.sql` 或其他自定义 DDL。患者身份映射改存 DataSyncDb 的 `lhyy.followup_patient_identity_map`，只需在停止自动导入并备份 DataSyncDb 后，通过数据库升级页对 `DataSyncDb` 执行 `DataSync.LHYY.V2/Scripts/202608/20260811.sql`。CubeDb 兼容检查只核对 NTCare 既有业务表、字段和读取/导入权限。
 
-- `DataSync.LHYY.V2/Scripts/202607/20260722.sql`
+从已部署旧版本升级时，执行 DataSyncDb 迁移后、启动自动导入前，在 LHYY 镜像中运行 `followup-patient-map bootstrap --hospital-code <医院编码> --confirm-datasync-write`。工具以只读事务读取 CubeDb 的旧 `datasync.followup_patient_source_map`，兼容只有 `patient_id` 的初版以及含双端 ID 的扩展版，并幂等写入 DataSyncDb；不会修改或删除 CubeDb 旧表。若旧表不存在或没有该院记录，但 DataSyncDb 已有历史导入包，命令返回需恢复基线，此时必须生成并导入 `RecoveryBaseline` 后才能继续 Incremental。回滚到旧镜像前，必须先用当前版本恢复所有由新版完成的包，避免旧镜像无法识别 DataSyncDb 中的新映射状态。
 
-该迁移创建 DataSync 自有的 `datasync.followup_patient_source_map` 来源映射表，并用 `original_source_type` 保存包内患者最近一次携带的原始来源。脚本在常规 `DataSyncDb` 升级链中会识别到目标业务表不存在并安全跳过；部署人员仍必须连接 `ConnectionStrings__CubeDb` 对应数据库手工执行同一文件。导入器会在备份前检查该表及关键字段，缺失时以结构待处理状态阻断导入。
+```bash
+docker compose run --rm datasync-lhyy-v2 \
+  followup-patient-map bootstrap \
+  --hospital-code <医院编码> \
+  --confirm-datasync-write
+```
 
 本版本只接受业务契约 `followup-hospital-sync.v3`，导入器版本为 `1.2.0`，要求数据包 `minImporterVersion` 不高于 `1.2.0`。旧 v2 数据包必须撤销并由新云端服务重新生成，不允许继续导入。SSH relay、加密 envelope 和 ACK 的传输协议版本仍为 `1.0`，没有随业务契约升级。
 
@@ -95,9 +100,9 @@ CYYY 总开关默认为 `false`；关闭时拉取 Worker 在创建服务 Scope �
 2. 需要补拉时，可直接点击某包的重拉按钮，或填写包号/增量日期范围执行条件重拉。
 3. LHYY 页面点击“发现包”，再执行“校验 / 导入”。服务要求外层 SHA-256 非空，并依次验证外层 hash、待导入包号/序号/类型、RSA-PSS 签名、RSA-OAEP 密钥解包、HMAC、AES 解密、内层 checksum 路径与内容、契约版本、包链和目标数据库结构。
 4. `Compatible` 自动继续；`RequiresMapping` 可在“结构处理”中保存目标表、字段和默认值映射，或标记“等待数据库升级”；`Breaking` 必须升级数据库或导入器后重试。
-5. 导入前自动生成目标业务库完整备份和受影响附件备份。业务数据按清单策略幂等写入，不执行物理删除。每个实际导入文件都通过同一个只读句柄校验表清单 SHA-256 并继续消费该句柄；校验后即使原路径被替换，也不会重新按路径读取未验证内容。`ARRAY/text[] → text` 的值形状也会在消费这一个已验证句柄时逐行复验，不能仅依赖此前按路径完成的结构预检。原始包、staging 文件和导入前备份保持原始内容不变；所有包内 `public.patient` 写入目标库时统一适配为 `source_type=care`，包内原始值写入来源映射表的 `original_source_type`，其他 UUID 和患者字段保持原值。新版附件备份使用版本 2 清单，记录原文件存在状态和备份副本 hash；备份登记同时锚定附件清单 hash、条目数和备份总大小。登记成功后只创建一次受锚定的附件冻结快照，附件安装与明确回滚时的补偿共同复用该快照，不再重新信任可变清单或原备份目录。安装先把包内文件复制到目标同目录临时文件并校验该实际副本的 size/hash；补偿也先复制并校验实际恢复临时副本；两者通过后才原子认领当前文件，再用硬链接 create-if-absent 发布，校验后出现的路径级新版本不会被覆盖。文件系统不支持同目录硬链接时会在认领目标前安全阻断；硬链接能力探针或其他临时文件无法清理时，会在异常中保留残留路径和主操作/清理原因并进入 `RestoreFailed`，不得把敏感硬链接副本遗留当作普通失败继续。安装在发布前异常时会无覆盖放回原版本，放回失败则保留 `.claim` 并进入 `RestoreFailed`。包附件已发布但旧版本 `.claim` 清理失败时同样进入 `RestoreFailed`。已明确回滚的导入只补偿本次实际安装且认领内容仍保持包内 hash 的附件；若认领后仍无法完成补偿，则保留最后可用的包附件 `.claim` 现场并进入 `RestoreFailed`。数据库提交结果不确定时也不会自动补偿附件，而是把包置为 `RestoreFailed`，必须使用该包登记的完整数据库与附件备份执行恢复。此边界不能强制阻止其他进程通过认领前已打开的文件句柄继续写同一文件；存在这种写入方式时，应在导入期间暂停附件写入或安排低峰维护窗口。
+5. 导入前自动生成目标业务库完整备份和受影响附件备份。业务数据按清单策略幂等写入，不执行物理删除。每个实际导入文件都通过同一个只读句柄校验表清单 SHA-256 并继续消费该句柄；校验后即使原路径被替换，也不会重新按路径读取未验证内容。`ARRAY/text[] → text` 的值形状也会在消费这一个已验证句柄时逐行复验，不能仅依赖此前按路径完成的结构预检。原始包、staging 文件和导入前备份保持原始内容不变。患者身份先按原 `unique_patient.id`，再按双方非空身份证，最后在任一方无身份证时按完整的姓名、出生日期、性别三要素识别；双方身份证均非空但不相等时不降级使用三要素。多重命中整包阻断且日志不记录患者明文。自然匹配复用院端 `patient.id` 时保留院端患者字段，并同步重写包内全部患者引用；原 `patient.id` 相同或院端尚无患者明细时仍按现有规则写入并适配 `source_type=care`。CubeDb 提交成功后，双端患者 ID、唯一患者 ID、匹配依据和原始来源会与 `Imported` 状态在一个 DataSyncDb 事务内写入；该事务失败时保留 `Importing` 门禁，禁止后续包越过。新版附件备份使用版本 2 清单，记录原文件存在状态和备份副本 hash；备份登记同时锚定附件清单 hash、条目数和备份总大小。登记成功后只创建一次受锚定的附件冻结快照，附件安装与明确回滚时的补偿共同复用该快照，不再重新信任可变清单或原备份目录。安装先把包内文件复制到目标同目录临时文件并校验该实际副本的 size/hash；补偿也先复制并校验实际恢复临时副本；两者通过后才原子认领当前文件，再用硬链接 create-if-absent 发布，校验后出现的路径级新版本不会被覆盖。文件系统不支持同目录硬链接时会在认领目标前安全阻断；硬链接能力探针或其他临时文件无法清理时，会在异常中保留残留路径和主操作/清理原因并进入 `RestoreFailed`，不得把敏感硬链接副本遗留当作普通失败继续。安装在发布前异常时会无覆盖放回原版本，放回失败则保留 `.claim` 并进入 `RestoreFailed`。包附件已发布但旧版本 `.claim` 清理失败时同样进入 `RestoreFailed`。已明确回滚的导入只补偿本次实际安装且认领内容仍保持包内 hash 的附件；若认领后仍无法完成补偿，则保留最后可用的包附件 `.claim` 现场并进入 `RestoreFailed`。数据库提交结果不确定时也不会自动补偿附件，而是把包置为 `RestoreFailed`，必须使用该包登记的完整数据库与附件备份执行恢复。患者主档会在事务内加 `SHARE` 锁复验，生产导入应安排低峰期，避免阻塞 NTCare 患者维护。
 6. `followup-hospital-sync.v3` 的 `care.patient_event` 只导出已达到表单展示条件的事件，或 `form_set_id` 为空且有关联住院/门诊资料的基础事件。表单事件要求 `is_valid` 未作废，并满足以下任一条件：状态为“已审核/已随访”；或事件类型为“预问诊/门诊签到”、`input_time` 非空且状态为“门诊结束/办理住院/入组随访/转诊”；或“转诊记录+已确认”。未达到条件的表单事件不得借由住院/门诊关联进入任何包；医院端保持已有表单事件的原始字段，对无表单住院/门诊基础事件按目标项目的 `event_type` 唯一有效定义补齐 `form_set_id`、`form_set_name` 和 `event_type_definition_id`。找不到映射或存在多个映射时整包回滚并进入结构处理，禁止写入 NTCare 无法加载的患者事件。医院端同时拒绝旧 v2 数据包；后续达到条件时，由内容快照变化将完整事件纳入下一增量包。
-7. 同一个 CubeDb 事务会把回传患者登记到 `datasync.followup_patient_source_map`，再为其中涉及 EDC 的患者幂等补齐 `patient_data_scope_map`。补图同时覆盖患者事件的 `project_id` 和患者自身的 `public.patient.project_id`，因此没有事件或没有已填写表单的回传患者也可获得 EDC 数据范围；纯 FormSet 增量切换为 EDC 时，也只回填来源映射表中的回传患者，不扩展 NTCare 原生患者。非 EDC 包不会访问 `patient_data_scope_map`，缺少映射表或关键列时在备份和导入前阻断。
+7. EDC 补图只使用本包患者以及 DataSyncDb 中该医院的 FollowUp 映射目标 ID，再幂等写入 CubeDb 既有的 `patient_data_scope_map`。补图同时覆盖患者事件的 `project_id` 和患者自身的 `public.patient.project_id`，因此没有事件或没有已填写表单的回传患者也可获得 EDC 数据范围；纯 FormSet 增量切换为 EDC 时，也只回填已映射的回传患者，不扩展 NTCare 原生患者。普通 ESB 和医院本地数据导入不读写 `lhyy.followup_patient_identity_map`。非 EDC 包不会访问 `patient_data_scope_map`。
 8. DataSync 不依赖也不调用 NTCare 新接口。数据和附件提交后，导入状态和 ACK 仍为 `Imported`，同时以 `NTCARE_RESTART_REQUIRED` 和警告日志明确提示：重启 NTCare 或执行医院既有缓存刷新运维流程。该提示不回滚已提交数据。
 9. 导入成功后 LHYY 写入 `Imported` ACK，CYYY 使用稳定 `ackId` 重试转发。已成功导入的包不会再次执行，也不会被迟到失败状态降级。后续 `Incremental`、`Supplement` 和 `Replacement` 仍按相同 UUID 幂等增量写入。
 
@@ -147,6 +152,8 @@ CYYY 总开关默认为 `false`；关闭时拉取 Worker 在创建服务 Scope �
 5. 恢复批次登记后，系统先在持久化 `BackupRoot/.restore-reconciliation` 目录写入未完成标记，再把包状态置为 `Restoring` 并调用实际恢复；再次点击恢复时会先在恢复专用独占租约内协调同包已有的完成标记，如果该标记证明数据库和附件已经恢复，则只补写管理状态、审计和日志并直接返回，不登记新批次，也不重复执行 `pg_restore` 或附件恢复。只有没有完成证明时，后续恢复批次才会在同一个管理库事务内把同包遗留的旧 `Running` 审计标记为“恢复进程中断”，再登记新批次。恢复成功后包状态变为 `Restored`，并写入 `lhyy.followup_package_restore_record` 和审计日志；如果数据库和附件已恢复但 DataSyncDb 暂时不可用，系统会把持久标记更新为已完成，再由后台任务持续幂等补写 `Restored`、`Completed` 和带 `restoreId` 的恢复日志，三项全部落库后才删除标记，期间原 `Restoring` 状态继续阻断普通写入。每个标记只匹配自身的恢复记录、备份记录和当前最新恢复批次；前台已明确捕获恢复失败时会在标记中保存 `RestoreError`，后台只据此补齐该次恢复的 `Failed` 审计和必要的 `RestoreFailed` 状态。没有 `RestoreError` 的当前未完成标记仍表示结果未知，后台只保留等待，不会推断结果，也不会再次恢复 CubeDb 或附件；只有出现更新恢复批次后，仍为 `Running` 的旧未知记录才会标记为“恢复进程中断”。旧批次标记不能把后发恢复状态改为成功，单个异常标记也不会阻断其他标记。页面仍返回恢复成功并提示检查 DataSync 日志，不得重复执行恢复，也不得人工删除补写标记。
 如果数据库和全部附件已经恢复，仅 `BackupRoot` 外的临时快照清理失败，系统必须记录 `Restored`/`Completed` 和清理异常，页面返回“恢复已完成、需人工清理残留”，不得写为 `RestoreFailed`，也不得引导再次执行 `pg_restore`。真正的数据库或附件恢复失败仍进入 `RestoreFailed`。
 
+恢复完成状态与患者映射回滚使用同一个 DataSyncDb 事务：删除由被恢复包首次创建的映射，并把其余映射的 `last_package_id` 回退到该包前驱；后台完成标记补写也执行同一逻辑。因此不得绕过页面直接把包状态改为 `Restored`。
+
 6. 需要重放时，从恢复后的最早目标包开始按包链顺序执行“校验 / 导入”；`Supplement` 不推进主链，`Replacement` 仍按被替代包状态校验。
 7. 导入或恢复租约会在成功、失败或取消后自动释放；取消正在执行的 `pg_dump`/`pg_restore` 时，系统会先终止子进程树并以不可取消等待确认实际退出，确认前不会释放维护租约。进程崩溃时 PostgreSQL 会随连接断开自动释放 advisory lock。核对业务数据、附件和 ACK 后，再恢复上游推送并重新启用 Worker。
 
@@ -159,7 +166,7 @@ CYYY 服务如果在包状态写为 `Pulling` 后异常退出，重启后的普�
 ## 7. 上线验收最小集
 
 - 合并数据库脚本经升级页执行成功，两个管理页预检通过。
-- CubeDb 专用来源映射迁移已执行；确认没有误应用到 DataSyncDb。
+- DataSyncDb 的 `20260811.sql` 已执行，旧版患者映射已完成只读迁移或已通过 `RecoveryBaseline` 重建；CubeDb 未执行任何 DDL。
 - SSH 严格 host key 校验生效，错误 key、缺 token 和非法 shell 均被拒绝。
 - 正常包可拉取、验签、解密、备份、导入并回传 ACK。
 - 首次完整 Baseline/Replacement 导入后重启 NTCare，患者管理可查看回传表单；后续增量重复导入不产生重复患者或 EDC 权限记录。

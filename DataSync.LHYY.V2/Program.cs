@@ -51,6 +51,12 @@ public class Program
                 return;
             }
 
+            if (FollowUpPatientIdentityBootstrapTool.IsCommand(args))
+            {
+                Environment.ExitCode = await FollowUpPatientIdentityBootstrapTool.RunAsync(args);
+                return;
+            }
+
             if (MessageArchiveTool.IsCommand(args))
             {
                 Environment.ExitCode = await MessageArchiveTool.RunAsync(args);
@@ -146,6 +152,7 @@ public class Program
                 sp.GetRequiredService<IFollowUpCubePersistentStateGate>()));
             builder.Services.AddScoped<FollowUpPackageVerifyService>();
             builder.Services.AddScoped<FollowUpPackageSchemaCheckService>();
+            builder.Services.AddScoped<FollowUpPatientIdentityService>();
             builder.Services.AddScoped<FollowUpTargetAdaptationService>();
             builder.Services.AddScoped<FollowUpEdcScopeService>();
             builder.Services.AddScoped<FollowUpPackageBackupService>();

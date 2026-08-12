@@ -53,6 +53,13 @@
 - Bio.Core 初始化或能力不足时，只有明确支持的处理器可走 `DirectTargetWriteService`；不得把降级路径推广为默认路径。
 - 动态 target 表写入必须按表单元数据、系统字段和批准映射确定列范围，不能根据输入对象整行写入。
 
+## FollowUp 包的患者身份适配
+
+- 该路径不经普通 ESB 字段映射；`FollowUpPackageImportService` 在备份前预计算患者映射，并在 CubeDb 导入事务内加锁重算。两次结果不一致时整包失败。
+- 优先复用 `unique_patient.id`；ID 不同时先按规范化身份证号，任一方身份证号缺失时才按完整的姓名、出生日期、性别三要素匹配。多候选或身份冲突不得自动选择。
+- `patient` 在映射后的 `unique_id + hospital_id + project_id` 范围内唯一。复用已有院端 `patient` 时保留其现有字段，只重映射包内 patient/event/门诊/住院/动态表和 EDC 可见性关联。
+- DataSyncDb 的 `lhyy.followup_patient_identity_map` 持久化云端 patient/unique_patient 到院端 ID 的映射，保证无 `patient` 行的 Incremental 和重试包仍稳定指向同一院端患者。该表仅属于 FollowUp 包导入路径；普通 JSON/SOAP ESB、后台消息和医院本地同步不得读写，也不得把 NTCare 原生患者加入 EDC 补图范围。
+
 ## 配置表
 
 核心配置和状态表包括 `esb_integration_project`、`esb_integration_project_config`、`esb_global_config`、`esb_interface_config`、`esb_interface_match_rule`、`esb_field_mapping`、`esb_filter_rule`、`esb_idempotent_key_part`、`esb_event_identity`、`esb_messages`、`esb_message_receipt`、`esb_process_log` 和项目文档表。

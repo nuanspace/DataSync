@@ -20,10 +20,10 @@ public sealed class ExternalCubeCompatibilityToolTests
     }
 
     [Fact]
-    public void 缺少映射字段和Vector时返回明确问题()
+    public void 缺少患者判定字段和Vector时返回明确问题()
     {
         var columns = CreateCompatibleColumns();
-        ((HashSet<string>)columns["datasync.followup_patient_source_map"]).Remove("last_package_id");
+        ((HashSet<string>)columns["public.unique_patient"]).Remove("gender");
 
         var issues = ExternalCubeCompatibilityTool.Evaluate(
             columns,
@@ -31,8 +31,24 @@ public sealed class ExternalCubeCompatibilityToolTests
             CreateCompatibleSchemas(),
             vectorInstalled: false);
 
-        Assert.Contains("缺少字段 datasync.followup_patient_source_map.last_package_id", issues);
+        Assert.Contains("缺少字段 public.unique_patient.gender", issues);
         Assert.Contains("缺少 form schema 下的 vector 扩展", issues);
+    }
+
+    [Fact]
+    public void 患者身份合并只要求Cube既有自然人读取字段()
+    {
+        var uniquePatient = ExternalCubeCompatibilityTool.DefaultRequirements
+            .Single(item => item.Table == "public.unique_patient");
+
+        Assert.Contains("SELECT", uniquePatient.Privileges);
+        Assert.Contains("sid_number", uniquePatient.Columns);
+        Assert.Contains("name", uniquePatient.Columns);
+        Assert.Contains("birthday", uniquePatient.Columns);
+        Assert.Contains("gender", uniquePatient.Columns);
+        Assert.DoesNotContain(
+            ExternalCubeCompatibilityTool.DefaultRequirements,
+            item => item.Table.StartsWith("datasync.", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -59,14 +75,14 @@ public sealed class ExternalCubeCompatibilityToolTests
         var privileges = CreateCompatiblePrivileges();
         ((HashSet<string>)privileges["public.patient_data_scope_map"]).Remove("UPDATE");
         var schemas = CreateCompatibleSchemas();
-        schemas.Remove("datasync");
+        schemas.Remove("target");
 
         var issues = ExternalCubeCompatibilityTool.Evaluate(columns, privileges, schemas, vectorInstalled: true);
 
         Assert.Contains("缺少表 form.form_form_set", issues);
         Assert.Contains("缺少字段 form.form_project.ward_id", issues);
         Assert.Contains("当前账号缺少权限 public.patient_data_scope_map:UPDATE", issues);
-        Assert.Contains("当前账号缺少 schema 使用权限 datasync:USAGE", issues);
+        Assert.Contains("当前账号缺少 schema 使用权限 target:USAGE", issues);
     }
 
     [Fact]
@@ -86,7 +102,7 @@ public sealed class ExternalCubeCompatibilityToolTests
 
         var actual = ExternalCubeCompatibilityTool.DefaultRequirements
             .Select(item => item.Table)
-            .Where(table => table is not "datasync.followup_patient_source_map" and not "public.patient_data_scope_map")
+            .Where(table => table is not "public.patient_data_scope_map")
             .ToArray();
 
         Assert.Equal(expected, actual);
@@ -99,8 +115,7 @@ public sealed class ExternalCubeCompatibilityToolTests
             .GroupBy(type => type.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var modelBackedRequirements = ExternalCubeCompatibilityTool.DefaultRequirements
-            .Where(item => item.Table is not "datasync.followup_patient_source_map"
-                and not "public.patient_data_scope_map"
+            .Where(item => item.Table is not "public.patient_data_scope_map"
                 && !item.Table.StartsWith("report.", StringComparison.OrdinalIgnoreCase));
 
         foreach (var requirement in modelBackedRequirements)
@@ -206,5 +221,5 @@ public sealed class ExternalCubeCompatibilityToolTests
             StringComparer.OrdinalIgnoreCase);
 
     private static HashSet<string> CreateCompatibleSchemas() =>
-        new(["system", "care", "form", "public", "followup", "report", "datasync", "target"], StringComparer.OrdinalIgnoreCase);
+        new(["system", "care", "form", "public", "followup", "report", "target"], StringComparer.OrdinalIgnoreCase);
 }

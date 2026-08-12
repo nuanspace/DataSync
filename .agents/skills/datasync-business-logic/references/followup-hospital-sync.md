@@ -29,6 +29,15 @@
 9. 导入前完整备份 CubeDb 和会覆盖的附件。附件原子切换完成后才提交数据库事务；失败时回滚数据库并恢复附件。
 10. 提交后写 `Imported` 和 ACK；审计/ACK 暂时失败不得把已成功导入降级为失败或触发重复导入。
 
+## 患者身份合并
+
+- `unique_patient.id` 仍是最高优先级；ID 不同且双方身份证均有值时按去首尾空格、忽略 `X/x` 大小写后的身份证匹配。任一方无身份证时，只有姓名、出生日期、性别双方均完整且精确一致才匹配；双方非空身份证不同不得降级到三要素。
+- 已有唯一患者主档始终以院端字段为准。患者明细只在映射后的 `unique_id + hospital_id + project_id` 范围内复用；该范围必须至多一条，否则以 `PATIENT_IDENTITY_CONFLICT` 阻断整包且不记录身份明文。
+- 自然匹配导致 `patient.id` 改用院端 ID 时不更新院端 `patient` 字段，并同步改写事件、住院、门诊、动态答案、来源登记和 EDC 范围中的患者引用；原 ID 相同仍执行既有 Upsert。
+- 云端到院端 ID 保存在 DataSyncDb 的 `lhyy.followup_patient_identity_map`。持久映射优先于重新识别，备份后在 CubeDb 导入事务内锁定并复验患者主档；CubeDb 提交后，映射与 `Imported` 状态在单个 DataSyncDb 事务中提交，失败时保留 `Importing` 门禁。恢复成功时同一管理库事务删除由该包首次建立的映射并回退其余映射的最近包号。
+- CubeDb 不新增、修改或删除患者映射结构。存量升级先在 DataSyncDb 执行 `20260811.sql`，再用 `followup-patient-map bootstrap` 只读迁移旧 Cube 映射；无法迁移且已有历史包时必须执行 `RecoveryBaseline`，缺映射的纯引用增量返回 `PATIENT_IDENTITY_BOOTSTRAP_REQUIRED`。
+- EDC 补图只使用当前包患者和当前医院已持久映射的目标患者 ID，不扫描或扩展 NTCare 原生患者；普通 ESB 与医院本地导入链不得读取或写入 FollowUp 患者映射。
+
 ## 动态表与附件范围
 
 - target 动态宽表只处理系统固定字段、主键、当前医院实际关联题目和批准默认值字段；结构检查与 upsert 必须复用同一列集合。

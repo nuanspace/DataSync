@@ -65,7 +65,8 @@ for table in \
   lhyy.followup_package_schema_check \
   lhyy.followup_package_backup_record \
   lhyy.followup_package_restore_record \
-  lhyy.followup_package_import_log; do
+  lhyy.followup_package_import_log \
+  lhyy.followup_patient_identity_map; do
   check_table "$ds_container" "$ds_user" "$ds_database" "$ds_password" "$table"
 done
 
@@ -93,15 +94,26 @@ vector_installed="$(query "$cube_container" "$cube_user" "$cube_database" "$cube
     WHERE extension.extname='vector' AND namespace.nspname='form');")"
 [[ "$vector_installed" == "t" ]] || { echo "Cube 缺少 form schema 下的 vector 扩展。" >&2; exit 1; }
 
-for table in public.patient care.patient_event form.form_project datasync.followup_patient_source_map public.patient_data_scope_map; do
+check_columns "$ds_container" "$ds_user" "$ds_database" "$ds_password" \
+  lhyy followup_patient_identity_map \
+  hospital_code source_patient_id target_patient_id source_unique_patient_id target_unique_patient_id \
+  identity_match_basis original_source_type first_package_id last_package_id created_at updated_at
+
+for table in public.patient care.patient_event form.form_project public.patient_data_scope_map; do
   check_table "$cube_container" "$cube_user" "$cube_database" "$cube_password" "$table"
 done
 
 check_columns "$cube_container" "$cube_user" "$cube_database" "$cube_password" \
-  datasync followup_patient_source_map \
-  patient_id original_source_type hospital_code first_package_id last_package_id created_at updated_at
-check_columns "$cube_container" "$cube_user" "$cube_database" "$cube_password" \
   public patient_data_scope_map \
   id created_time patient_id hospital_id department_id ward_id project_id
+
+identity_map_unique="$(query "$ds_container" "$ds_user" "$ds_database" "$ds_password" "
+  SELECT EXISTS (
+    SELECT 1
+    FROM pg_indexes
+    WHERE schemaname='lhyy'
+      AND tablename='followup_patient_identity_map'
+      AND indexdef ILIKE '%UNIQUE%hospital_code%target_patient_id%');")"
+[[ "$identity_map_unique" == "t" ]] || { echo "DataSyncDb 缺少患者身份目标唯一约束。" >&2; exit 1; }
 
 echo "数据库验证通过：DataSync表=$datasync_tables，Cube表=$cube_tables，运行历史=0。"

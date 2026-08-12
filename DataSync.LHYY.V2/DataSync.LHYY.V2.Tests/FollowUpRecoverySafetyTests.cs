@@ -260,7 +260,7 @@ public sealed class FollowUpRecoverySafetyTests
         var completedMarker = restoreSource.IndexOf(
             "reconciliationMarker = reconciliationMarker with { RestoredAt", StringComparison.Ordinal);
         var markerCall = restoreSource.IndexOf("completionStore.SaveAsync", completedMarker, StringComparison.Ordinal);
-        var statusCall = restoreSource.IndexOf("repository.MarkAsync(state.HospitalCode, state.PackageId, \"Restored\"", StringComparison.Ordinal);
+        var statusCall = restoreSource.IndexOf("repository.CompleteRestoreAsync(", markerCall, StringComparison.Ordinal);
 
         Assert.True(restoreCall >= 0 && completedMarker > restoreCall && markerCall > completedMarker && statusCall > markerCall);
         Assert.Contains("AddHostedService<FollowUpRestoreReconciliationWorker>", programSource);

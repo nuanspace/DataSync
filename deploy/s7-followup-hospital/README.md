@@ -59,7 +59,7 @@ bash start.sh       # 启动前自动执行只读 cube-compat-check
 bash status.sh
 ```
 
-`cube-compat-check` 只在只读事务中核对连接、v2 默认启用的 23 张目标表、来源适配与 EDC 可见性维护表、必要字段、8 个 schema 的 `USAGE`、按导入策略实际需要的表权限、导入前完整 `pg_dump` 所需的全部业务 schema/table/sequence 读取权限，以及 form schema 下的 vector 扩展。`UseExistingById/RejectIfMissing` 要求 `SELECT`，`InsertIfMissing` 要求 `INSERT`，`Upsert` 要求 `SELECT/INSERT/UPDATE`（PostgreSQL 的 `ON CONFLICT DO UPDATE` 会读取 `EXCLUDED` 列）；当前导入流程不要求 `DELETE`。
+`cube-compat-check` 只在只读事务中核对连接、v3 默认启用的 23 张目标表、来源适配与 EDC 可见性维护表、患者身份判定字段及映射唯一索引、8 个 schema 的 `USAGE`、按导入策略实际需要的表权限、导入前完整 `pg_dump` 所需的全部业务 schema/table/sequence 读取权限，以及 form schema 下的 vector 扩展。`UseExistingById/RejectIfMissing` 要求 `SELECT`，`InsertIfMissing` 要求 `INSERT`，`Upsert` 要求 `SELECT/INSERT/UPDATE`（PostgreSQL 的 `ON CONFLICT DO UPDATE` 会读取 `EXCLUDED` 列）；当前导入流程不要求 `DELETE`。
 
 启动检查还会读取目标库 `form.form_question.table_name`，逐一验证已引用的 `target.*` 动态表、`patient_event_id` 字段及 `INSERT/UPDATE` 权限。云端后续可能启用新的动态表，因此每个数据包在真正导入前仍会执行完整 schema/主键/字段类型检查；`external-cube` 模式还会按该包映射后的目标表和 `ImportPolicy` 再检查 schema `USAGE` 与最小表权限。新动态表缺失或权限不足时包会进入结构待处理状态，不会开始写库。实施人员应在首次包和云端表清单变更后先手工拉取并完成这道检查，再开启自动导入。
 
@@ -76,9 +76,9 @@ bash start.sh
 bash status.sh
 ```
 
-全新部署的 Cube schema-only dump 必须已经包含 `20260722-cube-v2.sql` 的结构。`restore-fresh-databases.sh cube` 和 `verify-fresh-databases.sh` 会在 `external-cube` 模式主动拒绝执行。
+本版本不携带也不执行 CubeDb 自定义迁移；无论全新还是存量模式，CubeDb 只需具备 NTCare 既有业务表。存量升级应先停止自动导入并备份 DataSyncDb，在数据库升级页仅对 `DataSyncDb` 执行 `20260811.sql`，随后运行一次 `followup-patient-map bootstrap --hospital-code <医院编码> --confirm-datasync-write`。该工具对 CubeDb 使用只读事务，只把旧版本遗留映射幂等迁移到 `lhyy.followup_patient_identity_map`；若提示无旧映射但已有历史导入包，必须先执行 `RecoveryBaseline`，不得直接放开增量导入。`restore-fresh-databases.sh cube` 和 `verify-fresh-databases.sh` 会在 `external-cube` 模式主动拒绝执行。
 
-首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任。DMZ 运行期 SSH 授权与医院端七项材料均由页面即时应用，初始化阶段无需重启 DMZ、CYYY 或 LHYY。随后执行：关闭自动任务 → 检查服务和 v3/1.2.0（医院端拒绝旧 v2 包）→ 检查两库及来源映射 → 保存或核对 CYYY 医院来源 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
+首次部署完成后，先在 LHYY“医院端统一初始化”按 `hospital-to-dmz → dmz-to-cloud → cloud-to-dmz → dmz-to-hospital` 四包顺序完成三端信任。DMZ 运行期 SSH 授权与医院端七项材料均由页面即时应用，初始化阶段无需重启 DMZ、CYYY 或 LHYY。随后执行：关闭自动任务 → 检查服务和 v3/1.2.0（医院端拒绝旧 v2 包）→ 检查两库及 DataSyncDb 患者映射 → 保存或核对 CYYY 医院来源 → CYYY 连接诊断 → 手工生成 Baseline → CYYY 拉取 → LHYY 备份并导入 → 重启 NTCare/刷新缓存并核对患者管理 → 检查 ACK → 验证 Incremental 和幂等 → 依次启用自动任务。详细步骤见包内 `docs/KEY-SEQUENCE.md`。
 
 LHYY 必须保留 Compose 中 `${NTCARE_UPLOADS_PATH}:/app/uploads` 的绑定，并保持 `FollowUpPackageImport.AttachmentRoot=/app/uploads`。`NTCARE_UPLOADS_PATH` 必须是已存在、非符号链接、可读写的绝对路径，并指向现有 NTCare 实际使用的 uploads 目录；若 NTCare 位于另一主机，则填写双方同一共享存储在 DataSync 宿主机上的挂载点，该存储必须支持同目录硬链接和原子重命名，不能使用禁用硬链接的 SMB/CIFS 配置。安装和启动脚本都会通过 LHYY 容器实际探测文件创建、同目录硬链接、原子发布与清理能力，但不会创建附件根、递归改属主或放宽其权限。导入器会将包内 `files/uploads` 原子安装到此目录，并仅对已授权的“文件”题把 `/uploads/...`、`uploads/...` 和历史 HTTP(S) 上传 URL 统一保存为 NTCare 既有的相对文件名；引用未进入附件清单时会以包完整性错误在备份前拒绝导入。NTCare 页面继续由 NTCare 自身 origin 和权限体系读取同一物理目录，LHYY 不对外提供附件静态目录。不得把附件根指向未挂载的容器临时目录；基线及增量导入后应分别从真实 NTCare 表单验证图片和非图片附件。
 

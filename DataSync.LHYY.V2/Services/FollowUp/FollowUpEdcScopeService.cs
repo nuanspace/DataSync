@@ -9,6 +9,7 @@ namespace DataSync.LHYY.V2.Services.FollowUp;
 public sealed record FollowUpEdcScopePlan(
     IReadOnlyCollection<Guid> PatientIds,
     IReadOnlyCollection<Guid> EdcProjectIds,
+    IReadOnlyCollection<Guid> MappedPatientIds,
     bool ShouldApply);
 
 internal sealed class FollowUpPackageScope
@@ -27,13 +28,30 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
 
     private readonly string _cubeConnectionString = configuration.GetConnectionString("CubeDb")
         ?? throw new InvalidOperationException("未找到连接字符串 'CubeDb'");
+    private readonly string _dataSyncConnectionString = configuration.GetConnectionString("DataSyncDb")
+        ?? throw new InvalidOperationException("未找到连接字符串 'DataSyncDb'");
 
     public async Task<FollowUpEdcScopePlan> PrepareAsync(
         FollowUpVerifiedPackage package,
         FollowUpSchemaDecision? schemaDecision,
+        CancellationToken cancellationToken) =>
+        await PrepareAsync(package, schemaDecision, null, cancellationToken);
+
+    public async Task<FollowUpEdcScopePlan> PrepareAsync(
+        FollowUpVerifiedPackage package,
+        FollowUpSchemaDecision? schemaDecision,
+        IReadOnlyDictionary<Guid, Guid>? patientIdMap,
         CancellationToken cancellationToken)
     {
         var packageScope = await ReadPackageScopeAsync(package, schemaDecision, cancellationToken);
+        if (patientIdMap is { Count: > 0 } && packageScope.PatientIds.Count > 0)
+        {
+            var remapped = packageScope.PatientIds
+                .Select(patientId => patientIdMap.GetValueOrDefault(patientId, patientId))
+                .ToArray();
+            packageScope.PatientIds.Clear();
+            packageScope.PatientIds.UnionWith(remapped);
+        }
         if (packageScope.PatientIds.Count == 0
             && packageScope.ProjectIds.Count == 0
             && packageScope.EdcProjectIds.Count == 0)
@@ -59,6 +77,12 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
                     FollowUpErrorCodes.SchemaReviewRequired,
                     $"EDC 患者可见性依赖 public.patient_data_scope_map，目标库缺少字段：{string.Join(", ", missing)}。");
             }
+
+            var mappedPatientIds = await ReadMappedPatientIdsAsync(
+                package.Manifest.HospitalCode,
+                cancellationToken);
+            mappedPatientIds.UnionWith(plan.PatientIds);
+            plan = plan with { MappedPatientIds = mappedPatientIds.ToArray() };
         }
 
         return plan;
@@ -70,7 +94,10 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
         FollowUpEdcScopePlan plan,
         CancellationToken cancellationToken)
     {
-        if (!plan.ShouldApply || (plan.PatientIds.Count == 0 && plan.EdcProjectIds.Count == 0))
+        if (!plan.ShouldApply
+            || (plan.PatientIds.Count == 0
+                && plan.MappedPatientIds.Count == 0
+                && plan.EdcProjectIds.Count == 0))
             return 0;
 
         await using var command = new NpgsqlCommand(BuildUpsertSql(), connection, transaction);
@@ -82,6 +109,10 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
         {
             TypedValue = plan.EdcProjectIds.ToArray()
         });
+        command.Parameters.Add(new NpgsqlParameter<Guid[]>("mapped_patient_ids", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            TypedValue = plan.MappedPatientIds.ToArray()
+        });
         return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -89,17 +120,19 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
         WITH candidate AS (
             SELECT p.id AS patient_id, pe.project_id
             FROM public.patient p
-            INNER JOIN datasync.followup_patient_source_map source_map ON source_map.patient_id = p.id
             INNER JOIN care.patient_event pe ON pe.patient_id = p.id
-            WHERE p.id = ANY(@patient_ids) OR pe.project_id = ANY(@edc_project_ids)
+            WHERE p.id = ANY(@patient_ids)
+               OR (p.id = ANY(@mapped_patient_ids)
+                   AND pe.project_id = ANY(@edc_project_ids))
 
             UNION
 
             SELECT p.id AS patient_id, p.project_id
             FROM public.patient p
-            INNER JOIN datasync.followup_patient_source_map source_map ON source_map.patient_id = p.id
             WHERE p.project_id IS NOT NULL
-              AND (p.id = ANY(@patient_ids) OR p.project_id = ANY(@edc_project_ids))
+              AND (p.id = ANY(@patient_ids)
+                   OR (p.id = ANY(@mapped_patient_ids)
+                       AND p.project_id = ANY(@edc_project_ids)))
         )
         , desired AS (
             SELECT DISTINCT
@@ -166,7 +199,27 @@ public sealed class FollowUpEdcScopeService(IConfiguration configuration)
         return new(
             packageScope.PatientIds.ToArray(),
             edcProjectIds.ToArray(),
+            [],
             hasTargetEdcData || edcProjectIds.Count > 0);
+    }
+
+    private async Task<HashSet<Guid>> ReadMappedPatientIdsAsync(
+        string hospitalCode,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(_dataSyncConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT target_patient_id
+            FROM lhyy.followup_patient_identity_map
+            WHERE hospital_code = @hospitalCode
+            """, connection);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        var result = new HashSet<Guid>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+            result.Add(reader.GetGuid(0));
+        return result;
     }
 
     private static async Task<FollowUpPackageScope> ReadPackageScopeAsync(

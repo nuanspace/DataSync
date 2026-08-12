@@ -12,7 +12,7 @@ public static class ExternalCubeCompatibilityTool
 
     public static IReadOnlyList<ExternalCubeTableRequirement> DefaultRequirements { get; } =
     [
-        // 与云端 HospitalDataTableSelectionService.GetDefaultTables 的 v2 默认清单保持一致。
+        // 与云端 HospitalDataTableSelectionService.GetDefaultTables 的 v3 默认清单保持一致。
         Required("system.sys_hospital", ["id"], ["SELECT"]),
         Required("system.sys_department", ["id", "hospital_id"], ["INSERT"]),
         Required("form.form_project", ["id", "hospital_id", "department_id", "ward_id"], ["SELECT", "INSERT", "UPDATE"]),
@@ -23,15 +23,15 @@ public static class ExternalCubeCompatibilityTool
         Required("form.form_card", ["id", "project_id"], ["INSERT", "UPDATE"]),
         Required("form.form_question", ["id", "project_id", "table_name"], ["SELECT", "INSERT", "UPDATE"]),
         Required("form.form_linker_rule", ["id", "formset_id"], ["INSERT", "UPDATE"]),
-        Required("public.unique_patient", ["id"], ["INSERT"]),
+        Required("public.unique_patient", ["id", "sid_number", "name", "birthday", "gender"], ["SELECT", "INSERT"]),
         Required("public.patient", ["id", "hospital_id", "project_id", "unique_id", "source_type"], ["SELECT", "INSERT", "UPDATE"]),
         Required("care.patient_event",
             ["id", "patient_id", "project_id", "form_set_id", "form_set_name", "event_type_definition_id"],
             ["SELECT", "INSERT", "UPDATE"]),
         Required("care.patient_event_form_audit_state", ["patient_event_id", "form_id"], ["INSERT", "UPDATE"]),
-        Required("care.patient_hospitalized", ["id", "patient_event_id"], ["INSERT", "UPDATE"]),
+        Required("care.patient_hospitalized", ["id", "patient_id", "patient_event_id"], ["INSERT", "UPDATE"]),
         Required("care.patient_outpatient",
-            ["id", "patient_event_id", "diagnosis_file", "physical_exam_file", "remark_file"],
+            ["id", "patient_id", "patient_event_id", "diagnosis_file", "physical_exam_file", "remark_file"],
             ["INSERT", "UPDATE"]),
         Required("followup.followup_file_list", ["id"], ["INSERT", "UPDATE"]),
         Required("public.table_definition", ["id"], ["INSERT"]),
@@ -41,17 +41,14 @@ public static class ExternalCubeCompatibilityTool
         Required("report.child_multi_quick_suite_item", ["id", "suite_id"], ["INSERT", "UPDATE"]),
         Required("form.form_progress_excluded_question", ["id", "project_id"], ["INSERT", "UPDATE"]),
 
-        // LHYY 导入后的来源适配与 EDC 可见性维护结构。
-        Required("datasync.followup_patient_source_map",
-            ["patient_id", "original_source_type", "hospital_code", "first_package_id", "last_package_id", "created_at", "updated_at"],
-            ["SELECT", "INSERT", "UPDATE"]),
+        // LHYY 只使用 CubeDb 已有业务结构；患者身份映射保存在 DataSyncDb。
         Required("public.patient_data_scope_map",
             ["id", "created_time", "patient_id", "hospital_id", "department_id", "ward_id", "project_id"],
             ["SELECT", "INSERT", "UPDATE"])
     ];
 
     private static readonly string[] RequiredSchemas =
-        ["system", "care", "form", "public", "followup", "report", "datasync", "target"];
+        ["system", "care", "form", "public", "followup", "report", "target"];
 
     public static bool IsCommand(string[] args) =>
         args.Length > 0 && string.Equals(args[0], CommandName, StringComparison.OrdinalIgnoreCase);
