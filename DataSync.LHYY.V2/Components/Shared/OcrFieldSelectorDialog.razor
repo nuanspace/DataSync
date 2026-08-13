@@ -1,0 +1,279 @@
+﻿@inherits BasePage
+
+@if (Visible)
+{
+    <div class="ocr-preview-overlay" @onclick="CloseAsync">
+        <div class="ocr-preview-modal" @onclick:stopPropagation="true">
+            <div class="ocr-preview-header">
+                <div>
+                    <MudText Typo="Typo.h6">PDF 报告预览</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        左侧查看报告原始版式，右侧配置字段；点击“测试全部字段”后才调用全局当前 AI。
+                    </MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseAsync" Disabled="Saving" />
+            </div>
+
+            <div class="ocr-preview-content">
+                @if (PreviewResult == null)
+                {
+                    <MudAlert Severity="Severity.Warning">当前没有可用的 PDF 预览结果。</MudAlert>
+                }
+                else
+                {
+                    <div class="ocr-preview-layout">
+                        <section class="ocr-preview-document">
+                            <div class="ocr-preview-toolbar">
+                                <MudIconButton Icon="@Icons.Material.Filled.ChevronLeft" Size="Size.Small"
+                                               Disabled="@(_selectedPageNumber <= 1)" OnClick="PreviousPage" />
+                                <MudText Typo="Typo.body2">第 @_selectedPageNumber 页 · 已加载 @PreviewResult.Pages.Count 页</MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small"
+                                               Disabled="@(!HasNextLoadedPage())" OnClick="NextPage" />
+                                @if (HasMorePages || Loading)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Info"
+                                               Disabled="Loading || Testing" OnClick="OnLoadMore">
+                                        @(Loading ? "加载中..." : "加载更多（3页）")
+                                    </MudButton>
+                                }
+                                <MudSpacer />
+                                <MudIconButton Icon="@Icons.Material.Filled.ZoomOut" Size="Size.Small"
+                                               Disabled="@(_zoomPercent <= 50)" OnClick="ZoomOut" />
+                                <MudText Typo="Typo.caption">@_zoomPercent%</MudText>
+                                <MudIconButton Icon="@Icons.Material.Filled.ZoomIn" Size="Size.Small"
+                                               Disabled="@(_zoomPercent >= 200)" OnClick="ZoomIn" />
+                            </div>
+
+                            @if (GetSelectedPage() is { } page)
+                            {
+                                <div class="ocr-preview-scroll">
+                                    @if (!string.IsNullOrWhiteSpace(page.PreviewImageDataUrl))
+                                    {
+                                        <img class="ocr-preview-page-image" style="@GetImageStyle()"
+                                             src="@(page.PreviewImageDataUrl)" alt="@(GetPageAltText(page))" />
+                                    }
+                                    else
+                                    {
+                                        <pre class="ocr-preview-page-text" style="@GetTextStyle()">@(page.Text)</pre>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="ocr-preview-page-loading">
+                                    <MudProgressCircular Indeterminate="true" Color="Color.Info" />
+                                    <MudText Typo="Typo.body2">当前页面正在加载</MudText>
+                                </div>
+                            }
+                        </section>
+
+                        <aside class="ocr-preview-results">
+                            <div class="ocr-preview-field-header">
+                                <div>
+                                    <MudText Typo="Typo.subtitle2">要提取的字段（@ExtractionRules.Count）</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        样本测试只使用当前已加载的 @PreviewResult.Pages.Count 页；未加载页面中的字段会暂时返回 null。
+                                    </MudText>
+                                </div>
+                                <div class="ocr-preview-field-actions">
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                                               StartIcon="@Icons.Material.Filled.Add" Disabled="Testing"
+                                               OnClick="AddFieldAsync">
+                                        新增字段
+                                    </MudButton>
+                                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                               StartIcon="@Icons.Material.Filled.AutoAwesome"
+                                               Disabled="Testing || Loading || ExtractionRules.Count == 0"
+                                               OnClick="OnTestFields">
+                                        @(Testing ? "测试中..." : "测试全部字段")
+                                    </MudButton>
+                                </div>
+                            </div>
+
+                            @if (Testing)
+                            {
+                                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-2" />
+                            }
+                            @if (!string.IsNullOrWhiteSpace(TestError))
+                            {
+                                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@TestError</MudAlert>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(LoadError))
+                            {
+                                <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">
+                                    @LoadError
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                               Disabled="Loading" OnClick="OnLoadMore">
+                                        重试本批
+                                    </MudButton>
+                                </MudAlert>
+                            }
+
+                            <div class="ocr-preview-result-list">
+                                @if (ExtractionRules.Count == 0)
+                                {
+                                    <MudAlert Severity="Severity.Warning" Dense="true">
+                                        请新增至少一个提取字段。没有测试结果也可以先配置字段，最后在外层保存接口。
+                                    </MudAlert>
+                                }
+                                @foreach (var rule in ExtractionRules)
+                                {
+                                    var value = GetPreviewValue(rule);
+                                    <MudPaper Outlined="true" Class="pa-3 ocr-preview-result-card" @key="rule">
+                                        <div class="ocr-preview-result-title">
+                                            <MudText Typo="Typo.subtitle2">字段配置</MudText>
+                                            <MudTooltip Text="删除字段">
+                                                <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                               Color="Color.Error" Disabled="Testing"
+                                                               OnClick="@(() => RemoveFieldAsync(rule))" />
+                                            </MudTooltip>
+                                        </div>
+                                        <MudTextField T="string" Value="rule.FieldCode"
+                                                      ValueChanged="@(text => ChangeFieldCodeAsync(rule, text))"
+                                                      Label="输出字段名称" Required="true" Margin="Margin.Dense"
+                                                      HelperText="例如：房性早搏_单发次数" Disabled="Testing" />
+                                        <MudTextField T="string" Value="rule.SourceFieldName"
+                                                      ValueChanged="@(text => ChangeSourceFieldNameAsync(rule, text))"
+                                                      Label="PDF 字段名称" Required="true" Margin="Margin.Dense"
+                                                      HelperText="必须与报告文字一致，例如：单发(次)" Disabled="Testing" />
+                                        <MudTextField T="string" Value="rule.SectionHeading"
+                                                      ValueChanged="@(text => ChangeSectionHeadingAsync(rule, text))"
+                                                      Label="所属标题（可选）" Margin="Margin.Dense"
+                                                      HelperText="同名字段必须填写，例如：房性早搏" Disabled="Testing" />
+                                        <MudTextField T="string" Value="rule.Instruction"
+                                                      ValueChanged="@(text => ChangeInstructionAsync(rule, text))"
+                                                      Label="识别说明（可选）" Margin="Margin.Dense"
+                                                      Disabled="Testing" />
+                                        <MudSwitch T="bool" Value="rule.IsRequired"
+                                                   ValueChanged="@(required => ChangeRequiredAsync(rule, required))"
+                                                   Label="必填" Color="Color.Warning" Disabled="Testing" />
+
+                                        @if (!FieldsTested)
+                                        {
+                                            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">待测试</MudAlert>
+                                        }
+                                        else
+                                        {
+                                            <MudAlert Severity="@(value == null ? Severity.Warning : Severity.Success)"
+                                                      Dense="true" Class="mt-2">
+                                                @(value == null ? "null（未识别到）" : value.Length == 0 ? "空字符串（报告中字段值为空）" : value)
+                                            </MudAlert>
+                                        }
+                                    </MudPaper>
+                                }
+                            </div>
+                        </aside>
+                    </div>
+                }
+            </div>
+
+            <div class="ocr-preview-actions">
+                <MudButton Variant="Variant.Text" OnClick="CloseAsync" Disabled="Saving">关闭</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OnSave"
+                           Disabled="Saving || Loading || Testing">
+                    @(Saving ? "保存中..." : "保存接口配置")
+                </MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public OcrDocumentResult? PreviewResult { get; set; }
+    [Parameter] public List<OcrExtractionRule> ExtractionRules { get; set; } = [];
+    [Parameter] public EventCallback<List<OcrExtractionRule>> ExtractionRulesChanged { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool HasMorePages { get; set; }
+    [Parameter] public string? LoadError { get; set; }
+    [Parameter] public bool Testing { get; set; }
+    [Parameter] public bool Saving { get; set; }
+    [Parameter] public bool FieldsTested { get; set; }
+    [Parameter] public string? TestError { get; set; }
+    [Parameter] public EventCallback OnLoadMore { get; set; }
+    [Parameter] public EventCallback OnTestFields { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+
+    private int _selectedPageNumber = 1;
+    private int _zoomPercent = 100;
+
+    protected override void OnParametersSet()
+    {
+        if (PreviewResult != null)
+            _selectedPageNumber = Math.Clamp(_selectedPageNumber, 1, Math.Max(1, PreviewResult.PageCount));
+    }
+
+    private OcrPageResult? GetSelectedPage()
+        => PreviewResult?.Pages.FirstOrDefault(page => page.PageNumber == _selectedPageNumber);
+
+    private bool HasNextLoadedPage()
+        => PreviewResult?.Pages.Any(page => page.PageNumber == _selectedPageNumber + 1) == true;
+
+    private string? GetPreviewValue(OcrExtractionRule rule)
+        => PreviewResult?.ExtractedFields.TryGetValue(rule.FieldCode.Trim(), out var value) == true ? value : null;
+
+    private string GetImageStyle() => $"width: {_zoomPercent}%";
+    private string GetTextStyle() => $"font-size: {_zoomPercent / 100d}rem";
+    private static string GetPageAltText(OcrPageResult page) => $"第 {page.PageNumber} 页 PDF 预览";
+
+    private void PreviousPage() => _selectedPageNumber = Math.Max(1, _selectedPageNumber - 1);
+    private void NextPage()
+    {
+        if (HasNextLoadedPage())
+            _selectedPageNumber++;
+    }
+    private void ZoomOut() => _zoomPercent = Math.Max(50, _zoomPercent - 10);
+    private void ZoomIn() => _zoomPercent = Math.Min(200, _zoomPercent + 10);
+
+    private async Task AddFieldAsync()
+    {
+        ExtractionRules.Add(new OcrExtractionRule());
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task RemoveFieldAsync(OcrExtractionRule rule)
+    {
+        ExtractionRules.Remove(rule);
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task ChangeFieldCodeAsync(OcrExtractionRule rule, string value)
+    {
+        rule.FieldCode = value;
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task ChangeSourceFieldNameAsync(OcrExtractionRule rule, string? value)
+    {
+        rule.SourceFieldName = value;
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task ChangeSectionHeadingAsync(OcrExtractionRule rule, string? value)
+    {
+        rule.SectionHeading = value;
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task ChangeInstructionAsync(OcrExtractionRule rule, string? value)
+    {
+        rule.Instruction = value;
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task ChangeRequiredAsync(OcrExtractionRule rule, bool value)
+    {
+        rule.IsRequired = value;
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private async Task CloseAsync()
+    {
+        if (Saving)
+            return;
+
+        Visible = false;
+        await VisibleChanged.InvokeAsync(false);
+    }
+}

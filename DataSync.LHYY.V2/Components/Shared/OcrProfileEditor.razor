@@ -1,0 +1,204 @@
+﻿@inherits BasePage
+
+<MudGrid Class="mt-1">
+    <MudItem xs="12">
+        <MudAlert Severity="Severity.Info" Dense="true">
+            系统会识别整份 PDF，再由全局配置中当前使用的 AI 只提取下方字段。表格中存在同名字段时，请用“所属标题”区分；AI 成功执行但未识别到的非必填字段会保留为 null。
+        </MudAlert>
+    </MudItem>
+    <MudItem xs="12">
+        <MudSwitch @bind-Value="Profile.IsEnabled" Label="启用 PDF 识别" Color="Color.Primary" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudSelect T="OcrSourceKind" @bind-Value="Profile.SourceKind" Label="PDF 来源类型">
+            <MudSelectItem Value="OcrSourceKind.FilePath">文件路径</MudSelectItem>
+            <MudSelectItem Value="OcrSourceKind.Url">URL</MudSelectItem>
+            <MudSelectItem Value="OcrSourceKind.Base64">Base64</MudSelectItem>
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="8">
+        @if (SourcePathPickEnabled)
+        {
+            <PathPickTextField @bind-Value="Profile.SourcePath"
+                               Label="PDF 来源路径"
+                               HelperText="消息 JSON 中 PDF 路径、URL 或 Base64 内容所在的 JSONPath"
+                               IsActive="SourcePathPickActive"
+                               OnActivated="OnSourcePathPickActivated" />
+        }
+        else
+        {
+            <MudTextField @bind-Value="Profile.SourcePath" Label="PDF 来源路径" Required="true"
+                          HelperText="消息 JSON 中 PDF 路径、URL 或 Base64 内容所在的 JSONPath"
+                          Placeholder="$main.PDF" />
+        }
+    </MudItem>
+    @if (Profile.SourceKind == OcrSourceKind.FilePath)
+    {
+        <MudItem xs="12">
+            <MudTextField @bind-Value="Profile.AllowedFileRoots" Label="允许读取的目录" Lines="2"
+                          HelperText="为了文件安全，文件路径来源必须指定可读取目录；多个目录使用分号或换行分隔" />
+        </MudItem>
+    }
+
+    <MudItem xs="12" Class="mt-3">
+        <MudPaper Outlined="true" Class="pa-3">
+            <div class="ocr-fields-header">
+                <div>
+                    <MudText Typo="Typo.subtitle2">要提取的字段（@ExtractionRules.Count）</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        输出字段名称用于后续映射；PDF 字段名称必须与报告文字一致。旧配置未填写 PDF 字段名称时会沿用输出字段名称。
+                    </MudText>
+                </div>
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add" OnClick="AddFieldsAsync">
+                    新增字段
+                </MudButton>
+            </div>
+
+            @if (ExtractionRules.Count == 0)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-3">
+                    OCR 接口至少需要配置一个提取字段，否则不能保存、启用或处理消息。
+                </MudAlert>
+            }
+            else
+            {
+                <div class="ocr-field-list mt-3">
+                    <div class="ocr-field-list-header">
+                        <MudText Typo="Typo.caption">输出字段名称</MudText>
+                        <MudText Typo="Typo.caption">PDF 字段名称</MudText>
+                        <MudText Typo="Typo.caption">所属标题</MudText>
+                        <MudText Typo="Typo.caption">识别说明</MudText>
+                        <MudText Typo="Typo.caption">必填</MudText>
+                        <MudText Typo="Typo.caption">操作</MudText>
+                    </div>
+                    @foreach (var (rule, index) in ExtractionRules.Select((item, index) => (item, index)))
+                    {
+                        <div class="ocr-field-list-row" @key="rule">
+                            <MudText Typo="Typo.body2" Class="ocr-field-list-value">@DisplayValue(rule.FieldCode)</MudText>
+                            <MudText Typo="Typo.body2" Class="ocr-field-list-value">@DisplayValue(rule.SourceFieldName)</MudText>
+                            <MudText Typo="Typo.body2" Class="ocr-field-list-value">@DisplayValue(rule.SectionHeading)</MudText>
+                            <MudText Typo="Typo.body2" Class="ocr-field-list-value">@DisplayValue(rule.Instruction)</MudText>
+                            <MudText Typo="Typo.body2">@(rule.IsRequired ? "是" : "否")</MudText>
+                            <div class="ocr-field-list-actions">
+                                <MudTooltip Text="编辑字段">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                                   Color="Color.Primary" OnClick="@(() => EditFieldsAsync(index))" />
+                                </MudTooltip>
+                                <MudTooltip Text="删除字段">
+                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                   Color="Color.Error" OnClick="@(() => RemoveFieldAsync(rule))" />
+                                </MudTooltip>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" Class="mt-3">
+        <MudDivider />
+    </MudItem>
+    <MudItem xs="12">
+        <MudText Typo="Typo.subtitle2">PDF 样本预览</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            样本只用于查看 PDF 和测试当前字段，不执行映射、不写业务表，也不修改消息状态。没有样本不影响字段配置。
+        </MudText>
+    </MudItem>
+    <MudItem xs="12" sm="8">
+        <MudSelect T="long?" Value="SelectedSampleMessageId" ValueChanged="OnSelectedSampleChanged"
+                   Label="样本消息" Clearable="true" Disabled="SamplesLoading || Previewing">
+            @foreach (var message in SampleMessages)
+            {
+                <MudSelectItem Value="@((long?)message.Id)">
+                    #@message.Id · @message.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss") · @message.Status
+                </MudSelectItem>
+            }
+        </MudSelect>
+    </MudItem>
+    <MudItem xs="12" sm="4" Class="d-flex align-center gap-2">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" OnClick="OnLoadSamples"
+                   Disabled="SamplesLoading || Previewing" StartIcon="@Icons.Material.Filled.Refresh">
+            @(SamplesLoading ? "加载中..." : "加载样本")
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Info" OnClick="OnPreview"
+                   Disabled="Previewing || SamplesLoading || !SelectedSampleMessageId.HasValue"
+                   StartIcon="@Icons.Material.Filled.Visibility">
+            @(Previewing ? "生成中..." : "查看 PDF 并配置字段")
+        </MudButton>
+    </MudItem>
+
+    @if (Previewing)
+    {
+        <MudItem xs="12">
+            <MudProgressLinear Indeterminate="true" Color="Color.Info" />
+        </MudItem>
+    }
+
+    @if (PreviewResult != null)
+    {
+        <MudItem xs="12">
+            <MudPaper Outlined="true" Class="pa-3">
+                <div class="ocr-preview-summary">
+                    <div>
+                        <MudText Typo="Typo.subtitle2">@(Previewing ? "报告页面加载中" : "报告预览已生成")</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @if (Previewing)
+                            {
+                                <span>正在加载当前批次</span>
+                            }
+                            else
+                            {
+                                <span>已加载 @PreviewResult.Pages.Count 页 · @PreviewElapsedMs ms · 可测试当前已加载页面</span>
+                            }
+                        </MudText>
+                    </div>
+                    <MudSpacer />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.PictureAsPdf" OnClick="OnOpenFieldSelector">
+                        查看 PDF 并配置字段
+                    </MudButton>
+                </div>
+            </MudPaper>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public EsbOcrProfile Profile { get; set; } = new();
+    [Parameter] public List<OcrExtractionRule> ExtractionRules { get; set; } = [];
+    [Parameter] public EventCallback<List<OcrExtractionRule>> ExtractionRulesChanged { get; set; }
+    [Parameter] public bool SourcePathPickEnabled { get; set; }
+    [Parameter] public bool SourcePathPickActive { get; set; }
+    [Parameter] public EventCallback OnSourcePathPickActivated { get; set; }
+    [Parameter] public IReadOnlyList<EsbMessageListItem> SampleMessages { get; set; } = [];
+    [Parameter] public long? SelectedSampleMessageId { get; set; }
+    [Parameter] public EventCallback<long?> SelectedSampleMessageIdChanged { get; set; }
+    [Parameter] public bool SamplesLoading { get; set; }
+    [Parameter] public bool Previewing { get; set; }
+    [Parameter] public OcrDocumentResult? PreviewResult { get; set; }
+    [Parameter] public long PreviewElapsedMs { get; set; }
+    [Parameter] public EventCallback OnLoadSamples { get; set; }
+    [Parameter] public EventCallback OnPreview { get; set; }
+    [Parameter] public EventCallback OnOpenFieldSelector { get; set; }
+    [Parameter] public EventCallback<int?> OnManageFields { get; set; }
+
+    private Task AddFieldsAsync() => OnManageFields.InvokeAsync(null);
+    private Task EditFieldsAsync(int index) => OnManageFields.InvokeAsync(index);
+
+    private async Task RemoveFieldAsync(OcrExtractionRule rule)
+    {
+        ExtractionRules.Remove(rule);
+        await ExtractionRulesChanged.InvokeAsync(ExtractionRules);
+    }
+
+    private static string DisplayValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
+
+    private async Task OnSelectedSampleChanged(long? messageId)
+    {
+        SelectedSampleMessageId = messageId;
+        await SelectedSampleMessageIdChanged.InvokeAsync(messageId);
+    }
+}

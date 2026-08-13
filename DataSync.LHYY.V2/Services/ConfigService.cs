@@ -286,11 +286,15 @@ public class ConfigService
             errors.Add("直处理模式不支持待身份绑定策略，请改为 Fail 或 DegradeToPatientOnly");
         }
 
+        if (OcrProfileService.IsOcrHandler(config) && config.ReceiveMode != ReceiveMode.PersistAndAsync)
+            errors.Add("OCR 接口仅支持入队异步处理");
+
         return errors;
     }
 
     private static bool RequiresStandardEventIdentity(EsbInterfaceConfig config)
-        => config.HandlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack;
+        => config.HandlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack
+            || OcrProfileService.IsOcrHandler(config);
 
     private async Task<Dictionary<string, EsbInterfaceConfig>> GetAllInterfaceConfigsAsync(
         string? integrationProjectCode = null,

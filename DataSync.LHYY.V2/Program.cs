@@ -137,6 +137,7 @@ public class Program
             builder.Services.AddScoped<GenericMessageProcessor>();
             builder.Services.AddScoped<GenericQuestionWriteBackProcessor>();
             builder.Services.AddScoped<OcrProfileService>();
+            builder.Services.AddHttpClient<OcrAiExtractionService>();
             builder.Services.AddScoped<MessageExecutionService>();
             builder.Services.AddScoped<FilterRuleService>();
             builder.Services.AddScoped<MappingPreviewService>();
@@ -301,36 +302,20 @@ public class Program
                 "packages");
         }
 
-        var mudBlazorRoot = Path.Combine(packagesRoot, "mudblazor");
-        if (!Directory.Exists(mudBlazorRoot))
-        {
+        var mudBlazorVersion = typeof(MudButton).Assembly.GetName().Version?.ToString(3);
+        if (string.IsNullOrWhiteSpace(mudBlazorVersion))
             return null;
-        }
 
-        var versionDirectories = Directory.GetDirectories(mudBlazorRoot)
-            .Select(path =>
-            {
-                var name = Path.GetFileName(path);
-                return new
-                {
-                    Path = path,
-                    Version = Version.TryParse(name, out var parsedVersion) ? parsedVersion : new Version(0, 0)
-                };
-            })
-            .OrderByDescending(item => item.Version)
-            .Select(item => item.Path);
+        var staticAssetsDirectory = Path.Combine(
+            packagesRoot,
+            "mudblazor",
+            mudBlazorVersion,
+            "staticwebassets");
 
-        foreach (var versionDirectory in versionDirectories)
-        {
-            var staticAssetsDirectory = Path.Combine(versionDirectory, "staticwebassets");
-            if (File.Exists(Path.Combine(staticAssetsDirectory, "MudBlazor.min.js"))
-                && File.Exists(Path.Combine(staticAssetsDirectory, "MudBlazor.min.css")))
-            {
-                return staticAssetsDirectory;
-            }
-        }
-
-        return null;
+        return File.Exists(Path.Combine(staticAssetsDirectory, "MudBlazor.min.js"))
+            && File.Exists(Path.Combine(staticAssetsDirectory, "MudBlazor.min.css"))
+                ? staticAssetsDirectory
+                : null;
     }
 
     private static void EnsurePlatformSchemaPatched(DataSyncDbContext db)
@@ -476,10 +461,22 @@ public class Program
                 keep_work_files          BOOLEAN NOT NULL DEFAULT FALSE,
                 allowed_file_roots       TEXT,
                 output_json_path         VARCHAR(1000),
+                extraction_rules         JSONB NOT NULL DEFAULT '[]'::JSONB,
+                sample_message_id        BIGINT,
                 description              VARCHAR(500),
                 created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
                 updated_at               TIMESTAMP NOT NULL DEFAULT NOW()
             );
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_ocr_profile
+                ADD COLUMN IF NOT EXISTS extraction_rules JSONB NOT NULL DEFAULT '[]'::JSONB;
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            ALTER TABLE IF EXISTS lhyy.esb_ocr_profile
+                ADD COLUMN IF NOT EXISTS sample_message_id BIGINT;
             """);
 
         db.Database.ExecuteSqlRaw("""

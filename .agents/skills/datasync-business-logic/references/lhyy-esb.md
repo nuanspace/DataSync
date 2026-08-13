@@ -1,4 +1,4 @@
-# LHYY ESB、映射与 ntcare 写入
+﻿# LHYY ESB、映射与 ntcare 写入
 
 ## 职责与入口
 
@@ -16,7 +16,7 @@
 1. `EsbController` 读取 JSON 请求体；入口支持 gzip，并有请求大小限制。
 2. `EsbReceiverService` 取得接入项目上下文，先持久化原消息。
 3. `InterfaceRecognitionService` 依次尝试传统交易码、`serverCode/ServerCode/tranCode/TranCode/code/Code`，最后执行配置化匹配规则。
-4. 根据 `ReceiveMode` 直接处理或进入后台队列。
+4. 根据 `ReceiveMode` 直接处理或进入后台队列；OCR 接口因识别耗时和失败重试要求，只允许入队异步处理。
 5. `MessageExecutionService` 根据 `HandlerType` 选择通用、题目/子卡回写或自定义处理器。
 6. 处理器执行接口级过滤、字段级过滤、字段映射、字典转换、幂等和事件定位。
 7. 通过 Bio.Core 或受控的目标表直写更新 ntcare，并写消息状态、回执和处理日志。
@@ -50,6 +50,7 @@
 
 - `MappingTarget.Patient/Event/Question/SubCard` 分别映射患者、事件、题目和子卡。
 - 通用 JSONPath、数组路径、字典和值表达式由配置驱动；不要另建平行映射体系。
+- 映射源为 JSON `null` 或路径不存在时按缺值处理：优先使用映射默认值，未配置默认值则跳过写入；空字符串 `""` 是明确值，继续参与现有映射和写入。
 - Bio.Core 初始化或能力不足时，只有明确支持的处理器可走 `DirectTargetWriteService`；不得把降级路径推广为默认路径。
 - 动态 target 表写入必须按表单元数据、系统字段和批准映射确定列范围，不能根据输入对象整行写入。
 
@@ -63,6 +64,8 @@
 ## 配置表
 
 核心配置和状态表包括 `esb_integration_project`、`esb_integration_project_config`、`esb_global_config`、`esb_interface_config`、`esb_interface_match_rule`、`esb_field_mapping`、`esb_filter_rule`、`esb_idempotent_key_part`、`esb_event_identity`、`esb_messages`、`esb_message_receipt`、`esb_process_log` 和项目文档表。
+
+配置同步把 OCR 配置和字段提取规则作为接口配置的一部分导出、预览和导入；样本消息编号属于环境本地数据，不进入同步包。OCR 自定义处理器在事件身份页面、服务端校验和后续执行上按通用映射处理器使用相同规则，不另建患者、事件或题目映射链路。
 
 配置数量和消息数量属于动态状态，不写入知识库。数据库变更遵循 `DataSync.LHYY.V2/AGENTS.md`。
 

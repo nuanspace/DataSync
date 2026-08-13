@@ -1,0 +1,154 @@
+﻿@inherits BasePage
+
+@if (Visible)
+{
+    <div class="ocr-rules-dialog-overlay">
+        <div class="ocr-rules-dialog" @onclick:stopPropagation="true">
+            <div class="ocr-rules-dialog-header">
+                <div>
+                    <MudText Typo="Typo.h6">配置提取字段</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">可在这里一次新增、编辑或删除多个字段，确定后统一应用。</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="CloseAsync" />
+            </div>
+            <div class="ocr-rules-dialog-body">
+                <div class="ocr-rules-dialog-toolbar">
+                    <MudText Typo="Typo.subtitle2">字段（@_draftRules.Count）</MudText>
+                    <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddField">
+                        新增字段
+                    </MudButton>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mt-2">@_error</MudAlert>
+                }
+                <div class="ocr-rules-dialog-list">
+                    @foreach (var (rule, index) in _draftRules.Select((item, index) => (item, index)))
+                    {
+                        <MudPaper Outlined="true"
+                                  Class="@($"pa-3 ocr-rules-dialog-card{(ReferenceEquals(rule, _focusedRule) ? " ocr-rules-dialog-card-active" : "")}")"
+                                  @key="rule">
+                            <div class="ocr-rules-dialog-card-header">
+                                <MudText Typo="Typo.subtitle2">字段 @(index + 1)</MudText>
+                                <MudTooltip Text="删除字段">
+                                    <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Size="Size.Small"
+                                                   Color="Color.Error" OnClick="@(() => RemoveField(rule))" />
+                                </MudTooltip>
+                            </div>
+                            <MudGrid>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="rule.FieldCode" Label="输出字段名称" Required="true"
+                                                  Margin="Margin.Dense" AutoFocus="@ReferenceEquals(rule, _focusedRule)"
+                                                  HelperText="保存到 Ocr.ExtractedFields，例如：房性早搏_单发次数" />
+                                </MudItem>
+                                <MudItem xs="12" sm="6">
+                                    <MudTextField @bind-Value="rule.SourceFieldName" Label="PDF 字段名称" Required="true"
+                                                  Margin="Margin.Dense" HelperText="必须与 PDF 中字段文字一致，例如：单发(次)" />
+                                </MudItem>
+                                <MudItem xs="12" sm="5">
+                                    <MudTextField @bind-Value="rule.SectionHeading" Label="所属标题（可选）"
+                                                  Margin="Margin.Dense" HelperText="同名字段必须填写，例如：房性早搏" />
+                                </MudItem>
+                                <MudItem xs="12" sm="5">
+                                    <MudTextField @bind-Value="rule.Instruction" Label="识别说明（可选）"
+                                                  Margin="Margin.Dense" HelperText="只能补充值的提取范围，不能用来指定另一个字段" />
+                                </MudItem>
+                                <MudItem xs="12" sm="2" Class="d-flex align-center">
+                                    <MudSwitch @bind-Value="rule.IsRequired" Label="必填" Color="Color.Warning" />
+                                </MudItem>
+                            </MudGrid>
+                        </MudPaper>
+                    }
+                </div>
+            </div>
+            <div class="ocr-rules-dialog-actions">
+                <MudButton OnClick="CloseAsync">取消</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ApplyAsync">确定</MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public IReadOnlyList<OcrExtractionRule> Rules { get; set; } = [];
+    [Parameter] public bool AddInitialField { get; set; }
+    [Parameter] public int? FocusedIndex { get; set; }
+    [Parameter] public EventCallback<List<OcrExtractionRule>> OnApply { get; set; }
+
+    private bool _wasVisible;
+    private List<OcrExtractionRule> _draftRules = [];
+    private OcrExtractionRule? _focusedRule;
+    private string? _error;
+
+    protected override void OnParametersSet()
+    {
+        if (Visible && !_wasVisible)
+        {
+            _draftRules = Rules.Select(CloneRule).ToList();
+            if (AddInitialField)
+            {
+                _focusedRule = new OcrExtractionRule();
+                _draftRules.Add(_focusedRule);
+            }
+            else
+            {
+                _focusedRule = FocusedIndex.HasValue
+                    && FocusedIndex.Value >= 0
+                    && FocusedIndex.Value < _draftRules.Count
+                        ? _draftRules[FocusedIndex.Value]
+                        : _draftRules.FirstOrDefault();
+            }
+            _error = null;
+        }
+
+        _wasVisible = Visible;
+    }
+
+    private void AddField()
+    {
+        _focusedRule = new OcrExtractionRule();
+        _draftRules.Add(_focusedRule);
+        _error = null;
+    }
+
+    private void RemoveField(OcrExtractionRule rule)
+    {
+        _draftRules.Remove(rule);
+        if (ReferenceEquals(rule, _focusedRule))
+            _focusedRule = _draftRules.FirstOrDefault();
+        _error = null;
+    }
+
+    private async Task ApplyAsync()
+    {
+        var errors = OcrExtractionRuleHelper.Validate(_draftRules);
+        if (errors.Count > 0)
+        {
+            _error = string.Join("；", errors);
+            return;
+        }
+
+        await OnApply.InvokeAsync(_draftRules.Select(CloneRule).ToList());
+        await CloseAsync();
+    }
+
+    private async Task CloseAsync()
+    {
+        Visible = false;
+        _wasVisible = false;
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    private static OcrExtractionRule CloneRule(OcrExtractionRule rule)
+        => new()
+        {
+            FieldCode = rule.FieldCode,
+            SourceFieldName = rule.SourceFieldName,
+            SectionHeading = rule.SectionHeading,
+            Instruction = rule.Instruction,
+            IsRequired = rule.IsRequired
+        };
+}
