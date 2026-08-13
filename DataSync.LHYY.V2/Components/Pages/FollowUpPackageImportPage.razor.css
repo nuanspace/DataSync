@@ -6,6 +6,9 @@
 .preflight-item { color: #9a5d14; font-size: .78rem; white-space: nowrap; }
 .preflight-item.is-ready { color: #1f7a63; }
 .key-workspace { display: grid; grid-template-columns: minmax(210px, .8fr) auto auto minmax(280px, 1.5fr) auto; align-items: center; gap: .75rem; padding-bottom: 1rem; border-bottom: 1px solid #dce6ec; }
+.storage-workspace { display: grid; gap: .75rem; padding-block: .25rem 1rem; border-bottom: 1px solid #dce6ec; }
+.storage-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.cleanup-confirm { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(180px, 1fr); gap: .75rem; }
 .import-summary { display: grid; grid-template-columns: repeat(4, 1fr); border-block: 1px solid #dce6ec; }
 .import-summary div { display: flex; justify-content: space-between; align-items: baseline; padding: .8rem 1rem; border-right: 1px solid #dce6ec; }
 .import-summary div:last-child { border-right: 0; }.import-summary span { color: #607786; font-size: .78rem; }.import-summary strong { font-size: 1.25rem; color: #12334a; }
@@ -13,4 +16,4 @@
 .schema-decision-section { padding: 1.25rem; border: 1px solid #d89b43; border-radius: 12px; background: var(--mud-palette-surface); }
 .schema-decision-form { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr); gap: 1rem; margin: 1rem 0; }
 @media (max-width: 1100px) { .key-workspace { grid-template-columns: 1fr 1fr; }.key-workspace > div, .key-workspace .mud-input-control { grid-column: 1 / -1; }.import-summary { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 680px) { .followup-import-heading, .section-heading { align-items: flex-start; flex-direction: column; }.import-summary { grid-template-columns: 1fr; }.import-summary div { border-right: 0; border-bottom: 1px solid #dce6ec; } }
+@media (max-width: 680px) { .followup-import-heading, .section-heading { align-items: flex-start; flex-direction: column; }.import-summary, .storage-grid, .cleanup-confirm { grid-template-columns: 1fr; }.import-summary div { border-right: 0; border-bottom: 1px solid #dce6ec; } }

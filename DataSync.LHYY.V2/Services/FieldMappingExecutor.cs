@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
@@ -519,7 +519,12 @@ public class FieldMappingExecutor
             return null;
 
         if (!collectArrayValues || !sourcePath.Contains("[]", StringComparison.Ordinal))
-            return MessageJsonHelper.ResolveScopedToken(body, context, sourcePath)?.ToString();
+        {
+            var token = MessageJsonHelper.ResolveScopedToken(body, context, sourcePath);
+            return token == null || token.Type is JTokenType.Null or JTokenType.Undefined
+                ? null
+                : token.ToString();
+        }
 
         var values = MessageJsonHelper.ResolveScopedTokens(body, context, sourcePath)
             .Select(t => t.ToString())

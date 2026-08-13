@@ -1,0 +1,98 @@
+﻿{
+  "schema_version": 1,
+  "project": "DataSync",
+  "last_reviewed_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "domains": [
+    {
+      "id": "architecture",
+      "title": "总体架构与链路路由",
+      "skill": "datasync-business-logic",
+      "keywords": ["架构", "项目结构", "数据方向", "调用链", "CYYY", "LHYY", "DataSync.Common"],
+      "symbols": ["SyncOrchestrator", "EsbReceiverService", "MessageExecutionService"],
+      "workflows": ["主动采集", "ESB接收", "写入ntcare"],
+      "source_paths": ["DataSync.sln", "DataSync.Common/DataSync.Common.csproj", "DataSync.Common/**", "DataSync.CYYY/DataSync.CYYY.csproj", "DataSync.CYYY/Dockerfile", "DataSync.CYYY/Program.cs", "DataSync.LHYY.V2/DataSync.LHYY.V2.csproj", "DataSync.LHYY.V2/Dockerfile", "DataSync.LHYY.V2/Program.cs"],
+      "references": [".agents/skills/datasync-business-logic/references/architecture-and-routing.md"],
+      "review_record": ".agents/knowledge-reviews/architecture.json",
+      "impact_types": ["项目边界", "依赖方向", "主处理链", "运行时版本"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "cyyy-ingestion",
+      "title": "CYYY 主动采集与同步编排",
+      "skill": "datasync-business-logic",
+      "keywords": ["采集", "数据湖", "同步任务", "补数据", "数据库源", "pending", "CYYY"],
+      "symbols": ["IngestionService", "DataLakeClient", "SyncOrchestrator", "ApiPushService", "DatabasePushService"],
+      "workflows": ["医院数据采集", "本地数据池", "队列推送", "补数据"],
+      "source_paths": ["DataSync.CYYY/DataSync.CYYY.csproj", "DataSync.CYYY/Dockerfile", "DataSync.CYYY/Services/**", "DataSync.CYYY/Workers/**", "DataSync.CYYY/Models/**", "DataSync.CYYY/Data/**", "DataSync.CYYY/Scripts/**", "DataSync.CYYY/Migrations/**"],
+      "references": [".agents/skills/datasync-business-logic/references/cyyy-ingestion.md"],
+      "review_record": ".agents/knowledge-reviews/cyyy-ingestion.json",
+      "impact_types": ["采集源", "查询过滤", "同步任务", "推送报文", "数据库表"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "lhyy-esb",
+      "title": "LHYY ESB 接收、识别、映射与写入",
+      "skill": "datasync-business-logic",
+      "keywords": ["ESB", "SOAP", "接口识别", "字段映射", "过滤", "幂等", "Bio.Core", "待身份绑定", "LHYY"],
+      "symbols": ["EsbController", "EsbReceiverService", "InterfaceRecognitionService", "GenericMessageProcessor", "FieldMappingExecutor", "BioCoreIntegrationService"],
+      "workflows": ["JSON接收", "SOAP接收", "消息识别", "字段映射", "患者事件写入"],
+      "source_paths": ["DataSync.LHYY.V2/DataSync.LHYY.V2.csproj", "DataSync.LHYY.V2/Dockerfile", "DataSync.LHYY.V2/Controllers/**", "DataSync.LHYY.V2/Services/**", "DataSync.LHYY.V2/Handlers/**", "DataSync.LHYY.V2/Models/**", "DataSync.LHYY.V2/Data/**", "DataSync.LHYY.V2/Scripts/**"],
+      "references": [".agents/skills/datasync-business-logic/references/lhyy-esb.md"],
+      "review_record": ".agents/knowledge-reviews/lhyy-esb.json",
+      "impact_types": ["接收协议", "识别顺序", "处理状态", "映射语义", "写入目标"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "interfaces-documents",
+      "title": "医院接口、文档与文件处理",
+      "skill": "datasync-business-logic",
+      "keywords": ["接口文档", "WebService", "生命体征", "评估单", "PDF", "OCR", "字段提取", "归档", "附件", "报告"],
+      "symbols": ["WebServiceController", "SoapWebServiceService", "ProjectDocumentService", "OcrMessageProcessor", "OcrAiExtractionService", "IOcrConversionService"],
+      "workflows": ["医院SOAP接入", "项目文档", "OCR转换", "OCR字段提取", "报告归档"],
+      "source_paths": ["DataSync.Common/Ocr/**", "DataSync.LHYY.V2/Controllers/WebServiceController.cs", "DataSync.LHYY.V2/Controllers/ProjectDocumentsController.cs", "DataSync.LHYY.V2/Services/SoapWebServiceService.cs", "DataSync.LHYY.V2/Services/ProjectDocumentService.cs", "DataSync.LHYY.V2/Services/OcrProfileService.cs", "DataSync.LHYY.V2/Services/OcrAiExtractionService.cs", "DataSync.LHYY.V2/Services/MessageQueryService.cs", "DataSync.LHYY.V2/Services/ConfigSyncService.cs", "DataSync.LHYY.V2/Handlers/OcrMessageProcessor.cs", "DataSync.LHYY.V2/Models/Entities/EsbOcrProfile.cs", "DataSync.LHYY.V2/Models/Dto/ConfigSyncModels.cs", "DataSync.LHYY.V2/Components/Pages/InterfaceConfigPage.razor", "DataSync.LHYY.V2/Components/Pages/MessageDetailPage.razor", "DataSync.LHYY.V2/Components/Shared/OcrProfileEditor.razor", "DataSync.LHYY.V2/Components/Shared/OcrFieldSelectorDialog.razor", "DataSync.LHYY.V2/ProjectDocuments/**"],
+      "references": [".agents/skills/datasync-business-logic/references/interfaces-documents-and-ocr.md"],
+      "review_record": ".agents/knowledge-reviews/interfaces-documents.json",
+      "impact_types": ["医院协议", "文档入口", "文件安全", "OCR输入输出", "归档语义"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "hospital-sync",
+      "title": "FollowUp 医院数据回传",
+      "skill": "datasync-hospital-sync-delivery",
+      "keywords": ["医院回传", "数据包", "fupkg", "relay", "ACK", "包链", "验签", "导入", "恢复", "CubeDb", "附件恢复"],
+      "symbols": ["FollowUpProtocol", "FollowUpPackageSyncService", "FollowUpPackageVerifyService", "FollowUpPackageImportService", "FollowUpPackageRestoreService"],
+      "workflows": ["DMZ拉包", "包校验", "结构适配", "导入", "ACK", "备份恢复"],
+      "source_paths": ["DataSync.Common/FollowUp/**", "DataSync.CYYY/Services/FollowUp/**", "DataSync.CYYY/Workers/FollowUpPackagePullWorker.cs", "DataSync.LHYY.V2/Services/FollowUp/**", "DataSync.LHYY.V2/Models/FollowUp/**", "DataSync.LHYY.V2/Components/Pages/FollowUpPackageImportPage.razor", "DataSync.LHYY.V2/Scripts/202607/20260708.sql"],
+      "references": [".agents/skills/datasync-business-logic/references/followup-hospital-sync.md", ".agents/skills/datasync-hospital-sync-delivery/references/delivery-workflow.md"],
+      "review_record": ".agents/knowledge-reviews/hospital-sync.json",
+      "impact_types": ["协议", "状态机", "安全门禁", "包链", "导入范围", "恢复顺序", "附件"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "offline-release",
+      "title": "医院端离线发布、安装与回滚",
+      "skill": "datasync-offline-release",
+      "keywords": ["离线包", "出包", "发布", "安装", "升级", "部署", "镜像", "基础库", "回滚"],
+      "symbols": ["package-release.sh", "install.sh", "deployment-mode.sh"],
+      "workflows": ["离线出包", "现场安装", "双模式部署", "回滚验收"],
+      "source_paths": ["deploy/s7-followup-hospital/**", "DataSync.LHYY.V2/ProjectDocuments/FollowUp医院数据回传部署与恢复.md"],
+      "references": [".agents/skills/datasync-business-logic/references/operations-and-risks.md", ".agents/skills/datasync-offline-release/references/offline-release.md"],
+      "review_record": ".agents/knowledge-reviews/offline-release.json",
+      "impact_types": ["交付白名单", "镜像清单", "部署模式", "密钥挂载", "回滚步骤"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    },
+    {
+      "id": "database-operations",
+      "title": "数据库升级与运维安全",
+      "skill": "datasync-business-logic",
+      "keywords": ["数据库升级", "优化脚本", "消息归档", "备份", "pg_dump", "psql", "互斥", "advisory lock"],
+      "symbols": ["DatabaseUpgradeService", "DatabaseCompareService", "MessageArchiveTool", "FollowUpCubeOperationCoordinator"],
+      "workflows": ["功能脚本升级", "优化脚本升级", "消息归档", "CubeDb维护互斥"],
+      "source_paths": ["DataSync.LHYY.V2/Services/DatabaseUpgradeService.cs", "DataSync.LHYY.V2/Services/DatabaseCompareService.cs", "DataSync.LHYY.V2/Services/ArchiveOptimizationCheck.cs", "DataSync.LHYY.V2/DatabaseUpgrades/**", "DataSync.LHYY.V2/Tools/**"],
+      "references": [".agents/skills/datasync-business-logic/references/operations-and-risks.md"],
+      "review_record": ".agents/knowledge-reviews/database-operations.json",
+      "impact_types": ["升级分类", "备份", "互斥", "状态记录", "外部进程清理"],
+      "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
+    }
+  ]
+}

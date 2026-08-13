@@ -5,7 +5,8 @@
 @inject FollowUpPackageImportService ImportService
 @inject FollowUpPackageRestoreService RestoreService
 @inject FollowUpPackageBackupService BackupService
-@inject FollowUpPackageImportKeyService KeyService
+@inject FollowUpHospitalStorageService StorageService
+@inject FollowUpHospitalInitializationService InitializationService
 @inject IOptions<FollowUpPackageImportOptions> ImportOptions
 
 <PageTitle>FollowUp 回传导入</PageTitle>
@@ -47,11 +48,58 @@
         </section>
 
         <section class="key-workspace">
-            <div><MudText Typo="Typo.subtitle1">密钥交换</MudText><MudText Typo="Typo.caption" Color="Color.Secondary">院内私钥不可导出，只向 FollowUp 提供公钥</MudText></div>
-            <MudButton Variant="Variant.Outlined" OnClick="GenerateKeyAsync" Disabled="@(_busy || _overview.DecryptionKeyReady)">生成院内 RSA-3072 密钥</MudButton>
-            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_overview.DecryptionKeyReady)">复制院内公钥</MudButton>
-            <MudTextField @bind-Value="_signingPublicKey" Label="导入 FollowUp 云端验签公钥" Lines="3" Variant="Variant.Outlined" />
-            <MudButton Variant="Variant.Text" OnClick="SaveSigningKeyAsync" Disabled="@string.IsNullOrWhiteSpace(_signingPublicKey)">保存验签公钥</MudButton>
+            <div>
+                <MudText Typo="Typo.subtitle1">医院端统一初始化</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">同时管理 CYYY SSH 密钥与 LHYY 加密密钥；私钥始终留在医院主机。</MudText>
+            </div>
+            <MudButton Variant="Variant.Outlined" OnClick="GenerateHospitalPackageAsync" Disabled="@_busy">生成并导出 hospital-to-dmz.s7sync</MudButton>
+            <MudFileUpload T="IBrowserFile" Accept=".s7sync,application/json" FilesChanged="ImportDmzResponseAsync" MaximumFileCount="1">
+                <ActivatorContent>
+                    <MudButton Variant="Variant.Outlined" Disabled="@_busy">导入 dmz-to-hospital.s7sync</MudButton>
+                </ActivatorContent>
+            </MudFileUpload>
+            <MudButton Variant="Variant.Text" OnClick="ValidateInitializationAsync" Disabled="@_busy">一键验证</MudButton>
+            <MudText Typo="Typo.caption" Color="@(_initializationStatus.Complete ? Color.Success : Color.Warning)">
+                @InitializationStatusText
+            </MudText>
+        </section>
+
+        @if (_initializationStatus.Complete)
+        {
+            <MudAlert Severity="Severity.Success" Variant="Variant.Outlined">
+                第 5 步已完成：七项初始化材料已即时生效，无需重启 CYYY 或 LHYY。下一步请到 CYYY 保存或核对医院来源，然后执行“连接诊断”。
+            </MudAlert>
+        }
+
+        <section class="storage-workspace">
+            <div class="section-heading">
+                <div>
+                    <MudText Typo="Typo.subtitle1">存储与人工清理</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">不自动删除。只有成功导入并完成 ACK 转发的恢复基线之前的数据包和备份才能清理，业务附件不会删除。</MudText>
+                </div>
+                <div class="cleanup-confirm">
+                    <MudTextField @bind-Value="_cleanupOperator" Label="清理操作人" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    <MudTextField @bind-Value="_cleanupConfirmText" Label="输入“确认清理”" Margin="Margin.Dense" Variant="Variant.Outlined" />
+                </div>
+            </div>
+            @if (_overview.RecoveryBaselineSequenceNo.HasValue)
+            {
+                <MudAlert Severity="Severity.Success" Dense="true" Class="mb-2">最新可用于清理保护的恢复基线：#@_overview.RecoveryBaselineSequenceNo</MudAlert>
+            }
+            else
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">尚无已导入且 ACK 已转发的恢复基线，所有历史包和备份均禁止清理。</MudAlert>
+            }
+            <div class="storage-grid">
+                @foreach (var storage in _overview.Storage)
+                {
+                    <MudAlert Severity="@StorageSeverity(storage)" Variant="Variant.Outlined" Dense="true">
+                        <strong>@storage.Name</strong><br />
+                        目录 @FormatBytes(storage.DirectoryBytes)，卷使用率 @storage.UsedPercent%，可用 @FormatBytes(storage.AvailableBytes) / @FormatBytes(storage.TotalBytes)
+                        @if (!storage.Ready) { <span><br />检查失败：@storage.Error</span> }
+                    </MudAlert>
+                }
+            </div>
         </section>
 
         <section class="import-summary">
@@ -84,6 +132,12 @@
                         @if (FollowUpDisplayText.CanRestore(context.ImportStatus))
                         {
                             <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error" OnClick="@(() => RestoreAsync(context))" Disabled="@(_busy || _confirmText != "确认")">恢复</MudButton>
+                        }
+                        @if (CanCleanup(context))
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => CleanupStorageAsync(context))"
+                                       Disabled="@(_busy || _cleanupConfirmText != "确认清理" || string.IsNullOrWhiteSpace(_cleanupOperator))">清理文件</MudButton>
                         }
                     </MudTd>
                 </RowTemplate>
@@ -119,11 +173,13 @@
 
 @code {
     private FollowUpPackageImportOverview _overview = new();
-    private string? _signingPublicKey;
+    private FollowUpHospitalInitializationStatus _initializationStatus = new(false, false, false, false, false, false, false);
     private string? _confirmText;
     private FollowUpPackageImportState? _decisionPackage;
     private string _decisionStatus = "WaitingForUpgrade";
     private string? _operatorName;
+    private string? _cleanupOperator;
+    private string? _cleanupConfirmText;
     private string _mappingJson = "{}";
     private bool _busy;
     protected override bool RequiresIntegrationProject => false;
@@ -149,8 +205,13 @@
                 DecryptionKeyReady = File.Exists(options.DecryptionPrivateKeyPath),
                 SigningKeyReady = File.Exists(options.CloudSigningPublicKeyPath),
                 PostgreSqlToolsReady = BackupService.PostgreSqlToolsReady,
-                Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : []
+                Packages = missing.Count == 0 ? await ImportRepository.GetPackagesAsync(cancellationToken: CancellationToken) : [],
+                RecoveryBaselineSequenceNo = missing.Count == 0 && !string.IsNullOrWhiteSpace(options.HospitalCode)
+                    ? await ImportRepository.GetLatestRecoveryBaselineSequenceAsync(options.HospitalCode, CancellationToken)
+                    : null,
+                Storage = StorageService.GetStorageStatus()
             };
+            _initializationStatus = InitializationService.GetStatus();
         }
         catch (Exception ex) { inj_snackbar.Add($"加载失败：{ex.Message}", Severity.Error); }
         finally { _busy = false; }
@@ -186,6 +247,21 @@
         var result = await RestoreService.RestoreAsync(state, CancellationToken);
         inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
         _confirmText = null;
+        await LoadAsync();
+    }
+
+    private async Task CleanupStorageAsync(FollowUpPackageImportState state)
+    {
+        if (_cleanupConfirmText != "确认清理" || string.IsNullOrWhiteSpace(_cleanupOperator)) return;
+        var confirmed = await inj_dialogService.ShowMessageBox(
+            "确认清理旧包与备份",
+            $"将清理 #{state.SequenceNo} 的本地加密包和导入前备份，但永久保留包链、ACK、导入状态和审计记录。确认继续？",
+            yesText: "确认清理", cancelText: "取消");
+        if (confirmed != true) return;
+        _busy = true;
+        var result = await StorageService.CleanupAsync(state, _cleanupOperator, CancellationToken);
+        inj_snackbar.Add(result.Message, result.Success ? Severity.Success : Severity.Error);
+        _cleanupConfirmText = null;
         await LoadAsync();
     }
 
@@ -228,25 +304,76 @@
         }
     }
 
-    private async Task GenerateKeyAsync()
+    private async Task GenerateHospitalPackageAsync()
     {
-        try { _ = await KeyService.GenerateEncryptionKeyAsync(CancellationToken); inj_snackbar.Add("院内密钥已生成。", Severity.Success); await LoadAsync(); }
+        await RunInitializationAsync(async () =>
+        {
+            var content = await InitializationService.GenerateAndExportAsync(CancellationToken);
+            await inj_jsRuntime.InvokeVoidAsync("dataSync.downloadFile", "hospital-to-dmz.s7sync", content, "application/json;charset=utf-8");
+            inj_snackbar.Add("医院端密钥已就绪，初始化包已导出。", Severity.Success);
+        });
+    }
+
+    private async Task ImportDmzResponseAsync(IBrowserFile file)
+    {
+        await RunInitializationAsync(async () =>
+        {
+            if (file.Size > 256 * 1024) throw new InvalidDataException("初始化包不能超过 256KB。");
+            await using var stream = file.OpenReadStream(256 * 1024, CancellationToken);
+            using var reader = new StreamReader(stream);
+            await InitializationService.ImportDmzResponseAsync(await reader.ReadToEndAsync(CancellationToken), CancellationToken);
+            _initializationStatus = InitializationService.GetStatus();
+            inj_snackbar.Add(
+                _initializationStatus.Complete
+                    ? "DMZ 回程包已导入，七项材料已自动验证并即时生效，无需重启 CYYY/LHYY。请删除交接介质上的敏感初始化包，并到 CYYY 配置医院来源后执行连接诊断。"
+                    : $"DMZ 回程包已导入，但初始化检查尚未全部通过：{InitializationStatusText}",
+                _initializationStatus.Complete ? Severity.Success : Severity.Warning);
+        });
+    }
+
+    private Task ValidateInitializationAsync()
+    {
+        _initializationStatus = InitializationService.GetStatus();
+        inj_snackbar.Add(_initializationStatus.Complete ? "医院端初始化检查全部通过。" : InitializationStatusText,
+            _initializationStatus.Complete ? Severity.Success : Severity.Warning);
+        return Task.CompletedTask;
+    }
+
+    private async Task RunInitializationAsync(Func<Task> action)
+    {
+        _busy = true;
+        try { await action(); }
         catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
+        finally { _busy = false; await LoadAsync(); }
     }
-    private async Task CopyPublicKeyAsync()
-    {
-        var key = await KeyService.ReadEncryptionPublicKeyAsync(CancellationToken);
-        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("院内公钥已复制。", Severity.Success); }
-    }
-    private async Task SaveSigningKeyAsync()
-    {
-        try { await KeyService.SaveSigningPublicKeyAsync(_signingPublicKey ?? "", CancellationToken); _signingPublicKey = null; inj_snackbar.Add("验签公钥已保存。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
-    }
+
+    private string InitializationStatusText => _initializationStatus.Complete
+        ? "CYYY/LHYY 密钥、DMZ 指纹与令牌、云端验签公钥均已就绪。"
+        : $"待完成：{string.Join("、", new[]
+        {
+            _initializationStatus.CyyyPrivateKeyReady && _initializationStatus.CyyyPublicKeyReady ? null : "CYYY SSH 密钥",
+            _initializationStatus.LhyyPrivateKeyReady && _initializationStatus.LhyyPublicKeyReady ? null : "LHYY 加密密钥",
+            _initializationStatus.DmzKnownHostsReady ? null : "DMZ 主机指纹",
+            _initializationStatus.DmzTokenReady ? null : "DMZ 访问令牌",
+            _initializationStatus.CloudSigningKeyReady ? null : "云端验签公钥"
+        }.Where(value => value is not null))}";
 
     private int Count(string status) => _overview.Packages.Count(item => item.ImportStatus == status);
     private static RenderFragment Preflight(string label, bool ready) => builder => { builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}"); builder.AddContent(2, $"{(ready ? "✓" : "!")} {label}"); builder.CloseElement(); };
     private static Color StatusColor(string status) => status switch { "Imported" => Color.Success, "ImportFailed" or "RestoreFailed" or "RejectedSchemaMismatch" => Color.Error, "Importing" or "BackingUp" or "Validating" or "Restoring" => Color.Info, _ when status.StartsWith("Waiting") => Color.Warning, _ => Color.Default };
+
+    private bool CanCleanup(FollowUpPackageImportState state) =>
+        state.ImportStatus == "Imported"
+        && !string.IsNullOrWhiteSpace(state.LocalPackagePath)
+        && _overview.RecoveryBaselineSequenceNo is { } recoverySequence
+        && state.SequenceNo < recoverySequence;
+
+    private static Severity StorageSeverity(FollowUpStorageStatus status) =>
+        !status.Ready || status.IsCritical ? Severity.Error : status.IsWarning ? Severity.Warning : Severity.Success;
+
+    private static string FormatBytes(long bytes) => bytes >= 1024L * 1024 * 1024
+        ? $"{bytes / 1024d / 1024 / 1024:F2} GB"
+        : bytes >= 1024L * 1024 ? $"{bytes / 1024d / 1024:F1} MB" : bytes > 0 ? $"{bytes / 1024d:F1} KB" : "0 B";
     private static void EnsureDirectory(string path) { if (!string.IsNullOrWhiteSpace(path)) Directory.CreateDirectory(path); }
     private static bool CanWrite(string path) { try { Directory.CreateDirectory(path); var probe = Path.Combine(path, $".probe-{Guid.NewGuid():N}"); File.WriteAllText(probe, "ok"); File.Delete(probe); return true; } catch { return false; } }
 }

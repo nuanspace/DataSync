@@ -1,4 +1,4 @@
-using DataSync.LHYY.V2.Data;
+﻿using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
@@ -167,13 +167,35 @@ public sealed class ConfigSyncService
                 .GroupBy(p => p.TranCode)
                 .ToDictionary(g => g.Key, g => g.Select(ToPackageIdempotentPart).ToList(), StringComparer.OrdinalIgnoreCase);
 
+            var ocrProfiles = tranCodes.Count == 0
+                ? new List<EsbOcrProfile>()
+                : await db.EsbOcrProfiles
+                    .Where(profile => (profile.IntegrationProjectCode == projectCode
+                            || profile.IntegrationProjectCode == null)
+                        && tranCodes.Contains(profile.TranCode))
+                    .OrderBy(profile => profile.Id)
+                    .ToListAsync(cancellationToken);
+            var ocrProfileMap = ocrProfiles
+                .GroupBy(profile => profile.TranCode)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.FirstOrDefault(profile => string.Equals(
+                            profile.IntegrationProjectCode,
+                            projectCode,
+                            StringComparison.OrdinalIgnoreCase))
+                        ?? group.First(profile => string.IsNullOrWhiteSpace(profile.IntegrationProjectCode)),
+                    StringComparer.OrdinalIgnoreCase);
+
             package.Interfaces = interfaces.Select(config =>
             {
                 var item = ToPackageInterface(
                     config,
                     filterMap.GetValueOrDefault(config.TranCode) ?? [],
                     matchMap.GetValueOrDefault(config.TranCode) ?? [],
-                    idempotentMap.GetValueOrDefault(config.TranCode) ?? []);
+                    idempotentMap.GetValueOrDefault(config.TranCode) ?? [],
+                    OcrProfileService.IsOcrHandler(config)
+                        ? ocrProfileMap.GetValueOrDefault(config.TranCode)
+                        : null);
                 item.ContentHash = ComputeInterfaceHash(item);
                 return item;
             }).ToList();
@@ -288,13 +310,17 @@ public sealed class ConfigSyncService
         foreach (var item in package.Interfaces)
         {
             var local = localMap.GetValueOrDefault(item.TranCode);
+            var localOcrProfile = local == null
+                ? null
+                : await LoadOcrProfileAsync(db, local.TranCode, targetProjectCode, cancellationToken);
             var localHash = local == null
                 ? ""
                 : ComputeInterfaceHash(ToPackageInterface(
                     local,
                     await LoadInterfaceFilterRulesAsync(db, local.TranCode, targetProjectCode, cancellationToken),
                     await LoadInterfaceMatchRulesAsync(db, local.TranCode, targetProjectCode, cancellationToken),
-                    await LoadIdempotentKeyPartsAsync(db, local.TranCode, targetProjectCode, cancellationToken)));
+                    await LoadIdempotentKeyPartsAsync(db, local.TranCode, targetProjectCode, cancellationToken),
+                    OcrProfileService.IsOcrHandler(local) ? localOcrProfile : null));
             var changeType = local == null
                 ? ConfigSyncChangeType.New
                 : string.Equals(localHash, item.ContentHash, StringComparison.Ordinal)
@@ -495,6 +521,9 @@ public sealed class ConfigSyncService
             foreach (var part in item.IdempotentKeyParts.Select((part, index) => ToEntityIdempotentPart(part, item.TranCode, targetProjectCode, index)))
                 db.EsbIdempotentKeyParts.Add(part);
 
+            if (item.OcrProfile != null)
+                await ApplyOcrProfileAsync(db, item.TranCode, targetProjectCode, item.OcrProfile, cancellationToken);
+
             await db.SaveChangesAsync(cancellationToken);
         }
     }
@@ -654,7 +683,8 @@ public sealed class ConfigSyncService
         EsbInterfaceConfig config,
         List<ConfigSyncFilterRule> filterRules,
         List<ConfigSyncInterfaceMatchRule> matchRules,
-        List<ConfigSyncIdempotentKeyPart> idempotentParts) => new()
+        List<ConfigSyncIdempotentKeyPart> idempotentParts,
+        EsbOcrProfile? ocrProfile) => new()
     {
         TranCode = config.TranCode,
         TranName = config.TranName,
@@ -686,7 +716,22 @@ public sealed class ConfigSyncService
         SampleJson = config.SampleJson,
         FilterRules = filterRules,
         MatchRules = matchRules,
-        IdempotentKeyParts = idempotentParts
+        IdempotentKeyParts = idempotentParts,
+        OcrProfile = ocrProfile == null ? null : ToPackageOcrProfile(ocrProfile)
+    };
+
+    private static ConfigSyncOcrProfile ToPackageOcrProfile(EsbOcrProfile profile) => new()
+    {
+        ProfileName = profile.ProfileName,
+        IsEnabled = profile.IsEnabled,
+        SourceKind = profile.SourceKind,
+        SourcePath = profile.SourcePath,
+        MaxPages = profile.MaxPages,
+        MaxInputBytes = profile.MaxInputBytes,
+        AllowedFileRoots = profile.AllowedFileRoots,
+        ExtractionRules = OcrProfileService.SerializeExtractionRules(
+            OcrProfileService.DeserializeExtractionRules(profile.ExtractionRules)),
+        Description = profile.Description
     };
 
     private static ConfigSyncFilterRule ToPackageRule(EsbFilterRule rule) => new()
@@ -875,6 +920,61 @@ public sealed class ConfigSyncService
         return parts.Select(ToPackageIdempotentPart).ToList();
     }
 
+    private static async Task<EsbOcrProfile?> LoadOcrProfileAsync(
+        DataSyncDbContext db,
+        string tranCode,
+        string targetProjectCode,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await db.EsbOcrProfiles
+            .AsNoTracking()
+            .Where(profile => profile.TranCode == tranCode
+                && (profile.IntegrationProjectCode == targetProjectCode
+                    || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync(cancellationToken);
+        return profiles.FirstOrDefault(profile => string.Equals(
+                profile.IntegrationProjectCode,
+                targetProjectCode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(profile => string.IsNullOrWhiteSpace(profile.IntegrationProjectCode));
+    }
+
+    private static async Task ApplyOcrProfileAsync(
+        DataSyncDbContext db,
+        string tranCode,
+        string targetProjectCode,
+        ConfigSyncOcrProfile item,
+        CancellationToken cancellationToken)
+    {
+        var profile = await db.EsbOcrProfiles
+            .Where(existing => existing.IntegrationProjectCode == targetProjectCode
+                && existing.TranCode == tranCode)
+            .OrderBy(existing => existing.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (profile == null)
+        {
+            profile = new EsbOcrProfile
+            {
+                TranCode = tranCode,
+                IntegrationProjectCode = targetProjectCode,
+                CreatedAt = DateTime.Now
+            };
+            db.EsbOcrProfiles.Add(profile);
+        }
+
+        profile.ProfileName = item.ProfileName;
+        profile.IsEnabled = item.IsEnabled;
+        profile.SourceKind = item.SourceKind;
+        profile.SourcePath = item.SourcePath;
+        profile.MaxPages = item.MaxPages;
+        profile.MaxInputBytes = item.MaxInputBytes;
+        profile.AllowedFileRoots = item.AllowedFileRoots;
+        profile.ExtractionRules = item.ExtractionRules;
+        profile.Description = item.Description;
+        profile.UpdatedAt = DateTime.Now;
+    }
+
     private static EsbFieldMapping? ResolveLocalMapping(
         List<EsbFieldMapping> localMappings,
         Dictionary<string, EsbFieldMapping> bySyncKey,
@@ -911,7 +1011,34 @@ public sealed class ConfigSyncService
     private static void NormalizePackage(ConfigSyncPackage package)
     {
         foreach (var item in package.Interfaces)
+        {
+            if (IsOcrHandler(item))
+            {
+                if (item.ReceiveMode != ReceiveMode.PersistAndAsync)
+                    throw new InvalidOperationException($"OCR 接口 {item.TranCode} 仅支持入队异步处理。");
+                if (item.OcrProfile == null)
+                    throw new InvalidOperationException($"OCR 接口 {item.TranCode} 缺少 OCR 配置。");
+
+                var rules = OcrProfileService.DeserializeExtractionRules(item.OcrProfile.ExtractionRules);
+                item.OcrProfile.ExtractionRules = OcrProfileService.SerializeExtractionRules(rules);
+                var profileErrors = OcrProfileService.ValidateProfile(
+                    new EsbOcrProfile
+                    {
+                        IsEnabled = item.OcrProfile.IsEnabled,
+                        SourceKind = item.OcrProfile.SourceKind,
+                        SourcePath = item.OcrProfile.SourcePath,
+                        MaxPages = item.OcrProfile.MaxPages,
+                        MaxInputBytes = item.OcrProfile.MaxInputBytes,
+                        AllowedFileRoots = item.OcrProfile.AllowedFileRoots
+                    },
+                    rules,
+                    requireEnabled: item.IsEnabled);
+                if (profileErrors.Count > 0)
+                    throw new InvalidOperationException($"OCR 接口 {item.TranCode} 配置错误：{string.Join("；", profileErrors)}。");
+            }
+
             item.ContentHash = ComputeInterfaceHash(item);
+        }
 
         foreach (var item in package.FieldMappings)
         {
@@ -959,10 +1086,15 @@ public sealed class ConfigSyncService
         item.SoapOperation,
         item.SoapAction,
         item.SampleJson,
+        item.OcrProfile,
         FilterRules = OrderRules(item.FilterRules),
         MatchRules = item.MatchRules.OrderBy(r => r.MatchGroup).ThenBy(r => r.SortOrder).ThenBy(r => r.SourcePath),
         IdempotentKeyParts = item.IdempotentKeyParts.OrderBy(p => p.SortOrder).ThenBy(p => p.SourcePath).ThenBy(p => p.LiteralValue)
     });
+
+    private static bool IsOcrHandler(ConfigSyncInterfaceConfig config)
+        => config.HandlerType == HandlerType.Custom
+            && string.Equals(config.HandlerName, OcrProfileService.HandlerName, StringComparison.Ordinal);
 
     private static string ComputeMappingHash(ConfigSyncFieldMapping item) => ComputeHash(new
     {

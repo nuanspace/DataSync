@@ -402,3 +402,7 @@ DataSync.CYYY/docker包/
 DataSync.LHYY.V2/docker包/
 DataSync.LHYY.V2/测试患者数据/11位患者/何忠泽/*.png
 DataSync.LHYY.V2/测试患者数据
+
+# Codex 知识治理运行产物（规则与脚本本身仍纳入版本管理）
+/.codex/artifacts/
+/.codex/tmp/

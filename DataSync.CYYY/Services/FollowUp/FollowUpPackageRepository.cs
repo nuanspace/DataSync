@@ -18,6 +18,31 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
     private readonly string _connectionString = configuration.GetConnectionString("SyncDb")
         ?? throw new InvalidOperationException("未找到连接字符串 'SyncDb'");
 
+    public async Task<IAsyncDisposable?> TryAcquirePackageLockAsync(
+        string hospitalCode,
+        string packageId,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await OpenAsync(cancellationToken);
+        var lockName = FollowUpPackageLockKey.Create(hospitalCode, packageId);
+        try
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT pg_try_advisory_lock(hashtextextended(@lockName, 0));", connection);
+            command.Parameters.AddWithValue("lockName", lockName);
+            if ((bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false))
+                return new PackageAdvisoryLease(connection, lockName);
+
+            await connection.DisposeAsync();
+            return null;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
+
     public async Task<List<string>> GetMissingTablesAsync(CancellationToken cancellationToken = default)
     {
         await using var connection = await OpenAsync(cancellationToken);
@@ -168,6 +193,7 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
                 schema_summary_json = EXCLUDED.schema_summary_json,
                 package_summary_json = EXCLUDED.package_summary_json,
                 updated_at = now()
+            WHERE cyyy.followup_package_pull_state.pull_status NOT IN ('Archiving', 'Archived')
             """, connection);
         command.Parameters.AddWithValue("hospitalCode", hospitalCode);
         command.Parameters.AddWithValue("packageId", package.PackageId);
@@ -184,10 +210,11 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    public async Task MarkPackageAsync(
+    public async Task<bool> TryMarkPackageAsync(
         string hospitalCode,
         string packageId,
         string status,
+        IReadOnlyCollection<string> expectedStatuses,
         string? localPath,
         string? errorCode,
         string? errorMessage,
@@ -205,6 +232,7 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
                 last_pulled_at = CASE WHEN @status = 'Pulled' THEN now() ELSE last_pulled_at END,
                 updated_at = now()
             WHERE hospital_code = @hospitalCode AND package_id = @packageId
+              AND pull_status = ANY(@expectedStatuses)
             """, connection);
         command.Parameters.AddWithValue("status", status);
         command.Parameters.Add(new NpgsqlParameter("localPath", NpgsqlDbType.Text) { Value = DbValue(localPath) });
@@ -212,7 +240,8 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
         command.Parameters.Add(new NpgsqlParameter("errorMessage", NpgsqlDbType.Text) { Value = DbValue(Truncate(errorMessage, 1000)) });
         command.Parameters.AddWithValue("hospitalCode", hospitalCode);
         command.Parameters.AddWithValue("packageId", packageId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        command.Parameters.AddWithValue("expectedStatuses", expectedStatuses.ToArray());
+        return await command.ExecuteNonQueryAsync(cancellationToken) == 1;
     }
 
     public async Task<List<FollowUpPackagePullState>> GetPackagesAsync(int limit = 200, CancellationToken cancellationToken = default)
@@ -313,6 +342,30 @@ public sealed class FollowUpPackageRepository(IConfiguration configuration)
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         return connection;
+    }
+
+    private sealed class PackageAdvisoryLease(NpgsqlConnection connection, string lockName) : IAsyncDisposable
+    {
+        private NpgsqlConnection? _connection = connection;
+
+        public async ValueTask DisposeAsync()
+        {
+            var current = Interlocked.Exchange(ref _connection, null);
+            if (current is null) return;
+            try
+            {
+                await using var command = new NpgsqlCommand(
+                    "SELECT pg_advisory_unlock(hashtextextended(@lockName, 0));", current);
+                command.Parameters.AddWithValue("lockName", lockName);
+                await command.ExecuteNonQueryAsync();
+            }
+            catch
+            {
+                NpgsqlConnection.ClearPool(current);
+                throw;
+            }
+            finally { await current.DisposeAsync(); }
+        }
     }
 
     private static string NormalizeJson(string value)

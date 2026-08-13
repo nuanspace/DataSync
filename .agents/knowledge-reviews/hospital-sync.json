@@ -1,0 +1,5 @@
+{
+  "domain": "hospital-sync",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "医院数据包协议、状态机、附件、导入和恢复知识已与当前源码核对。"
+}

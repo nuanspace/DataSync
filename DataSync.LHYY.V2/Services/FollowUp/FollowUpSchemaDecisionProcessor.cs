@@ -59,19 +59,34 @@ public static class FollowUpSchemaDecisionProcessor
         string json,
         string sourceSchema,
         string sourceTable,
-        FollowUpSchemaDecision? decision)
+        FollowUpSchemaDecision? decision,
+        IReadOnlySet<string>? allowedSourceColumns = null)
     {
         var mapping = FindMapping(sourceSchema, sourceTable, decision);
-        if (mapping is null) return json;
+        if (mapping is null && allowedSourceColumns is null) return json;
         var source = JsonNode.Parse(json)?.AsObject() ?? throw new InvalidDataException("NDJSON 行不是 JSON 对象。");
         var target = new JsonObject();
         foreach (var property in source)
-            target[MapColumn(property.Key, mapping)] = property.Value?.DeepClone();
-        foreach (var defaultValue in mapping.DefaultValues)
+        {
+            if (allowedSourceColumns is not null && !allowedSourceColumns.Contains(property.Key))
+                continue;
+            var targetColumn = MapColumn(property.Key, mapping);
+            if (target.ContainsKey(targetColumn))
+                throw new InvalidDataException($"字段映射后出现重复目标字段：{targetColumn}。");
+            target[targetColumn] = property.Value?.DeepClone();
+        }
+        foreach (var defaultValue in mapping?.DefaultValues ?? [])
             if (!target.ContainsKey(defaultValue.Key))
                 target[defaultValue.Key] = JsonNode.Parse(defaultValue.Value.GetRawText());
         return target.ToJsonString(FollowUpJson.Options);
     }
+
+    internal static string MapColumn(
+        string schema,
+        string table,
+        string column,
+        FollowUpSchemaDecision? decision) =>
+        MapColumn(column, FindMapping(schema, table, decision));
 
     public static IReadOnlyDictionary<string, HashSet<string>> GetDefaultColumns(
         FollowUpSchemaDecision? decision)

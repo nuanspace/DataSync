@@ -1,4 +1,4 @@
-using DataSync.LHYY.V2.Data;
+﻿using DataSync.LHYY.V2.Data;
 using DataSync.LHYY.V2.Models.Dto;
 using DataSync.LHYY.V2.Models.Entities;
 using DataSync.LHYY.V2.Models.Enums;
@@ -17,6 +17,7 @@ namespace DataSync.LHYY.V2.Services;
 public class MessageQueryService
 {
     private const int DefaultHotDays = 30;
+    private const int OcrFallbackCandidateCount = 100;
     private const string MaintenanceMessage = "系统维护中，请稍后重试";
     private const long ArchiveLockKey = 2026052601;
 
@@ -234,6 +235,75 @@ public class MessageQueryService
             .ToListAsync();
     }
 
+    /// <summary>
+    /// 获取 OCR 配置可用的历史样本。优先保留已选样本，再读取同事件代码消息，
+    /// 最后兼容原始 JSON 事件代码匹配但数据库事件代码为空的历史消息。
+    /// </summary>
+    public async Task<List<EsbMessageListItem>> GetOcrSampleMessagesAsync(
+        string tranCode,
+        long? preferredMessageId = null,
+        IReadOnlyList<EsbInterfaceMatchRule>? matchRules = null,
+        int count = 20)
+    {
+        tranCode = tranCode.Trim();
+        if (tranCode.Length == 0)
+            return [];
+
+        count = Math.Clamp(count, 1, 100);
+        await using var db = await _contextFactory.CreateDbContextAsync();
+        var currentProjectCode = await _integrationProjectService.GetCurrentProjectCodeAsync();
+        var sourceQuery = await IsArchiveReadableAsync(db)
+            ? db.EsbMessages.FromSqlRaw(AllMessagesSql)
+            : db.EsbMessages.AsQueryable();
+        sourceQuery = sourceQuery
+            .AsNoTracking()
+            .WhereInProjectOrGlobal(currentProjectCode);
+
+        var result = new List<EsbMessageListItem>();
+        if (preferredMessageId.HasValue)
+        {
+            var preferred = await sourceQuery.FirstOrDefaultAsync(m => m.Id == preferredMessageId.Value);
+            if (preferred != null && IsOcrSampleForInterface(preferred, tranCode, matchRules))
+                result.Add(ToMessageListItem(preferred));
+        }
+
+        var preferredId = preferredMessageId ?? 0;
+        var exactMessages = await sourceQuery
+            .Where(m => m.TranCode == tranCode && m.Id != preferredId)
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
+            .Take(Math.Max(count, OcrFallbackCandidateCount))
+            .ToListAsync();
+        result.AddRange(exactMessages
+            .Where(message => IsOcrSampleMatchingRules(message, matchRules))
+            .Take(count - result.Count)
+            .Select(ToMessageListItem));
+
+        if (result.Count >= count)
+            return result;
+
+        var unmatchedCandidates = await sourceQuery
+            .Where(m => m.TranCode == "")
+            .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
+            .Take(OcrFallbackCandidateCount)
+            .ToListAsync();
+        foreach (var candidate in unmatchedCandidates)
+        {
+            if (result.Any(item => item.Id == candidate.Id)
+                || !IsOcrSampleForInterface(candidate, tranCode, matchRules))
+            {
+                continue;
+            }
+
+            result.Add(ToMessageListItem(candidate));
+            if (result.Count >= count)
+                break;
+        }
+
+        return result;
+    }
+
     public async Task<(List<EsbMessageListItem> Items, int TotalCount)> GetMessagesPagedAsync(
         int page,
         int pageSize,
@@ -334,6 +404,75 @@ public class MessageQueryService
             .AsNoTracking()
             .WhereInProjectOrGlobal(currentProjectCode)
             .FirstOrDefaultAsync(m => m.Id == id);
+    }
+
+    public static bool IsOcrSampleForTranCode(EsbMessage message, string tranCode)
+    {
+        if (!string.IsNullOrWhiteSpace(message.TranCode))
+            return string.Equals(message.TranCode, tranCode, StringComparison.OrdinalIgnoreCase);
+
+        if (!MessageJsonHelper.TryParseToken(message.RawJson, out var root, out _))
+            return false;
+
+        string?[] candidates =
+        [
+            MessageJsonHelper.TryGetLegacyTranCode(root),
+            MessageJsonHelper.ReadString(root, "serverCode"),
+            MessageJsonHelper.ReadString(root, "ServerCode"),
+            MessageJsonHelper.ReadString(root, "tranCode"),
+            MessageJsonHelper.ReadString(root, "TranCode"),
+            MessageJsonHelper.ReadString(root, "code"),
+            MessageJsonHelper.ReadString(root, "Code")
+        ];
+
+        return candidates.Any(candidate =>
+            string.Equals(candidate, tranCode, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsOcrSampleMatchingRules(
+        EsbMessage message,
+        IReadOnlyList<EsbInterfaceMatchRule>? matchRules)
+    {
+        var enabledRules = matchRules?.Where(rule => rule.IsEnabled).ToList() ?? [];
+        if (enabledRules.Count == 0)
+            return true;
+        if (!MessageJsonHelper.TryParseToken(message.RawJson, out var root, out _))
+            return false;
+
+        return enabledRules
+            .GroupBy(rule => rule.MatchGroup)
+            .Any(group => group.All(rule => IsOcrSampleRuleMatched(root, rule)));
+    }
+
+    public static bool IsOcrSampleForInterface(
+        EsbMessage message,
+        string tranCode,
+        IReadOnlyList<EsbInterfaceMatchRule>? matchRules)
+    {
+        var hasMatchRules = matchRules?.Any(rule => rule.IsEnabled) == true;
+        if (!string.IsNullOrWhiteSpace(message.TranCode))
+        {
+            return string.Equals(message.TranCode, tranCode, StringComparison.OrdinalIgnoreCase)
+                && (!hasMatchRules || IsOcrSampleMatchingRules(message, matchRules));
+        }
+
+        return hasMatchRules
+            ? IsOcrSampleMatchingRules(message, matchRules)
+            : IsOcrSampleForTranCode(message, tranCode);
+    }
+
+    private static bool IsOcrSampleRuleMatched(JToken root, EsbInterfaceMatchRule rule)
+    {
+        if (rule.SourcePath.Contains("[]", StringComparison.Ordinal))
+        {
+            return FilterRuleService.ResolvePath(root, rule.SourcePath)
+                .Any(value => FilterRuleService.Evaluate(value.value, rule.Operator, rule.CompareValue));
+        }
+
+        return FilterRuleService.Evaluate(
+            MessageJsonHelper.ReadString(root, rule.SourcePath),
+            rule.Operator,
+            rule.CompareValue);
     }
 
     public async Task<List<EsbProcessLog>> GetProcessLogsAsync(long messageId)
@@ -1019,6 +1158,24 @@ public class MessageQueryService
 
     private static bool CanDirectProcess(MessageStatus status) =>
         status != MessageStatus.Processing;
+
+    private static EsbMessageListItem ToMessageListItem(EsbMessage message)
+        => new()
+        {
+            Id = message.Id,
+            MessageId = message.MessageId,
+            TranCode = message.TranCode,
+            IntegrationProjectCode = message.IntegrationProjectCode,
+            TranName = message.TranName,
+            Mrn = message.Mrn,
+            VisitNo = message.VisitNo,
+            InpatientNo = message.InpatientNo,
+            ResolvedEventTime = message.ResolvedEventTime,
+            Status = message.Status,
+            RetryCount = message.RetryCount,
+            ErrorMessage = message.ErrorMessage,
+            CreatedAt = message.CreatedAt
+        };
 
     public async Task<List<string>> GetDistinctTranCodesAsync(DateTime? startTime = null, DateTime? endTime = null)
     {

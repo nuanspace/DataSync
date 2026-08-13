@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using DataSync.Common.Ocr;
 
@@ -38,13 +38,13 @@ public class EsbOcrProfile
 
     [Column("language")]
     [MaxLength(50)]
-    public string Language { get; set; } = "chi_sim";
+    public string Language { get; set; } = "chi_sim+eng";
 
     [Column("dpi")]
     public int Dpi { get; set; } = 300;
 
     [Column("page_seg_mode")]
-    public int PageSegMode { get; set; } = 11;
+    public int PageSegMode { get; set; } = 3;
 
     [Column("max_pages")]
     public int? MaxPages { get; set; }
@@ -64,6 +64,12 @@ public class EsbOcrProfile
     [Column("output_json_path")]
     [MaxLength(1000)]
     public string? OutputJsonPath { get; set; }
+
+    [Column("extraction_rules", TypeName = "jsonb")]
+    public string ExtractionRules { get; set; } = "[]";
+
+    [Column("sample_message_id")]
+    public long? SampleMessageId { get; set; }
 
     [Column("description")]
     [MaxLength(500)]

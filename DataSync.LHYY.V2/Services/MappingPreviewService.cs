@@ -129,7 +129,7 @@ public class MappingPreviewService
         }
 
         result.FinalValue = value;
-        result.IsMissing = string.IsNullOrEmpty(value);
+        result.IsMissing = value == null;
         result.Steps.Add(new MappingPreviewStep
         {
             Name = "最终结果",
@@ -237,7 +237,7 @@ public class MappingPreviewService
             value = FieldMappingExecutor.ApplyExpression(value, mapping.ValueExpression);
 
         result.FinalValue = value;
-        result.IsMissing = string.IsNullOrEmpty(value);
+        result.IsMissing = value == null;
 
         return result;
     }
@@ -260,7 +260,10 @@ public class MappingPreviewService
             return values.Count == 0 ? null : string.Join(",", values);
         }
 
-        return ResolvePreviewToken(body, mapping, mainRecordArrayPath, effectiveArrayPath)?.ToString();
+        var token = ResolvePreviewToken(body, mapping, mainRecordArrayPath, effectiveArrayPath);
+        return token == null || token.Type is JTokenType.Null or JTokenType.Undefined
+            ? null
+            : token.ToString();
     }
 
     private static string? GetPreviewSourcePath(

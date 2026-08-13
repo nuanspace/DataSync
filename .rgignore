@@ -1,0 +1,24 @@
+# 构建、缓存和本机运行产物
+**/bin/**
+**/obj/**
+**/.codex-temp/**
+**/.claude/**
+.codex/artifacts/**
+.codex/tmp/**
+
+# 大型归档、镜像与本机测试资料
+**/docker包/**
+**/DatabaseBackups/**
+**/DatabaseUpgradeState/**
+**/DatabaseSqlFiles/**
+**/blobs/**
+DataSync.LHYY.V2/测试患者数据/**
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.zip
+*.backup
+*.bak
+*.bak.*
+*.bak*.sql

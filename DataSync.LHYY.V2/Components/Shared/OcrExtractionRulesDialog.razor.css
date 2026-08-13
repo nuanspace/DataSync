@@ -1,0 +1,82 @@
+﻿.ocr-rules-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgba(15, 23, 42, 0.5);
+}
+
+.ocr-rules-dialog {
+    display: flex;
+    flex-direction: column;
+    width: min(1100px, calc(100vw - 2rem));
+    height: min(82vh, 760px);
+    min-height: 32rem;
+    overflow: hidden;
+    background: #fff;
+    border-radius: 0.75rem;
+    box-shadow: 0 1.5rem 4rem rgba(15, 23, 42, 0.35);
+}
+
+.ocr-rules-dialog-header,
+.ocr-rules-dialog-toolbar,
+.ocr-rules-dialog-card-header,
+.ocr-rules-dialog-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+}
+
+.ocr-rules-dialog-header {
+    flex: 0 0 auto;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+.ocr-rules-dialog-body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    padding: 1rem;
+}
+
+.ocr-rules-dialog-list {
+    flex: 1;
+    min-height: 0;
+    margin-top: 0.75rem;
+    padding-right: 0.25rem;
+    overflow-y: scroll;
+}
+
+.ocr-rules-dialog-card + .ocr-rules-dialog-card {
+    margin-top: 0.75rem;
+}
+
+.ocr-rules-dialog-card-active {
+    border-color: var(--mud-palette-primary, #594ae2);
+}
+
+.ocr-rules-dialog-actions {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid rgba(15, 23, 42, 0.12);
+}
+
+@media (max-width: 959.98px) {
+    .ocr-rules-dialog-overlay {
+        padding: 0;
+    }
+
+    .ocr-rules-dialog {
+        width: 100vw;
+        height: 100vh;
+        min-height: 0;
+        border-radius: 0;
+    }
+}

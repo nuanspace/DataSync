@@ -1,0 +1,5 @@
+{
+  "domain": "cyyy-ingestion",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "CYYY 主动采集、队列和推送知识已与当前源码核对。"
+}

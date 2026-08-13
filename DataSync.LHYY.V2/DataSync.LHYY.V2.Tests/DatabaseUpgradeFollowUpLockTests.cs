@@ -13,10 +13,10 @@ public sealed class DatabaseUpgradeFollowUpLockTests
     public async Task CubeDb升级在FollowUp维护中被拒绝()
     {
         var coordinator = new FollowUpCubeOperationCoordinator(new RejectingExclusiveLockProvider());
-        using var service = new DatabaseUpgradeService(CreateConfiguration(), new TestEnvironment(), coordinator);
+        using var service = new DatabaseUpgradeService(CreateConfiguration("fresh-cube"), new TestEnvironment(), coordinator);
         var executed = false;
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.RunExclusiveUpgradeOperationAsync("CubeDb", () =>
             {
                 executed = true;
@@ -24,6 +24,7 @@ public sealed class DatabaseUpgradeFollowUpLockTests
             }));
 
         Assert.False(executed);
+        Assert.DoesNotContain("external-cube", exception.Message);
     }
 
     [Fact]
@@ -39,14 +40,48 @@ public sealed class DatabaseUpgradeFollowUpLockTests
         Assert.Equal("executed", result);
     }
 
-    private static IConfiguration CreateConfiguration() =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
+    [Fact]
+    public async Task ExternalCube模式服务端拒绝CubeDb升级但不影响DataSyncDb()
+    {
+        var coordinator = new FollowUpCubeOperationCoordinator(new AllowingExclusiveLockProvider());
+        using var service = new DatabaseUpgradeService(
+            CreateConfiguration("external-cube"),
+            new TestEnvironment(),
+            coordinator);
+        var cubeExecuted = false;
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.RunExclusiveUpgradeOperationAsync("CubeDb", () =>
             {
-                ["ConnectionStrings:CubeDb"] = "Host=localhost;Port=5432;Database=cube;Username=test",
-                ["ConnectionStrings:DataSyncDb"] = "Host=localhost;Port=5432;Database=datasync;Username=test"
-            })
+                cubeExecuted = true;
+                return Task.FromResult(true);
+            }));
+        var dataSyncResult = await service.RunExclusiveUpgradeOperationAsync(
+            "DataSyncDb",
+            () => Task.FromResult("executed"));
+
+        Assert.False(cubeExecuted);
+        Assert.Contains("external-cube", exception.Message);
+        Assert.True(service.IsUpgradeExecutionBlocked("CubeDb"));
+        Assert.False(service.IsUpgradeExecutionBlocked("DataSyncDb"));
+        Assert.Equal("executed", dataSyncResult);
+    }
+
+    private static IConfiguration CreateConfiguration(string? deploymentMode = null)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["ConnectionStrings:CubeDb"] = "Host=localhost;Port=5432;Database=cube;Username=test",
+            ["ConnectionStrings:DataSyncDb"] = "Host=localhost;Port=5432;Database=datasync;Username=test"
+        };
+        if (deploymentMode is not null)
+            values["Deployment:Mode"] = deploymentMode;
+
+        return new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            (values))
             .Build();
+    }
 
     private sealed class RejectingExclusiveLockProvider : IFollowUpCubeAdvisoryLockProvider
     {
@@ -58,6 +93,23 @@ public sealed class DatabaseUpgradeFollowUpLockTests
 
         public ValueTask<IAsyncDisposable?> TryAcquireSharedAsync(CancellationToken cancellationToken) =>
             ValueTask.FromResult<IAsyncDisposable?>(null);
+    }
+
+    private sealed class AllowingExclusiveLockProvider : IFollowUpCubeAdvisoryLockProvider
+    {
+        public ValueTask<IAsyncDisposable?> TryAcquireExclusiveAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IAsyncDisposable?>(new NoOpLease());
+
+        public ValueTask<IAsyncDisposable?> TryAcquireSharedAdmissionAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IAsyncDisposable?>(new NoOpLease());
+
+        public ValueTask<IAsyncDisposable?> TryAcquireSharedAsync(CancellationToken cancellationToken) =>
+            ValueTask.FromResult<IAsyncDisposable?>(new NoOpLease());
+    }
+
+    private sealed class NoOpLease : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class TestEnvironment : IWebHostEnvironment

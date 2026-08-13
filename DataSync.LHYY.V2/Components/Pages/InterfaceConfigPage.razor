@@ -126,6 +126,29 @@
     </div>
 }
 
+<OcrFieldSelectorDialog Visible="_ocrFieldSelectorVisible"
+                        VisibleChanged="value => _ocrFieldSelectorVisible = value"
+                        PreviewResult="_ocrPreviewResult"
+                        ExtractionRules="_editOcrExtractionRules"
+                        ExtractionRulesChanged="OnOcrExtractionRulesChanged"
+                        Loading="_ocrPreviewing"
+                        HasMorePages="_ocrPreviewHasMorePages"
+                        LoadError="@_ocrPreviewLoadError"
+                        Testing="_ocrPreviewTesting"
+                        FieldsTested="_ocrPreviewFieldsTested"
+                        TestError="@_ocrPreviewTestError"
+                        Saving="_saving"
+                        OnLoadMore="LoadMoreOcrPreviewPagesAsync"
+                        OnTestFields="TestOcrPreviewFieldsAsync"
+                        OnSave="SaveFromOcrPreviewAsync" />
+
+<OcrExtractionRulesDialog Visible="_ocrRulesDialogVisible"
+                          VisibleChanged="value => _ocrRulesDialogVisible = value"
+                          Rules="_editOcrExtractionRules"
+                          AddInitialField="_ocrRulesDialogAddInitialField"
+                          FocusedIndex="_ocrRulesDialogFocusedIndex"
+                          OnApply="OnOcrProfileExtractionRulesChanged" />
+
 <MudDialog @bind-Visible="_soapDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true })">
     <TitleContent>
         <MudText Typo="Typo.h6">配置 WebService</MudText>
@@ -191,6 +214,7 @@
     [Inject] private MessageQueryService MessageQuerySvc { get; set; } = default!;
     [Inject] private SoapWebServiceService SoapWebServiceSvc { get; set; } = default!;
     [SupplyParameterFromQuery(Name = "createFromMessageId")] public long? QueryCreateFromMessageId { get; set; }
+    [SupplyParameterFromQuery(Name = "ocrSampleMessageId")] public long? QueryOcrSampleMessageId { get; set; }
 
     private List<EsbInterfaceConfig> _items = [];
     private List<EsbInterfaceConfig> _enabledItems = [];
@@ -210,6 +234,28 @@
     private List<EsbFilterRule> _editFilterRules = [];
     private List<EsbInterfaceMatchRule> _editMatchRules = [];
     private List<EsbIdempotentKeyPart> _editIdempotentKeyParts = [];
+    private EsbOcrProfile _editOcrProfile = new();
+    private List<OcrExtractionRule> _editOcrExtractionRules = [];
+    private List<EsbMessageListItem> _ocrSampleMessages = [];
+    private long? _selectedOcrSampleMessageId;
+    private EsbMessage? _selectedOcrSampleMessage;
+    private OcrDocumentResult? _ocrPreviewResult;
+    private bool _ocrFieldSelectorVisible;
+    private bool _ocrSamplesLoading;
+    private bool _ocrPreviewing;
+    private bool _ocrPreviewHasMorePages;
+    private string? _ocrPreviewLoadError;
+    private bool _ocrPreviewTesting;
+    private bool _ocrPreviewFieldsTested;
+    private string? _ocrPreviewTestError;
+    private long _ocrPreviewElapsedMs;
+    private string? _ocrPreviewTestRuleSignature;
+    private long? _ocrPreviewTestSampleMessageId;
+    private string? _ocrTemplateRuleSignature;
+    private long? _ocrTemplateSampleMessageId;
+    private bool _ocrRulesDialogVisible;
+    private bool _ocrRulesDialogAddInitialField;
+    private int? _ocrRulesDialogFocusedIndex;
 
     // 可用的自定义处理器类名
     private List<string> _availableHandlers = [];
@@ -229,7 +275,7 @@
     private bool _openWizardAfterCreateFromMessageSave;
 
     // 路径选取目标枚举（与 MappingEditDialog 模式一致）
-    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, CombinedVisitIdentity, SourceMessageId, MainRecordArray, FilterRule, MatchRule, IdempotentKeyPart }
+    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, CombinedVisitIdentity, SourceMessageId, MainRecordArray, OcrSource, FilterRule, MatchRule, IdempotentKeyPart }
     private enum EventIdentityModeOption
     {
         RequireEventTime,
@@ -248,6 +294,7 @@
     private string? _selectedJsonTreePath;
     private int _selectedJsonTreeVersion;
     private bool _advancedExpanded;
+    private bool _ocrExpanded;
     private bool _dedupeExpanded;
     private bool _webServiceExpanded;
     private bool _recognitionExpanded;
@@ -255,11 +302,13 @@
 
     // 当前编辑项是否有 SampleJson
     private bool _hasSampleJson => !string.IsNullOrWhiteSpace(_editItem?.SampleJson);
-    private bool _supportsEventIdentity => _editItem != null && RequiresEventStartTimePath(_editItem.HandlerType);
+    private bool _supportsEventIdentity => _editItem != null
+        && (RequiresEventStartTimePath(_editItem.HandlerType) || _isOcrHandler);
     private bool _showVisitIdentityFields => _supportsEventIdentity;
     private bool _isMrnPathRequired => _editItem?.HandlerType != HandlerType.GenericQuestionWriteBack &&
                                        (_editItem?.HandlerType != HandlerType.Generic ||
                                         string.IsNullOrWhiteSpace(_editItem.CombinedVisitIdentitySourcePath));
+    private bool _isOcrHandler => OcrProfileService.IsOcrHandler(_editItem);
     private string EnabledTabText => $"启用接口 ({_enabledItems.Count})";
     private string DisabledTabText => $"未启用接口 ({_disabledItems.Count})";
 
@@ -336,6 +385,7 @@
     private void PrepareDialogLayout(bool hasExistingAdvancedConfig = false)
     {
         _advancedExpanded = false;
+        _ocrExpanded = _isOcrHandler && (hasExistingAdvancedConfig || _editOcrExtractionRules.Count > 0);
         _dedupeExpanded = false;
         _webServiceExpanded = _editItem?.SoapEnabled == true;
         _recognitionExpanded = hasExistingAdvancedConfig && _editMatchRules.Count > 0;
@@ -357,6 +407,7 @@
             PathPickTarget.CombinedVisitIdentity => "当前正在为病案号+住院次数组合标识路径选取节点。",
             PathPickTarget.SourceMessageId => "当前正在为上游消息号路径选取节点。",
             PathPickTarget.MainRecordArray => "当前正在为主记录数组路径选取节点，请尽量点击数组节点。",
+            PathPickTarget.OcrSource => "当前正在为 OCR 的 PDF 来源路径选取节点。",
             PathPickTarget.FilterRule => $"当前正在为过滤规则 #{_pickFilterRuleIndex + 1} 选取源路径。",
             PathPickTarget.MatchRule => $"当前正在为识别规则 #{_pickMatchRuleIndex + 1} 选取源路径。",
             PathPickTarget.IdempotentKeyPart => $"当前正在为幂等键片段 #{_pickIdempotentKeyPartIndex + 1} 选取源路径。",
@@ -457,7 +508,7 @@
                 <MudTextField @bind-Value="_editItem!.TranName" Label="事件名称" />
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudSelect T="HandlerType" @bind-Value="_editItem!.HandlerType" Label="处理器类型"
+                <MudSelect T="HandlerType" @bind-Value="SelectedHandlerType" Label="处理器类型"
                            HelperText="大多数接口使用 Generic；只有真正特殊逻辑才切到 Custom。">
                     <MudSelectItem Value="HandlerType.Generic">Generic</MudSelectItem>
                     <MudSelectItem Value="HandlerType.GenericQuestionWriteBack">GenericQuestionWriteBack</MudSelectItem>
@@ -465,7 +516,8 @@
                 </MudSelect>
             </MudItem>
             <MudItem xs="12" sm="6">
-                <MudSelect T="ReceiveMode" @bind-Value="SelectedReceiveMode" Label="接收方式" HelperText="@GetReceiveModeHelperText()">
+                <MudSelect T="ReceiveMode" @bind-Value="SelectedReceiveMode" Label="接收方式"
+                           Disabled="_isOcrHandler" HelperText="@GetReceiveModeHelperText()">
                     <MudSelectItem Value="ReceiveMode.PersistAndAsync">入队异步处理</MudSelectItem>
                     <MudSelectItem Value="ReceiveMode.Direct">直接处理</MudSelectItem>
                 </MudSelect>
@@ -473,7 +525,7 @@
             @if (_editItem!.HandlerType == HandlerType.Custom)
             {
                 <MudItem xs="12" sm="6">
-                    <MudSelect T="string" @bind-Value="_editItem.HandlerName" Label="处理器类名" Clearable="true"
+                    <MudSelect T="string" @bind-Value="SelectedHandlerName" Label="处理器类名" Clearable="true"
                                HelperText="选择已实现 IMessageHandler 的处理器类">
                         @foreach (var name in _availableHandlers)
                         {
@@ -630,6 +682,28 @@
                             </MudItem>
                         </MudGrid>
                     </MudExpansionPanel>
+                    @if (_isOcrHandler)
+                    {
+                        <MudExpansionPanel Text="OCR 识别与字段提取" Icon="@Icons.Material.Filled.DocumentScanner" @bind-Expanded="_ocrExpanded">
+                            <OcrProfileEditor Profile="_editOcrProfile"
+                                              ExtractionRules="_editOcrExtractionRules"
+                                              ExtractionRulesChanged="OnOcrProfileExtractionRulesChanged"
+                                              SourcePathPickEnabled="_hasSampleJson"
+                                              SourcePathPickActive="@(_pathPickTarget == PathPickTarget.OcrSource)"
+                                              OnSourcePathPickActivated="@(() => ActivatePathPickTarget(PathPickTarget.OcrSource))"
+                                              SampleMessages="_ocrSampleMessages"
+                                              SelectedSampleMessageId="_selectedOcrSampleMessageId"
+                                              SelectedSampleMessageIdChanged="OnOcrSampleMessageChanged"
+                                              SamplesLoading="_ocrSamplesLoading"
+                                              Previewing="_ocrPreviewing"
+                                              PreviewResult="_ocrPreviewResult"
+                                              PreviewElapsedMs="_ocrPreviewElapsedMs"
+                                              OnLoadSamples="LoadOcrSampleMessagesAsync"
+                                              OnPreview="PreviewOcrSampleAsync"
+                                              OnOpenFieldSelector="@(() => _ocrFieldSelectorVisible = true)"
+                                              OnManageFields="OpenOcrRulesDialog" />
+                        </MudExpansionPanel>
+                    }
                     <MudExpansionPanel Text="去重与批量" Icon="@Icons.Material.Filled.ContentCopy" @bind-Expanded="_dedupeExpanded">
                         <MudGrid Class="mt-1">
                     <MudItem xs="12" sm="6">
@@ -739,7 +813,10 @@
         _idempotentKeyPartPathPickCallback = EventCallback.Factory.Create<int>(this, idx => ActivatePathPickTarget(PathPickTarget.IdempotentKeyPart, idx));
 
         await LoadDataAsync();
-        await OpenCreateFromMessageAsync();
+        if (QueryOcrSampleMessageId.HasValue)
+            await OpenOcrSampleFromQueryAsync();
+        else
+            await OpenCreateFromMessageAsync();
     }
 
     private async Task LoadDataAsync()
@@ -811,6 +888,7 @@
         _editFilterRules = [];
         _editMatchRules = [];
         _editIdempotentKeyParts = [];
+        ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
         ResetPathPickState();
         PrepareDialogLayout();
         _isNew = true;
@@ -818,6 +896,612 @@
         _openWizardAfterCreateFromMessageSave = true;
         await LoadEventTypesAsync();
         inj_snackbar.Add("已根据当前消息创建接口配置草稿，保存后才会写入数据库", Severity.Info);
+    }
+
+    private HandlerType SelectedHandlerType
+    {
+        get => _editItem?.HandlerType ?? HandlerType.Generic;
+        set
+        {
+            if (_editItem == null)
+                return;
+
+            _editItem.HandlerType = value;
+            NormalizeOcrReceiveMode();
+        }
+    }
+
+    private string? SelectedHandlerName
+    {
+        get => _editItem?.HandlerName;
+        set
+        {
+            if (_editItem == null)
+                return;
+
+            _editItem.HandlerName = value;
+            NormalizeOcrReceiveMode();
+        }
+    }
+
+    private async Task OpenOcrSampleFromQueryAsync()
+    {
+        if (!QueryOcrSampleMessageId.HasValue)
+            return;
+
+        var message = await MessageQuerySvc.GetMessageByIdAsync(QueryOcrSampleMessageId.Value);
+        if (message == null)
+        {
+            inj_snackbar.Add("消息不存在，无法用于 OCR 配置", Severity.Warning);
+            return;
+        }
+
+        var existing = _items.FirstOrDefault(item =>
+            string.Equals(item.TranCode, message.TranCode, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
+        {
+            await Edit(existing);
+            if (string.IsNullOrWhiteSpace(_editItem?.SampleJson))
+                _editItem!.SampleJson = BuildSanitizedMessageTemplate(message.RawJson);
+        }
+        else
+        {
+            _editItem = new EsbInterfaceConfig
+            {
+                IsEnabled = false,
+                ReceiveMode = ReceiveMode.PersistAndAsync,
+                TranCode = Truncate(message.TranCode, 20),
+                TranName = Truncate(message.TranName, 100),
+                HandlerType = HandlerType.Custom,
+                HandlerName = OcrProfileService.HandlerName,
+                SampleJson = BuildSanitizedMessageTemplate(message.RawJson),
+                IntegrationProjectCode = CurrentIntegrationProjectCode,
+                SortOrder = GetNextSortOrder()
+            };
+            _editFilterRules = [];
+            _editMatchRules = [];
+            _editIdempotentKeyParts = [];
+            ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
+            ResetPathPickState();
+            PrepareDialogLayout();
+            _isNew = true;
+            _dialogVisible = true;
+            _openWizardAfterCreateFromMessageSave = false;
+            await LoadEventTypesAsync();
+        }
+
+        SetOcrSampleMessage(message);
+        await LoadOcrSampleMessagesAsync(false);
+        _ocrExpanded = true;
+        inj_snackbar.Add("已载入 OCR 样本消息，预览不会执行映射或写业务表", Severity.Info);
+    }
+
+    private async Task LoadOcrSampleMessagesAsync() => await LoadOcrSampleMessagesAsync(true);
+
+    private async Task LoadOcrSampleMessagesAsync(bool showEmptyMessage)
+    {
+        if (_editItem == null || string.IsNullOrWhiteSpace(_editItem.TranCode))
+        {
+            inj_snackbar.Add("请先填写事件代码", Severity.Warning);
+            return;
+        }
+
+        _ocrSamplesLoading = true;
+        try
+        {
+            var preferredMessageId = _selectedOcrSampleMessageId ?? _editOcrProfile.SampleMessageId;
+            var items = await MessageQuerySvc.GetOcrSampleMessagesAsync(
+                _editItem.TranCode,
+                preferredMessageId,
+                _editMatchRules);
+            _ocrSampleMessages = items;
+
+            if (_selectedOcrSampleMessage != null
+                && IsOcrSampleForCurrentInterface(_selectedOcrSampleMessage)
+                && _ocrSampleMessages.All(item => item.Id != _selectedOcrSampleMessage.Id))
+            {
+                _ocrSampleMessages.Insert(0, ToMessageListItem(_selectedOcrSampleMessage));
+            }
+
+            var selectedMessageId = preferredMessageId.HasValue
+                && _ocrSampleMessages.Any(item => item.Id == preferredMessageId.Value)
+                    ? preferredMessageId
+                    : _ocrSampleMessages.FirstOrDefault()?.Id;
+            if (selectedMessageId.HasValue)
+            {
+                _selectedOcrSampleMessageId = selectedMessageId;
+                await LoadSelectedOcrSampleAsync(selectedMessageId.Value);
+            }
+            else
+            {
+                _selectedOcrSampleMessageId = null;
+                _selectedOcrSampleMessage = null;
+            }
+
+            if (showEmptyMessage && _ocrSampleMessages.Count == 0)
+                inj_snackbar.Add("当前接口没有可用的历史消息样本，可重新执行一次数据补录后再预览 PDF", Severity.Warning);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"加载 OCR 样本失败: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _ocrSamplesLoading = false;
+        }
+    }
+
+    private async Task OnOcrSampleMessageChanged(long? messageId)
+    {
+        _selectedOcrSampleMessageId = messageId;
+        _editOcrProfile.SampleMessageId = messageId;
+        if (_selectedOcrSampleMessage?.Id != messageId)
+            _selectedOcrSampleMessage = null;
+        _ocrPreviewResult = null;
+        _ocrPreviewElapsedMs = 0;
+        _ocrPreviewHasMorePages = false;
+        _ocrPreviewLoadError = null;
+        _ocrPreviewFieldsTested = false;
+        _ocrPreviewTestRuleSignature = null;
+        _ocrPreviewTestSampleMessageId = null;
+        _ocrPreviewTestError = null;
+
+        if (messageId.HasValue)
+        {
+            try
+            {
+                await LoadSelectedOcrSampleAsync(messageId.Value);
+            }
+            catch (Exception ex)
+            {
+                inj_snackbar.Add($"加载 OCR 样本失败: {ex.Message}", Severity.Error);
+            }
+        }
+    }
+
+    private async Task LoadSelectedOcrSampleAsync(long messageId)
+    {
+        var message = await MessageQuerySvc.GetMessageByIdAsync(messageId);
+        if (message == null)
+            throw new InvalidOperationException("OCR 样本消息不存在");
+        if (!IsOcrSampleForCurrentInterface(message))
+            throw new InvalidOperationException("样本消息的事件代码与当前接口不一致");
+
+        _selectedOcrSampleMessage = message;
+        _selectedOcrSampleMessageId = message.Id;
+        _editOcrProfile.SampleMessageId = message.Id;
+        if (string.IsNullOrWhiteSpace(_editItem?.SampleJson))
+            _editItem!.SampleJson = BuildSanitizedMessageTemplate(message.RawJson);
+    }
+
+    private async Task PreviewOcrSampleAsync()
+        => await LoadOcrPreviewBatchAsync(true);
+
+    private async Task LoadMoreOcrPreviewPagesAsync()
+        => await LoadOcrPreviewBatchAsync(false);
+
+    private async Task LoadOcrPreviewBatchAsync(bool reset)
+    {
+        if (!_selectedOcrSampleMessageId.HasValue || _selectedOcrSampleMessage == null)
+            await LoadOcrSampleMessagesAsync(false);
+
+        if (!_selectedOcrSampleMessageId.HasValue)
+        {
+            inj_snackbar.Add("没有可用于 PDF 预览的历史消息，请重新执行一次数据补录", Severity.Warning);
+            return;
+        }
+
+        PrepareOcrExtractionRules();
+        var errors = OcrProfileService.ValidateSourceProfile(_editOcrProfile, false);
+        if (errors.Count > 0)
+        {
+            foreach (var error in errors)
+                inj_snackbar.Add(error, Severity.Error);
+            return;
+        }
+
+        _ocrPreviewing = true;
+        if (reset)
+            _ocrPreviewResult = null;
+        _ocrPreviewLoadError = null;
+        if (reset)
+            _ocrPreviewElapsedMs = 0;
+        try
+        {
+            var message = _selectedOcrSampleMessage?.Id == _selectedOcrSampleMessageId.Value
+                ? _selectedOcrSampleMessage
+                : await MessageQuerySvc.GetMessageByIdAsync(_selectedOcrSampleMessageId.Value);
+            if (message == null)
+                throw new InvalidOperationException("OCR 样本消息不存在");
+            if (!IsOcrSampleForCurrentInterface(message))
+                throw new InvalidOperationException("样本消息的事件代码与当前接口不一致");
+            if (!MessageJsonHelper.TryParseToken(message.RawJson, out var token, out var parseError)
+                || token is not JObject root)
+            {
+                throw new InvalidOperationException(parseError ?? "OCR 样本消息根节点必须是对象");
+            }
+
+            var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, _editItem?.MainRecordArrayPath);
+            var sourceValue = MessageJsonHelper.ReadString(root, _editOcrProfile.SourcePath, mainContext);
+            if (string.IsNullOrWhiteSpace(sourceValue))
+                throw new InvalidOperationException($"未从样本消息中提取到 PDF 来源：{_editOcrProfile.SourcePath}");
+
+            _editOcrProfile.ExtractionRules = OcrProfileService.SerializeExtractionRules(_editOcrExtractionRules);
+            var options = OcrProfileService.ToConversionOptions(_editOcrProfile);
+            options.ExtractionRules = [];
+            options.OutputJsonPath = null;
+            options.OutputNameHint = null;
+            options.KeepWorkFiles = false;
+            options.IncludePreviewImages = true;
+            options.IncludeLayoutRecognition = true;
+            options.PageRangeStart = reset
+                ? 1
+                : (_ocrPreviewResult?.Pages.Max(page => page.PageNumber) ?? 0) + 1;
+            options.PageRangeCount = 3;
+            options.ProbeNextPage = true;
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var batchResult = await inj_ocrConversionService.ConvertAsync(
+                new OcrSource
+                {
+                    Kind = _editOcrProfile.SourceKind,
+                    Value = sourceValue
+                },
+                options,
+                CancellationToken);
+            stopwatch.Stop();
+            _ocrPreviewElapsedMs += stopwatch.ElapsedMilliseconds;
+            _ocrPreviewResult = reset
+                ? batchResult
+                : MergeOcrPreviewResults(_ocrPreviewResult!, batchResult);
+            _ocrPreviewHasMorePages = batchResult.HasMorePages;
+            _ocrPreviewFieldsTested = false;
+            _ocrPreviewTestRuleSignature = null;
+            _ocrPreviewTestSampleMessageId = null;
+            _ocrPreviewTestError = null;
+            _selectedOcrSampleMessage = message;
+            _ocrFieldSelectorVisible = true;
+            inj_snackbar.Add(
+                reset
+                    ? "已加载 PDF 前 3 页，可配置并测试当前页面字段"
+                    : $"已加载到第 {_ocrPreviewResult.Pages.Max(page => page.PageNumber)} 页",
+                Severity.Success);
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _ocrPreviewLoadError = $"PDF 页面加载失败：{ex.Message}";
+            if (_ocrPreviewResult == null)
+            {
+                _ocrPreviewElapsedMs = 0;
+                _ocrFieldSelectorVisible = false;
+                inj_snackbar.Add($"PDF 样本预览失败: {ex.Message}", Severity.Error);
+            }
+            else
+            {
+                inj_snackbar.Add(_ocrPreviewLoadError, Severity.Error);
+            }
+        }
+        finally
+        {
+            _ocrPreviewing = false;
+        }
+    }
+
+    private static OcrDocumentResult MergeOcrPreviewResults(
+        OcrDocumentResult current,
+        OcrDocumentResult batch)
+    {
+        var pages = current.Pages
+            .Concat(batch.Pages)
+            .GroupBy(page => page.PageNumber)
+            .Select(group => group.Last())
+            .OrderBy(page => page.PageNumber)
+            .ToList();
+        var layoutPages = current.LayoutPages
+            .Concat(batch.LayoutPages)
+            .GroupBy(page => page.PageNumber)
+            .Select(group => group.Last())
+            .OrderBy(page => page.PageNumber)
+            .ToList();
+
+        return new OcrDocumentResult
+        {
+            SourceKind = current.SourceKind,
+            Language = current.Language,
+            Dpi = current.Dpi,
+            PageSegMode = current.PageSegMode,
+            StartedAt = current.StartedAt,
+            FinishedAt = batch.FinishedAt,
+            PageCount = pages.Count,
+            Pages = pages,
+            LayoutPages = layoutPages,
+            TextItems = pages.SelectMany(page => page.TextItems).ToList(),
+            FullText = string.Join(
+                $"{Environment.NewLine}{Environment.NewLine}",
+                pages.Select(page => page.Text).Where(text => !string.IsNullOrWhiteSpace(text))),
+            HasMorePages = batch.HasMorePages,
+            Metadata = new Dictionary<string, string>(current.Metadata, StringComparer.Ordinal)
+        };
+    }
+
+    private async Task TestOcrPreviewFieldsAsync()
+    {
+        if (_ocrPreviewResult == null)
+        {
+            _ocrPreviewTestError = "当前没有可用的 PDF 预览结果";
+            return;
+        }
+        PrepareOcrExtractionRules();
+        var errors = OcrExtractionRuleHelper.Validate(_editOcrExtractionRules);
+        if (errors.Count > 0)
+        {
+            _ocrPreviewTestError = string.Join("；", errors);
+            return;
+        }
+
+        _ocrPreviewTesting = true;
+        _ocrPreviewFieldsTested = false;
+        _ocrPreviewTestError = null;
+        _ocrPreviewResult.ExtractedFields.Clear();
+        try
+        {
+            await OcrAiExtractionSvc.ExtractAsync(
+                _ocrPreviewResult,
+                _editOcrExtractionRules,
+                CancellationToken);
+            _ocrPreviewFieldsTested = true;
+            _ocrPreviewTestRuleSignature = BuildOcrRuleValueSignature(_editOcrExtractionRules);
+            _ocrPreviewTestSampleMessageId = _selectedOcrSampleMessageId ?? _editOcrProfile.SampleMessageId;
+            RebuildOcrSampleJson();
+            inj_snackbar.Add("OCR 字段测试完成", Severity.Success);
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            _ocrPreviewResult.ExtractedFields.Clear();
+            _ocrPreviewTestError = $"字段测试失败：{ex.Message}";
+            inj_snackbar.Add(_ocrPreviewTestError, Severity.Error);
+        }
+        finally
+        {
+            _ocrPreviewTesting = false;
+        }
+    }
+
+    private void RebuildOcrSampleJson()
+    {
+        if (_editItem == null)
+            return;
+
+        PrepareOcrExtractionRules();
+        var ruleSignature = BuildOcrRuleValueSignature(_editOcrExtractionRules);
+        var sampleMessageId = _selectedOcrSampleMessageId ?? _editOcrProfile.SampleMessageId;
+        var existingValues = ReadOcrTemplateValues(_editItem.SampleJson, _editItem.MainRecordArrayPath);
+        var existingPageCount = ReadOcrTemplatePageCount(_editItem.SampleJson, _editItem.MainRecordArrayPath);
+        var canUsePreviewValues = _ocrPreviewFieldsTested
+            && string.Equals(_ocrPreviewTestRuleSignature, ruleSignature, StringComparison.Ordinal)
+            && sampleMessageId == _ocrPreviewTestSampleMessageId;
+        var canKeepTemplateValues = string.Equals(_ocrTemplateRuleSignature, ruleSignature, StringComparison.Ordinal)
+            && sampleMessageId == _ocrTemplateSampleMessageId;
+        var templateSource = _selectedOcrSampleMessage?.RawJson ?? _editItem.SampleJson;
+        var root = MessageJsonHelper.TryParseToken(templateSource ?? "{}", out var token, out _)
+            && token is JObject obj
+                ? obj
+                : new JObject();
+
+        var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, _editItem.MainRecordArrayPath);
+        var sourceToken = MessageJsonHelper.ResolveScopedToken(
+            root,
+            mainContext,
+            _editOcrProfile.SourcePath,
+            mainContext);
+        sourceToken?.Replace(new JValue("[PDF 内容已省略]"));
+        MessageJsonHelper.SanitizeLargeStringValues(root);
+
+        var templateResult = new OcrDocumentResult
+        {
+            PageCount = canUsePreviewValues
+                ? _ocrPreviewResult?.PageCount ?? 0
+                : canKeepTemplateValues ? existingPageCount : 0
+        };
+        foreach (var rule in _editOcrExtractionRules)
+        {
+            var fieldCode = rule.FieldCode.Trim();
+            if (canUsePreviewValues
+                && _ocrPreviewResult?.ExtractedFields.TryGetValue(fieldCode, out var previewValue) == true)
+            {
+                templateResult.ExtractedFields[fieldCode] = previewValue;
+            }
+            else if (canKeepTemplateValues && existingValues.TryGetValue(fieldCode, out var existingValue))
+            {
+                templateResult.ExtractedFields[fieldCode] = existingValue;
+            }
+        }
+        var ocrTemplate = OcrMessageJsonHelper.BuildPayload(
+            templateResult,
+            _editOcrExtractionRules,
+            template: true);
+
+        AttachOcrResult(root, mainContext, ocrTemplate);
+        _editItem.SampleJson = root.ToString(Newtonsoft.Json.Formatting.Indented);
+        _ocrTemplateRuleSignature = ruleSignature;
+        _ocrTemplateSampleMessageId = sampleMessageId;
+        ResetPathPickState();
+    }
+
+    private static Dictionary<string, string?> ReadOcrTemplateValues(
+        string? sampleJson,
+        string? mainRecordArrayPath)
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (!MessageJsonHelper.TryParseToken(sampleJson ?? "{}", out var token, out _)
+            || token is not JObject root)
+        {
+            return values;
+        }
+
+        var ocr = ResolveOcrTemplate(root, mainRecordArrayPath);
+        if (ocr?["ExtractedFields"] is not JObject fields)
+            return values;
+
+        foreach (var property in fields.Properties())
+            values[property.Name] = property.Value.Type == JTokenType.Null ? null : property.Value.ToString();
+        return values;
+    }
+
+    private static int ReadOcrTemplatePageCount(string? sampleJson, string? mainRecordArrayPath)
+    {
+        if (!MessageJsonHelper.TryParseToken(sampleJson ?? "{}", out var token, out _)
+            || token is not JObject root)
+        {
+            return 0;
+        }
+
+        return ResolveOcrTemplate(root, mainRecordArrayPath)?["PageCount"]?.Value<int?>() ?? 0;
+    }
+
+    private static JToken? ResolveOcrTemplate(JObject root, string? mainRecordArrayPath)
+    {
+        var mainContext = MessageJsonHelper.ResolveMainRecordContext(root, mainRecordArrayPath);
+        return mainContext is JObject mainRecord && !ReferenceEquals(mainRecord, root)
+            ? mainRecord["Ocr"]
+            : root["Ocr"];
+    }
+
+    private static string BuildOcrRuleValueSignature(IReadOnlyList<OcrExtractionRule> rules)
+        => System.Text.Json.JsonSerializer.Serialize(rules.Select(rule => new
+        {
+            FieldCode = rule.FieldCode.Trim(),
+            SourceFieldName = rule.SourceFieldName?.Trim(),
+            SectionHeading = rule.SectionHeading?.Trim(),
+            Instruction = rule.Instruction?.Trim()
+        }));
+
+    private void SetOcrSampleMessage(EsbMessage message)
+    {
+        _selectedOcrSampleMessage = message;
+        _selectedOcrSampleMessageId = message.Id;
+        _editOcrProfile.SampleMessageId = message.Id;
+        _ocrPreviewResult = null;
+        _ocrPreviewElapsedMs = 0;
+        _ocrPreviewHasMorePages = false;
+        _ocrPreviewLoadError = null;
+        _ocrPreviewFieldsTested = false;
+        _ocrPreviewTestRuleSignature = null;
+        _ocrPreviewTestSampleMessageId = null;
+        _ocrPreviewTestError = null;
+        if (_ocrSampleMessages.All(item => item.Id != message.Id))
+            _ocrSampleMessages.Insert(0, ToMessageListItem(message));
+    }
+
+    private static EsbMessageListItem ToMessageListItem(EsbMessage message)
+        => new()
+        {
+            Id = message.Id,
+            MessageId = message.MessageId,
+            TranCode = message.TranCode,
+            IntegrationProjectCode = message.IntegrationProjectCode,
+            TranName = message.TranName,
+            Mrn = message.Mrn,
+            VisitNo = message.VisitNo,
+            InpatientNo = message.InpatientNo,
+            ResolvedEventTime = message.ResolvedEventTime,
+            Status = message.Status,
+            RetryCount = message.RetryCount,
+            ErrorMessage = message.ErrorMessage,
+            CreatedAt = message.CreatedAt
+        };
+
+    private static string BuildSanitizedMessageTemplate(string rawJson)
+    {
+        if (!MessageJsonHelper.TryParseToken(rawJson, out var token, out _))
+            return "{}";
+
+        MessageJsonHelper.SanitizeLargeStringValues(token);
+        return token.ToString(Newtonsoft.Json.Formatting.Indented);
+    }
+
+    private void PrepareOcrExtractionRules()
+    {
+        foreach (var rule in _editOcrExtractionRules)
+        {
+            rule.FieldCode = rule.FieldCode.Trim();
+            rule.SourceFieldName = string.IsNullOrWhiteSpace(rule.SourceFieldName)
+                ? null
+                : rule.SourceFieldName.Trim();
+            rule.SectionHeading = string.IsNullOrWhiteSpace(rule.SectionHeading)
+                ? null
+                : rule.SectionHeading.Trim();
+            rule.Instruction = string.IsNullOrWhiteSpace(rule.Instruction) ? null : rule.Instruction.Trim();
+        }
+    }
+
+    private void OnOcrExtractionRulesChanged(List<OcrExtractionRule> rules)
+    {
+        _editOcrExtractionRules = rules;
+        PrepareOcrExtractionRules();
+        var currentSignature = BuildOcrRuleValueSignature(_editOcrExtractionRules);
+        if (_ocrPreviewFieldsTested
+            && !string.Equals(_ocrPreviewTestRuleSignature, currentSignature, StringComparison.Ordinal))
+        {
+            _ocrPreviewFieldsTested = false;
+            _ocrPreviewTestRuleSignature = null;
+            _ocrPreviewTestSampleMessageId = null;
+            _ocrPreviewResult?.ExtractedFields.Clear();
+        }
+
+        _ocrPreviewTestError = null;
+        if (OcrExtractionRuleHelper.Validate(_editOcrExtractionRules).Count == 0)
+            RebuildOcrSampleJson();
+    }
+
+    private void OnOcrProfileExtractionRulesChanged(List<OcrExtractionRule> rules)
+    {
+        _editOcrExtractionRules = rules;
+        PrepareOcrExtractionRules();
+
+        var currentSignature = BuildOcrRuleValueSignature(_editOcrExtractionRules);
+        if (_ocrPreviewFieldsTested
+            && !string.Equals(_ocrPreviewTestRuleSignature, currentSignature, StringComparison.Ordinal))
+        {
+            _ocrPreviewFieldsTested = false;
+            _ocrPreviewTestRuleSignature = null;
+            _ocrPreviewTestSampleMessageId = null;
+            _ocrPreviewResult?.ExtractedFields.Clear();
+        }
+
+        _ocrPreviewTestError = null;
+        if (OcrExtractionRuleHelper.Validate(_editOcrExtractionRules).Count == 0)
+            RebuildOcrSampleJson();
+    }
+
+    private void OpenOcrRulesDialog(int? focusedIndex)
+    {
+        _ocrRulesDialogAddInitialField = !focusedIndex.HasValue;
+        _ocrRulesDialogFocusedIndex = focusedIndex;
+        _ocrRulesDialogVisible = true;
+    }
+
+    private static void AttachOcrResult(JObject root, JToken mainContext, JToken ocrResult)
+    {
+        if (mainContext is JObject mainRecord && !ReferenceEquals(mainRecord, root))
+            mainRecord["Ocr"] = ocrResult;
+        else
+            root["Ocr"] = ocrResult;
+    }
+
+    private bool IsOcrSampleForCurrentInterface(EsbMessage message)
+    {
+        var currentTranCode = _editItem?.TranCode;
+        if (string.IsNullOrWhiteSpace(currentTranCode))
+            return false;
+
+        return MessageQueryService.IsOcrSampleForInterface(message, currentTranCode, _editMatchRules);
     }
 
     private async Task AddNew()
@@ -833,6 +1517,7 @@
         _editFilterRules = [];
         _editMatchRules = [];
         _editIdempotentKeyParts = [];
+        ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
         ResetPathPickState();
         PrepareDialogLayout();
         _isNew = true;
@@ -855,6 +1540,7 @@
     private async Task Edit(EsbInterfaceConfig item)
     {
         _openWizardAfterCreateFromMessageSave = false;
+        ResetOcrPreviewState();
         _editItem = new EsbInterfaceConfig
         {
             Id = item.Id,
@@ -906,6 +1592,8 @@
             .Where(p => p.TranCode == item.TranCode && p.IntegrationProjectCode == item.IntegrationProjectCode)
             .OrderBy(p => p.SortOrder)
             .ToListAsync();
+        await LoadOcrProfileAsync(db, item.TranCode, item.IntegrationProjectCode);
+        NormalizeOcrReceiveMode();
 
         // 级联加载事件类型
         await LoadEventTypesAsync();
@@ -926,12 +1614,125 @@
             .ToList();
     }
 
+    private void ResetOcrProfile(string? tranCode, string? integrationProjectCode)
+    {
+        _editOcrProfile = new EsbOcrProfile
+        {
+            TranCode = tranCode ?? "",
+            IntegrationProjectCode = integrationProjectCode
+        };
+        _editOcrExtractionRules = [];
+        ResetOcrPreviewState();
+    }
+
+    private void ResetOcrPreviewState()
+    {
+        _ocrSampleMessages = [];
+        _selectedOcrSampleMessageId = null;
+        _selectedOcrSampleMessage = null;
+        _ocrPreviewResult = null;
+        _ocrPreviewElapsedMs = 0;
+        _ocrPreviewHasMorePages = false;
+        _ocrPreviewLoadError = null;
+        _ocrPreviewTesting = false;
+        _ocrPreviewFieldsTested = false;
+        _ocrPreviewTestRuleSignature = null;
+        _ocrPreviewTestSampleMessageId = null;
+        _ocrPreviewTestError = null;
+        _ocrTemplateRuleSignature = null;
+        _ocrTemplateSampleMessageId = null;
+    }
+
+    private async Task LoadOcrProfileAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var profiles = await db.EsbOcrProfiles
+            .AsNoTracking()
+            .Where(profile => profile.TranCode == tranCode
+                && (profile.IntegrationProjectCode == integrationProjectCode || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync();
+
+        var profile = profiles.FirstOrDefault(item =>
+                string.Equals(item.IntegrationProjectCode, integrationProjectCode, StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(item => string.IsNullOrWhiteSpace(item.IntegrationProjectCode));
+
+        if (profile == null)
+        {
+            ResetOcrProfile(tranCode, integrationProjectCode);
+            return;
+        }
+
+        var isProjectProfile = string.Equals(
+            profile.IntegrationProjectCode,
+            integrationProjectCode,
+            StringComparison.OrdinalIgnoreCase);
+        _editOcrProfile = CopyOcrProfile(profile, isProjectProfile ? profile.Id : 0, integrationProjectCode);
+        _selectedOcrSampleMessageId = _editOcrProfile.SampleMessageId;
+
+        try
+        {
+            _editOcrExtractionRules = OcrProfileService.DeserializeExtractionRules(profile.ExtractionRules);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _editOcrExtractionRules = [];
+            inj_snackbar.Add($"OCR 字段提取规则解析失败: {ex.Message}", Severity.Error);
+        }
+
+        _ocrTemplateRuleSignature = BuildOcrRuleValueSignature(_editOcrExtractionRules);
+        _ocrTemplateSampleMessageId = _editOcrProfile.SampleMessageId;
+    }
+
+    private static EsbOcrProfile CopyOcrProfile(EsbOcrProfile source, int id, string? integrationProjectCode)
+        => new()
+        {
+            Id = id,
+            TranCode = source.TranCode,
+            IntegrationProjectCode = integrationProjectCode,
+            ProfileName = source.ProfileName,
+            IsEnabled = source.IsEnabled,
+            SourceKind = source.SourceKind,
+            SourcePath = source.SourcePath,
+            Language = source.Language,
+            Dpi = source.Dpi,
+            PageSegMode = source.PageSegMode,
+            MaxPages = source.MaxPages,
+            MaxInputBytes = source.MaxInputBytes,
+            TimeoutSeconds = source.TimeoutSeconds,
+            KeepWorkFiles = source.KeepWorkFiles,
+            AllowedFileRoots = source.AllowedFileRoots,
+            OutputJsonPath = source.OutputJsonPath,
+            ExtractionRules = source.ExtractionRules,
+            SampleMessageId = source.SampleMessageId,
+            Description = source.Description,
+            CreatedAt = source.CreatedAt,
+            UpdatedAt = source.UpdatedAt
+        };
+
+    private List<string> ValidateOcrProfile(bool validateEnabledState = true)
+    {
+        var requireEnabled = validateEnabledState && _editItem?.IsEnabled == true;
+        return OcrProfileService.ValidateProfile(
+                _editOcrProfile,
+                _editOcrExtractionRules,
+                requireEnabled)
+            .ToList();
+    }
+
     private string GetReceiveModeHelperText()
-        => SelectedReceiveMode switch
+        => _isOcrHandler
+            ? "OCR 识别耗时较长，仅支持入队异步处理。"
+            : SelectedReceiveMode switch
         {
             ReceiveMode.Direct => "收到消息后立即处理，响应更快，但不支持转为待身份绑定。",
             _ => "先入队再由后台处理，支持待身份绑定和失败重试。"
         };
+
+    private void NormalizeOcrReceiveMode()
+    {
+        if (_editItem != null && _isOcrHandler)
+            _editItem.ReceiveMode = ReceiveMode.PersistAndAsync;
+    }
 
     private string GetEventIdentityModeHelperText()
     {
@@ -951,7 +1752,9 @@
     }
 
     private string GetMrnPathHelperText()
-        => _editItem?.HandlerType == HandlerType.GenericQuestionWriteBack
+        => _isOcrHandler
+            ? "病案号来自 PDF 时，先在 OCR 字段中配置“病案号”，再填写 $main.Ocr.ExtractedFields.病案号"
+            : _editItem?.HandlerType == HandlerType.GenericQuestionWriteBack
             ? "有病案号就填写；没有时可通过就诊号/住院号、住院次数或组合标识回查"
             : "消息 JSON 中病案号的路径；Generic 接口也可改用病案号+住院次数组合标识";
 
@@ -1132,6 +1935,7 @@
             PathPickTarget.CombinedVisitIdentity => _editItem.CombinedVisitIdentitySourcePath,
             PathPickTarget.SourceMessageId => _editItem.SourceMessageIdPath,
             PathPickTarget.MainRecordArray => _editItem.MainRecordArrayPath,
+            PathPickTarget.OcrSource => _editOcrProfile.SourcePath,
             PathPickTarget.FilterRule when targetIndex >= 0 && targetIndex < _editFilterRules.Count => _editFilterRules[targetIndex].SourcePath,
             PathPickTarget.MatchRule when targetIndex >= 0 && targetIndex < _editMatchRules.Count => _editMatchRules[targetIndex].SourcePath,
             PathPickTarget.IdempotentKeyPart when targetIndex >= 0 && targetIndex < _editIdempotentKeyParts.Count => _editIdempotentKeyParts[targetIndex].SourcePath,
@@ -1203,6 +2007,9 @@
             case PathPickTarget.MainRecordArray:
                 _editItem.MainRecordArrayPath = SubCardPathHelper.NormalizeArrayContainerPath(path);
                 break;
+            case PathPickTarget.OcrSource:
+                _editOcrProfile.SourcePath = normalizedPath;
+                break;
             case PathPickTarget.FilterRule:
                 if (_pickFilterRuleIndex >= 0 && _pickFilterRuleIndex < _editFilterRules.Count)
                     _editFilterRules[_pickFilterRuleIndex].SourcePath = normalizedPath;
@@ -1231,6 +2038,12 @@
     }
 
     private async Task Save()
+        => await SaveInterfaceAsync(true);
+
+    private async Task SaveFromOcrPreviewAsync()
+        => await SaveInterfaceAsync(false);
+
+    private async Task SaveInterfaceAsync(bool closeEditor)
     {
         if (_saving)
             return;
@@ -1244,12 +2057,29 @@
         _saving = true;
         var saveWasNew = _isNew;
         var savedTranCode = _editItem.TranCode;
-        var openWizardAfterSave = false;
+        var openWizardAfterSave = closeEditor && _openWizardAfterCreateFromMessageSave;
 
         try
         {
             if (!TryNormalizeMessageTemplate(false))
                 return;
+
+            if (_isOcrHandler)
+            {
+                NormalizeOcrReceiveMode();
+                PrepareOcrExtractionRules();
+                var ocrErrors = ValidateOcrProfile();
+                if (ocrErrors.Count > 0)
+                {
+                    foreach (var error in ocrErrors)
+                        inj_snackbar.Add(error, Severity.Error);
+                    return;
+                }
+
+                _editOcrProfile.SourcePath = NormalizePickedPath(_editOcrProfile.SourcePath) ?? "";
+                _editOcrProfile.ExtractionRules = OcrProfileService.SerializeExtractionRules(_editOcrExtractionRules);
+                RebuildOcrSampleJson();
+            }
 
             // 启用时校验关键路径
             if (_editItem.IsEnabled)
@@ -1350,11 +2180,12 @@
             await SyncFilterRulesAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
             await SyncMatchRulesAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
             await SyncIdempotentKeyPartsAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
+            if (_isOcrHandler)
+                await SyncOcrProfileAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
 
             await transaction.CommitAsync();
             _isNew = false;
             savedTranCode = _editItem.TranCode;
-            openWizardAfterSave = _openWizardAfterCreateFromMessageSave;
         }
         catch (Exception ex)
         {
@@ -1369,9 +2200,13 @@
         }
 
         ConfigSvc.ClearCache();
-        _dialogVisible = false;
-        _openWizardAfterCreateFromMessageSave = false;
-        inj_snackbar.Add("保存成功", Severity.Success);
+        if (closeEditor)
+            _dialogVisible = false;
+        if (closeEditor)
+            _openWizardAfterCreateFromMessageSave = false;
+        inj_snackbar.Add(
+            closeEditor ? "保存成功" : "接口配置及测试结果已保存",
+            Severity.Success);
         await LoadDataAsync();
 
         if (openWizardAfterSave)
@@ -1444,6 +2279,7 @@
             _editFilterRules = [];
             _editMatchRules = [];
             _editIdempotentKeyParts = [];
+            ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
             ResetPathPickState();
             PrepareDialogLayout();
             _isNew = true;
@@ -1665,6 +2501,48 @@
         await db.SaveChangesAsync();
     }
 
+    private async Task SyncOcrProfileAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var profile = _editOcrProfile.Id > 0
+            ? await db.EsbOcrProfiles.FindAsync(_editOcrProfile.Id)
+            : await db.EsbOcrProfiles
+                .Where(item => item.TranCode == tranCode && item.IntegrationProjectCode == integrationProjectCode)
+                .OrderBy(item => item.Id)
+                .FirstOrDefaultAsync();
+
+        if (profile == null)
+        {
+            profile = new EsbOcrProfile
+            {
+                CreatedAt = DateTime.Now
+            };
+            db.EsbOcrProfiles.Add(profile);
+        }
+
+        profile.TranCode = tranCode;
+        profile.IntegrationProjectCode = integrationProjectCode;
+        profile.ProfileName = _editOcrProfile.ProfileName;
+        profile.IsEnabled = _editOcrProfile.IsEnabled;
+        profile.SourceKind = _editOcrProfile.SourceKind;
+        profile.SourcePath = _editOcrProfile.SourcePath;
+        profile.Language = _editOcrProfile.Language;
+        profile.Dpi = _editOcrProfile.Dpi;
+        profile.PageSegMode = _editOcrProfile.PageSegMode;
+        profile.MaxPages = _editOcrProfile.MaxPages;
+        profile.MaxInputBytes = _editOcrProfile.MaxInputBytes;
+        profile.TimeoutSeconds = _editOcrProfile.TimeoutSeconds;
+        profile.KeepWorkFiles = _editOcrProfile.KeepWorkFiles;
+        profile.AllowedFileRoots = _editOcrProfile.AllowedFileRoots;
+        profile.OutputJsonPath = _editOcrProfile.OutputJsonPath;
+        profile.ExtractionRules = _editOcrProfile.ExtractionRules;
+        profile.SampleMessageId = _editOcrProfile.SampleMessageId;
+        profile.Description = _editOcrProfile.Description;
+        profile.UpdatedAt = DateTime.Now;
+
+        await db.SaveChangesAsync();
+        _editOcrProfile.Id = profile.Id;
+    }
+
     private async Task Delete(EsbInterfaceConfig item)
     {
         var confirmed = await inj_dialogService.ShowMessageBox("确认删除",
@@ -1724,6 +2602,9 @@
             if (nextEnabled)
             {
                 var errors = ConfigSvc.ValidateInterfaceConfig(entity);
+                if (OcrProfileService.IsOcrHandler(entity))
+                    errors.AddRange(await ValidateStoredOcrProfileAsync(db, entity));
+
                 if (errors.Count > 0)
                 {
                     foreach (var err in errors)
@@ -1745,6 +2626,37 @@
         finally
         {
             _statusChanging = false;
+        }
+    }
+
+    private static async Task<List<string>> ValidateStoredOcrProfileAsync(
+        DataSyncDbContext db,
+        EsbInterfaceConfig config)
+    {
+        var profiles = await db.EsbOcrProfiles
+            .AsNoTracking()
+            .Where(profile => profile.IsEnabled
+                && profile.TranCode == config.TranCode
+                && (profile.IntegrationProjectCode == config.IntegrationProjectCode
+                    || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync();
+        var profile = profiles.FirstOrDefault(item => string.Equals(
+                item.IntegrationProjectCode,
+                config.IntegrationProjectCode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(item => string.IsNullOrWhiteSpace(item.IntegrationProjectCode));
+        if (profile == null)
+            return ["未找到启用的 OCR 配置"];
+
+        try
+        {
+            var rules = OcrProfileService.DeserializeExtractionRules(profile.ExtractionRules);
+            return OcrProfileService.ValidateProfile(profile, rules).ToList();
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return [$"OCR 字段提取规则解析失败：{ex.Message}"];
         }
     }
 }

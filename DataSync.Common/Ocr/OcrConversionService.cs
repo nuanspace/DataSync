@@ -1,4 +1,4 @@
-using System.Text.Encodings.Web;
+﻿using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DataSync.Common.Ocr.Internal;
@@ -12,6 +12,7 @@ namespace DataSync.Common.Ocr;
 /// </summary>
 public sealed class OcrConversionService : IOcrConversionService
 {
+    private const int LayoutPageSegMode = 6;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -50,38 +51,144 @@ public sealed class OcrConversionService : IOcrConversionService
         {
             var resolved = await _sourceResolver.ResolveAsync(source, options, workDirectory, cancellationToken);
             var imagePaths = await _renderer.RenderAsync(resolved.LocalPath, workDirectory, options, cancellationToken);
-            var pages = new List<OcrPageResult>();
-            for (var index = 0; index < imagePaths.Count; index++)
+            IReadOnlyList<string> previewImagePaths = [];
+            if (options.IncludePreviewImages)
             {
-                pages.Add(await _ocrEngine.ReadAsync(imagePaths[index], index + 1, options, cancellationToken));
+                try
+                {
+                    previewImagePaths = await _renderer.RenderPreviewAsync(
+                        resolved.LocalPath,
+                        workDirectory,
+                        options,
+                        cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning("PDF 预览底图生成失败，将使用文字版式预览：FailureType={FailureType}", ex.GetType().Name);
+                }
             }
 
-            return new OcrDocumentResult
+            var pages = new List<OcrPageResult>();
+            var layoutPages = new List<OcrPageResult>();
+
+            for (var index = 0; index < imagePaths.Count; index++)
             {
-                SourceKind = source.Kind,
-                Language = options.Language,
-                Dpi = options.Dpi,
-                PageSegMode = options.PageSegMode,
-                StartedAt = startedAt,
-                FinishedAt = DateTimeOffset.Now,
-                PageCount = pages.Count,
-                Pages = pages,
-                TextItems = pages.SelectMany(page => page.TextItems).ToList(),
-                FullText = string.Join($"{Environment.NewLine}{Environment.NewLine}", pages.Select(page => page.Text)),
-                Metadata =
+                var imagePath = imagePaths[index];
+                var pageNumber = Math.Max(1, options.PageRangeStart) + index;
+                var (width, height) = await PngImageHelper.ReadSizeAsync(imagePath, cancellationToken);
+                var imageLength = new FileInfo(imagePath).Length;
+                OcrPageResult page;
+                try
                 {
-                    ["Engine"] = "tesseract-cli",
-                    ["Renderer"] = "pdftoppm"
+                    page = await _ocrEngine.ReadAsync(imagePath, pageNumber, options, cancellationToken);
                 }
-            };
+                catch (TimeoutException ex)
+                {
+                    throw new TimeoutException(
+                        $"OCR 第 {pageNumber} 页识别超时（限制 {options.TimeoutSeconds} 秒，图片 {width}x{height} 像素，{FormatFileSize(imageLength)}）。",
+                        ex);
+                }
+
+                page.ImageWidth = width;
+                page.ImageHeight = height;
+                if (options.IncludePreviewImages)
+                {
+                    var previewPath = index < previewImagePaths.Count ? previewImagePaths[index] : null;
+                    await AttachPreviewImageAsync(page, previewPath, width, height, cancellationToken);
+                }
+
+                pages.Add(page);
+
+                if (options.IncludeLayoutRecognition)
+                {
+                    OcrPageResult layoutPage;
+                    try
+                    {
+                        layoutPage = await _ocrEngine.ReadAsync(
+                            imagePath,
+                            pageNumber,
+                            options,
+                            cancellationToken,
+                            LayoutPageSegMode,
+                            "-layout");
+                    }
+                    catch (TimeoutException ex)
+                    {
+                        throw new TimeoutException(
+                            $"OCR 第 {pageNumber} 页版式识别超时（限制 {options.TimeoutSeconds} 秒，图片 {width}x{height} 像素，{FormatFileSize(imageLength)}）。",
+                            ex);
+                    }
+
+                    layoutPage.ImageWidth = width;
+                    layoutPage.ImageHeight = height;
+                    layoutPages.Add(layoutPage);
+                }
+            }
+
+            var result = BuildResult(
+                source.Kind,
+                options,
+                startedAt,
+                pages,
+                layoutPages,
+                options.ProbeNextPage && previewImagePaths.Count > imagePaths.Count);
+
+            OcrExtractionRuleHelper.Apply(result, options.ExtractionRules);
+            return result;
         }
         finally
         {
             if (!options.KeepWorkFiles)
                 TryDeleteDirectory(workDirectory);
-            else
-                _logger.LogInformation("OCR 临时文件已保留：{WorkDirectory}", workDirectory);
         }
+    }
+
+    private static OcrDocumentResult BuildResult(
+        OcrSourceKind sourceKind,
+        OcrConversionOptions options,
+        DateTimeOffset startedAt,
+        IReadOnlyList<OcrPageResult> pages,
+        IReadOnlyList<OcrPageResult> layoutPages,
+        bool hasMorePages)
+        => new()
+        {
+            SourceKind = sourceKind,
+            Language = options.Language,
+            Dpi = options.Dpi,
+            PageSegMode = options.PageSegMode,
+            StartedAt = startedAt,
+            FinishedAt = DateTimeOffset.Now,
+            PageCount = pages.Count,
+            Pages = pages.OrderBy(page => page.PageNumber).ToList(),
+            LayoutPages = layoutPages.OrderBy(page => page.PageNumber).ToList(),
+            HasMorePages = hasMorePages,
+            TextItems = pages.SelectMany(page => page.TextItems).ToList(),
+            FullText = string.Join(
+                $"{Environment.NewLine}{Environment.NewLine}",
+                pages.OrderBy(page => page.PageNumber)
+                    .Select(page => page.Text)
+                    .Where(text => !string.IsNullOrWhiteSpace(text))),
+            Metadata =
+            {
+                ["Engine"] = "tesseract-cli",
+                ["Renderer"] = "pdftoppm"
+            }
+        };
+
+    private static async Task AttachPreviewImageAsync(
+        OcrPageResult page,
+        string? previewImagePath,
+        int sourceWidth,
+        int sourceHeight,
+        CancellationToken cancellationToken)
+    {
+        page.PreviewSourceWidth = sourceWidth;
+        page.PreviewSourceHeight = sourceHeight;
+        if (string.IsNullOrWhiteSpace(previewImagePath))
+            return;
+
+        var bytes = await File.ReadAllBytesAsync(previewImagePath, cancellationToken);
+        page.PreviewImageDataUrl = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
     }
 
     public async Task<OcrDocumentResult> ConvertToJsonFileAsync(
@@ -109,6 +216,11 @@ public sealed class OcrConversionService : IOcrConversionService
         Directory.CreateDirectory(path);
         return path;
     }
+
+    private static string FormatFileSize(long bytes)
+        => bytes < 1024 * 1024
+            ? $"{Math.Ceiling(bytes / 1024d):0} KB"
+            : $"{bytes / 1024d / 1024d:0.##} MB";
 
     private static void TryDeleteDirectory(string path)
     {

@@ -38,11 +38,19 @@ public sealed class FollowUpImportStatusTransitionTests
     }
 
     [Theory]
-    [InlineData(false, "ImportFailed")]
-    [InlineData(true, "RestoreFailed")]
-    public void 附件回滚失败时进入恢复失败状态(bool attachmentRestoreFailed, string expectedStatus)
+    [InlineData(false, null, "ImportFailed")]
+    [InlineData(true, null, "RestoreFailed")]
+    [InlineData(false, "SCHEMA_REVIEW_REQUIRED", "WaitingForDecision")]
+    [InlineData(true, "SCHEMA_REVIEW_REQUIRED", "RestoreFailed")]
+    public void 导入失败按异常性质和附件回滚结果进入对应状态(
+        bool attachmentRestoreFailed,
+        string? errorCode,
+        string expectedStatus)
     {
-        var result = FollowUpPackageImportService.ResolveFailureStatus(attachmentRestoreFailed);
+        Exception exception = errorCode is null
+            ? new InvalidOperationException("导入失败")
+            : new DataSync.Common.FollowUp.FollowUpPackageException(errorCode, "需要结构处理");
+        var result = FollowUpPackageImportService.ResolveFailureStatus(exception, attachmentRestoreFailed);
 
         Assert.Equal(expectedStatus, result);
     }

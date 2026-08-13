@@ -67,10 +67,12 @@ public sealed class FollowUpPackageKeyService(IOptions<FollowUpPackageSyncOption
     }
 
     public FollowUpKeyPreflight GetPreflight() => new(
-        File.Exists(_options.PrivateKeyPath),
-        File.Exists(_options.PrivateKeyPath + ".pub"),
-        File.Exists(_options.KnownHostsPath),
-        File.Exists(_options.TokenFilePath));
+        IsNonEmpty(_options.PrivateKeyPath),
+        IsNonEmpty(_options.PrivateKeyPath + ".pub"),
+        IsNonEmpty(_options.KnownHostsPath),
+        IsNonEmpty(_options.TokenFilePath));
+
+    private static bool IsNonEmpty(string path) => File.Exists(path) && new FileInfo(path).Length > 0;
 
     private static void RestrictFile(string path)
     {

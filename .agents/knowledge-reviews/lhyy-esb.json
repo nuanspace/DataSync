@@ -1,0 +1,5 @@
+{
+  "domain": "lhyy-esb",
+  "reviewed_source_commit": "20c92eac988986a61512cab803d35deb71377c36",
+  "decision": "LHYY 接收、识别、映射和写入知识已与当前源码核对。"
+}

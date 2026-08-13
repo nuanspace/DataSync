@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 using DataSync.CYYY.Data;
 using DataSync.CYYY.Models;
 using Microsoft.EntityFrameworkCore;
@@ -162,10 +163,20 @@ public class PendingSyncService
                     continue;
                 }
 
-                if (item.Status == PendingSyncStatuses.Success)
+                var sourceRecordChanged = HasSourceRecordChanged(item.TriggerRecordJson, candidate.SnapshotJson);
+                if (item.Status == PendingSyncStatuses.Success && !sourceRecordChanged)
                 {
                     BackfillObjectIdentity(item, triggerSource.ServerCode, candidate);
                     continue;
+                }
+
+                if (sourceRecordChanged)
+                {
+                    item.TriggerRecordJson = candidate.SnapshotJson;
+                    item.TriggerPushDone = false;
+                    item.TriggerPushDoneAt = null;
+                    item.TriggerPushError = null;
+                    item.RetryCount = 0;
                 }
 
                 if (!isPrimaryTrigger && IsWaitingForConditions(item))
@@ -175,7 +186,7 @@ public class PendingSyncService
                 item.HisPatId = candidate.HisPatId;
                 item.PatVisitSn = candidate.PatVisitSn;
                 item.PatName = candidate.PatName;
-                if (!item.TriggerPushDone)
+                if (!item.TriggerPushDone && !sourceRecordChanged)
                 {
                     item.TriggerRecordJson = candidate.SnapshotJson;
                     item.TriggerPushError = null;
@@ -269,6 +280,20 @@ public class PendingSyncService
             SnapshotJson = JsonSerializer.Serialize(record)
         }).ToList();
 
+    internal static bool HasSourceRecordChanged(string? existingJson, string candidateJson)
+    {
+        if (string.IsNullOrWhiteSpace(existingJson))
+            return true;
+
+        try
+        {
+            return !JsonNode.DeepEquals(JsonNode.Parse(existingJson), JsonNode.Parse(candidateJson));
+        }
+        catch (JsonException)
+        {
+            return !string.Equals(existingJson, candidateJson, StringComparison.Ordinal);
+        }
+    }
     /// <summary>
     /// 按任务领取到期的待同步对象
     /// </summary>

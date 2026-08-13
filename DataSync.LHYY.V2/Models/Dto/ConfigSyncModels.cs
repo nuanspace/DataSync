@@ -1,3 +1,4 @@
+﻿using DataSync.Common.Ocr;
 using DataSync.LHYY.V2.Models.Enums;
 
 namespace DataSync.LHYY.V2.Models.Dto;
@@ -61,7 +62,21 @@ public sealed class ConfigSyncInterfaceConfig
     public List<ConfigSyncFilterRule> FilterRules { get; set; } = [];
     public List<ConfigSyncInterfaceMatchRule> MatchRules { get; set; } = [];
     public List<ConfigSyncIdempotentKeyPart> IdempotentKeyParts { get; set; } = [];
+    public ConfigSyncOcrProfile? OcrProfile { get; set; }
     public string ContentHash { get; set; } = "";
+}
+
+public sealed class ConfigSyncOcrProfile
+{
+    public string? ProfileName { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public OcrSourceKind SourceKind { get; set; }
+    public string SourcePath { get; set; } = "";
+    public int? MaxPages { get; set; }
+    public long? MaxInputBytes { get; set; }
+    public string? AllowedFileRoots { get; set; }
+    public string ExtractionRules { get; set; } = "[]";
+    public string? Description { get; set; }
 }
 
 public sealed class ConfigSyncFieldMapping

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DataSync 医院回传交付"
+  short_description: "安全推进医院数据包校验、导入、ACK 与恢复"
+  default_prompt: "使用 $datasync-hospital-sync-delivery 分析并交付医院数据回传任务。"

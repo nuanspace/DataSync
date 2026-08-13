@@ -20,6 +20,8 @@ public static class FollowUpErrorCodes
     public const string PackageIntegrityFailed = "PACKAGE_INTEGRITY_FAILED";
     public const string ContractVersionUnsupported = "CONTRACT_VERSION_UNSUPPORTED";
     public const string SchemaReviewRequired = "SCHEMA_REVIEW_REQUIRED";
+    public const string PatientIdentityConflict = "PATIENT_IDENTITY_CONFLICT";
+    public const string PatientIdentityBootstrapRequired = "PATIENT_IDENTITY_BOOTSTRAP_REQUIRED";
     public const string InternalError = "INTERNAL_ERROR";
 }
 

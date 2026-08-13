@@ -29,7 +29,7 @@ public class IngestionSource
     public int? DatabaseResourceId { get; set; }
 
     /// <summary>
-    /// 数据库类型：SqlServer / Oracle。
+    /// 数据库类型：SqlServer / Oracle / Doris / MySql。
     /// </summary>
     [Column("database_type")]
     public string? DatabaseType { get; set; } = "SqlServer";
@@ -47,7 +47,7 @@ public class IngestionSource
     public string? SqlServerHost { get; set; }
 
     /// <summary>
-    /// 数据库名或 Oracle 服务名。
+    /// 数据库名、Doris catalog 或 Oracle 服务名。
     /// </summary>
     [Column("sql_server_database")]
     public string? SqlServerDatabase { get; set; }

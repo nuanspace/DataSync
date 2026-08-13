@@ -66,9 +66,36 @@ public class ActiveMedicalRecordSyncWorker : BackgroundService
                 continue;
 
             var startedAt = DateTime.Now;
-            await service.ExecuteTaskAsync(task, ct);
-
             var intervalSeconds = Math.Max(60, task.PollingIntervalSeconds);
+            try
+            {
+                await service.ExecuteTaskAsync(task, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogWarning(
+                    "Active 补采任务 [{TaskName}] 暂时无法连接病历接口，将在 {RetrySeconds} 秒后重试：{Message}",
+                    task.Name,
+                    intervalSeconds,
+                    ex.Message);
+            }
+            catch (InvalidDataException ex)
+            {
+                _logger.LogWarning(
+                    "Active 补采任务 [{TaskName}] 的病历接口响应格式错误，将在 {RetrySeconds} 秒后重试：{Message}",
+                    task.Name,
+                    intervalSeconds,
+                    ex.Message);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Active 补采任务 [{TaskName}] 执行失败", task.Name);
+            }
+
             var next = startedAt.AddSeconds(intervalSeconds);
             if (next < DateTime.Now)
                 next = DateTime.Now.AddSeconds(intervalSeconds);

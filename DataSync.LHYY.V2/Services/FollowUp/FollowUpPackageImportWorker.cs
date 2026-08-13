@@ -39,7 +39,19 @@ public sealed class FollowUpPackageImportWorker(
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogError(ex, "FollowUp 包导入 Worker 执行失败。"); }
-        } while (await timer.WaitForNextTickAsync(stoppingToken));
+        } while (await WaitForNextTickAsync(timer, stoppingToken));
+    }
+
+    internal static async Task<bool> WaitForNextTickAsync(PeriodicTimer timer, CancellationToken stoppingToken)
+    {
+        try
+        {
+            return await timer.WaitForNextTickAsync(stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return false;
+        }
     }
 
     private bool PreflightReady(FollowUpPackageBackupService backupService) =>

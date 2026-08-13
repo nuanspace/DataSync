@@ -1,5 +1,6 @@
 using DataSync.Common.FollowUp;
 using DataSync.LHYY.V2.Models.FollowUp;
+using Microsoft.Extensions.Options;
 using Npgsql;
 using NpgsqlTypes;
 using System.Text.Json;
@@ -8,6 +9,7 @@ namespace DataSync.LHYY.V2.Services.FollowUp;
 
 public sealed class FollowUpPackageImportRepository(
     IConfiguration configuration,
+    IOptions<FollowUpPackageImportOptions> options,
     FollowUpCubeOperationCoordinator operationCoordinator) : IFollowUpRestoreCompletionReconciler
 {
     // TODO: EF model sync 后改为 DataSyncDbContext DbSet 访问。
@@ -24,6 +26,32 @@ public sealed class FollowUpPackageImportRepository(
     internal static readonly string[] RestorableImportStatuses = ["Imported", "RestoreFailed", "Importing", "Restoring"];
     private readonly string _connectionString = configuration.GetConnectionString("DataSyncDb")
         ?? throw new InvalidOperationException("未找到连接字符串 'DataSyncDb'");
+    private readonly string _importerVersion = options.Value.ImporterVersion;
+
+    public async Task<IAsyncDisposable?> TryAcquireStorageCleanupPackageLockAsync(
+        string hospitalCode,
+        string packageId,
+        CancellationToken cancellationToken = default)
+    {
+        var connection = await OpenAsync(cancellationToken);
+        try
+        {
+            await using var command = new NpgsqlCommand(
+                "SELECT pg_try_advisory_lock(hashtextextended(@lockName, 0));", connection);
+            var lockName = FollowUpPackageLockKey.Create(hospitalCode, packageId);
+            command.Parameters.AddWithValue("lockName", lockName);
+            if ((bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false))
+                return new PackageAdvisoryLease(connection, lockName);
+
+            await connection.DisposeAsync();
+            return null;
+        }
+        catch
+        {
+            await connection.DisposeAsync();
+            throw;
+        }
+    }
 
     public async Task<List<string>> GetMissingTablesAsync(CancellationToken cancellationToken = default)
     {
@@ -148,6 +176,349 @@ public sealed class FollowUpPackageImportRepository(
         return (bool)(await command.ExecuteScalarAsync(cancellationToken) ?? false);
     }
 
+    public async Task<long?> GetLatestRecoveryBaselineSequenceAsync(
+        string hospitalCode,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT state.sequence_no
+            FROM lhyy.followup_package_import_state state
+            INNER JOIN cyyy.followup_package_pull_state pull_state
+              ON pull_state.hospital_code = state.hospital_code
+             AND pull_state.package_id = state.package_id
+            WHERE state.hospital_code = @hospitalCode
+              AND state.package_type = 'Baseline'
+              AND pull_state.trigger_type = 'RecoveryBaseline'
+              AND state.import_status = 'Imported'
+              AND EXISTS (
+                  SELECT 1
+                  FROM cyyy.followup_package_ack_queue ack
+                  WHERE ack.hospital_code = state.hospital_code
+                    AND ack.package_id = state.package_id
+                    AND ack.ack_status IN ('Imported', 'Succeeded')
+                    AND ack.forward_status = 'Forwarded'
+                    AND lower(ack.ack_payload_json->>'receivedHash') = lower(state.package_hash))
+            ORDER BY state.sequence_no DESC
+            LIMIT 1
+            """, connection);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value);
+    }
+
+    public async Task<FollowUpStorageCleanupCandidate> PrepareStorageCleanupAsync(
+        string hospitalCode,
+        string packageId,
+        Func<FollowUpStorageCleanupCandidate, Task>? beforeStateTransition = null,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+
+        long? recoverySequence;
+        await using (var baselineCommand = new NpgsqlCommand("""
+            SELECT state.sequence_no
+            FROM lhyy.followup_package_import_state state
+            INNER JOIN cyyy.followup_package_pull_state pull_state
+              ON pull_state.hospital_code = state.hospital_code
+             AND pull_state.package_id = state.package_id
+            WHERE state.hospital_code = @hospitalCode
+              AND state.package_type = 'Baseline'
+              AND pull_state.trigger_type = 'RecoveryBaseline'
+              AND state.import_status = 'Imported'
+              AND EXISTS (
+                  SELECT 1 FROM cyyy.followup_package_ack_queue ack
+                  WHERE ack.hospital_code = state.hospital_code
+                    AND ack.package_id = state.package_id
+                    AND ack.ack_status IN ('Imported', 'Succeeded')
+                    AND ack.forward_status = 'Forwarded'
+                    AND lower(ack.ack_payload_json->>'receivedHash') = lower(state.package_hash))
+            ORDER BY state.sequence_no DESC
+            LIMIT 1
+            """, connection, transaction))
+        {
+            baselineCommand.Parameters.AddWithValue("hospitalCode", hospitalCode);
+            var value = await baselineCommand.ExecuteScalarAsync(cancellationToken);
+            recoverySequence = value is null or DBNull ? null : Convert.ToInt64(value);
+        }
+
+        if (!recoverySequence.HasValue)
+            throw new InvalidOperationException("尚无成功导入并完成 ACK 转发的恢复基线，不能清理旧包。");
+
+        string packageHash;
+        string packagePath;
+        long sequenceNo;
+        await using (var packageCommand = new NpgsqlCommand("""
+            SELECT state.sequence_no, state.package_hash, state.local_package_path,
+                   ARRAY(
+                       SELECT ack.ack_payload_json->>'receivedHash'
+                       FROM cyyy.followup_package_ack_queue ack
+                       WHERE ack.hospital_code = state.hospital_code
+                         AND ack.package_id = state.package_id
+                         AND ack.ack_status IN ('Imported', 'Succeeded')
+                         AND ack.forward_status = 'Forwarded') AS ack_hashes
+            FROM lhyy.followup_package_import_state state
+            INNER JOIN cyyy.followup_package_pull_state pull_state
+              ON pull_state.hospital_code = state.hospital_code
+             AND pull_state.package_id = state.package_id
+            WHERE state.hospital_code = @hospitalCode
+              AND state.package_id = @packageId
+              AND state.import_status = 'Imported'
+              AND state.sequence_no < @recoverySequence
+              AND pull_state.pull_status = 'Pulled'
+              AND state.local_package_path <> ''
+              AND pull_state.local_package_path = state.local_package_path
+              AND EXISTS (
+                  SELECT 1 FROM cyyy.followup_package_ack_queue ack
+                  WHERE ack.hospital_code = state.hospital_code
+                    AND ack.package_id = state.package_id
+                    AND ack.ack_status IN ('Imported', 'Succeeded')
+                    AND ack.forward_status = 'Forwarded')
+            FOR UPDATE OF state, pull_state
+            """, connection, transaction))
+        {
+            packageCommand.Parameters.AddWithValue("hospitalCode", hospitalCode);
+            packageCommand.Parameters.AddWithValue("packageId", packageId);
+            packageCommand.Parameters.AddWithValue("recoverySequence", recoverySequence.Value);
+            await using var reader = await packageCommand.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+                throw new InvalidOperationException("该包不满足清理条件：必须已成功导入和转发 ACK，且早于最新恢复基线。");
+            sequenceNo = reader.GetInt64(0);
+            packageHash = reader.GetString(1);
+            packagePath = reader.GetString(2);
+            var ackHashes = reader.GetFieldValue<string[]>(3);
+            if (!ackHashes.Any(hash => string.Equals(hash, packageHash, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(
+                    $"该包不满足清理条件：已转发 ACK 的 receivedHash 与导入记录不一致（ACK={string.Join(',', ackHashes)}，导入记录={packageHash}）。");
+        }
+
+        await using (var unsafeCommand = new NpgsqlCommand("""
+            SELECT EXISTS (
+                SELECT 1 FROM lhyy.followup_package_import_state
+                WHERE import_status IN ('Validating', 'BackingUp', 'Importing', 'Restoring', 'RestoreFailed')
+                UNION ALL
+                SELECT 1 FROM lhyy.followup_package_restore_record
+                WHERE restore_status IN ('Pending', 'Running', 'Restoring'))
+            """, connection, transaction))
+        {
+            if ((bool)(await unsafeCommand.ExecuteScalarAsync(cancellationToken) ?? false))
+                throw new InvalidOperationException("当前存在导入、备份或恢复操作，不能执行存储清理。");
+        }
+
+        var backups = new List<FollowUpStorageCleanupBackup>();
+        await using (var backupCommand = new NpgsqlCommand("""
+            SELECT id,
+                   detail_json->>'rootPath',
+                   database_backup_path,
+                   attachment_backup_path,
+                   backup_hash,
+                   backup_size_bytes,
+                   detail_json->>'attachmentManifestHash',
+                   (detail_json->>'attachmentEntryCount')::integer
+            FROM lhyy.followup_package_backup_record
+            WHERE hospital_code = @hospitalCode
+              AND package_id = @packageId
+              AND backup_status = 'Completed'
+            ORDER BY created_at
+            FOR UPDATE
+            """, connection, transaction))
+        {
+            backupCommand.Parameters.AddWithValue("hospitalCode", hospitalCode);
+            backupCommand.Parameters.AddWithValue("packageId", packageId);
+            await using var reader = await backupCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var databasePath = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+                backups.Add(new FollowUpStorageCleanupBackup(
+                    reader.GetGuid(0),
+                    reader.IsDBNull(1) ? Path.GetDirectoryName(databasePath) ?? string.Empty : reader.GetString(1),
+                    databasePath,
+                    reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
+                    reader.IsDBNull(4) ? string.Empty : reader.GetString(4),
+                    reader.GetInt64(5),
+                    reader.IsDBNull(6) ? null : reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetInt32(7)));
+            }
+        }
+
+        var candidate = new FollowUpStorageCleanupCandidate(
+            hospitalCode, packageId, sequenceNo, packageHash, packagePath, backups);
+        if (beforeStateTransition is not null) await beforeStateTransition(candidate);
+
+        await using (var markCommand = new NpgsqlCommand("""
+            UPDATE cyyy.followup_package_pull_state
+            SET pull_status = 'Archiving', updated_at = now()
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND pull_status = 'Pulled';
+            """, connection, transaction))
+        {
+            markCommand.Parameters.AddWithValue("hospitalCode", hospitalCode);
+            markCommand.Parameters.AddWithValue("packageId", packageId);
+            FollowUpStorageCleanupCas.EnsureAffected("Pulled->Archiving",
+                await markCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await using (var markBackupsCommand = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_backup_record
+            SET backup_status = 'Archiving'
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND backup_status = 'Completed';
+            """, connection, transaction))
+        {
+            markBackupsCommand.Parameters.AddWithValue("hospitalCode", hospitalCode);
+            markBackupsCommand.Parameters.AddWithValue("packageId", packageId);
+            FollowUpStorageCleanupCas.EnsureAffected("Completed->Archiving",
+                await markBackupsCommand.ExecuteNonQueryAsync(cancellationToken), backups.Count);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+        return candidate;
+    }
+
+    public async Task CompleteStorageCleanupAsync(
+        FollowUpStorageCleanupCandidate candidate,
+        string operatorName,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var pullCommand = new NpgsqlCommand("""
+            UPDATE cyyy.followup_package_pull_state
+            SET pull_status = 'Archived', local_package_path = '', updated_at = now()
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND pull_status = 'Archiving';
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(pullCommand, candidate);
+            FollowUpStorageCleanupCas.EnsureAffected("Archiving->Archived",
+                await pullCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await using (var importCommand = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_import_state
+            SET local_package_path = '',
+                import_summary_json = import_summary_json || jsonb_build_object(
+                    'storageArchivedAt', now(), 'storageArchivedBy', @operatorName),
+                updated_at = now()
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND import_status = 'Imported';
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(importCommand, candidate);
+            importCommand.Parameters.AddWithValue("operatorName", operatorName);
+            FollowUpStorageCleanupCas.EnsureAffected("Imported metadata archive",
+                await importCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await using (var backupCommand = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_backup_record
+            SET backup_status = 'Archived',
+                database_backup_path = NULL,
+                attachment_backup_path = NULL,
+                detail_json = detail_json || jsonb_build_object(
+                    'storageArchivedAt', now(), 'storageArchivedBy', @operatorName)
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND backup_status = 'Archiving';
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(backupCommand, candidate);
+            backupCommand.Parameters.AddWithValue("operatorName", operatorName);
+            FollowUpStorageCleanupCas.EnsureAffected("Archiving backups->Archived",
+                await backupCommand.ExecuteNonQueryAsync(cancellationToken), candidate.Backups.Count);
+        }
+        await using (var logCommand = new NpgsqlCommand("""
+            INSERT INTO lhyy.followup_package_import_log
+                (hospital_code, package_id, operation, level, message, detail_json)
+            VALUES
+                (@hospitalCode, @packageId, 'storage-cleanup', 'Warning', '已人工清理恢复基线之前的包文件和备份',
+                 jsonb_build_object('operatorName', @operatorName, 'sequenceNo', @sequenceNo));
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(logCommand, candidate);
+            logCommand.Parameters.AddWithValue("operatorName", operatorName);
+            logCommand.Parameters.AddWithValue("sequenceNo", candidate.SequenceNo);
+            FollowUpStorageCleanupCas.EnsureAffected("archive audit log",
+                await logCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task CancelStorageCleanupAsync(
+        FollowUpStorageCleanupCandidate candidate,
+        string errorMessage,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using (var pullCommand = new NpgsqlCommand("""
+            UPDATE cyyy.followup_package_pull_state
+            SET pull_status = 'Pulled', updated_at = now()
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND pull_status = 'Archiving';
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(pullCommand, candidate);
+            FollowUpStorageCleanupCas.EnsureAffected("Archiving->Pulled",
+                await pullCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await using (var backupCommand = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_backup_record
+            SET backup_status = 'Completed'
+            WHERE hospital_code = @hospitalCode AND package_id = @packageId AND backup_status = 'Archiving';
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(backupCommand, candidate);
+            FollowUpStorageCleanupCas.EnsureAffected("Archiving backups->Completed",
+                await backupCommand.ExecuteNonQueryAsync(cancellationToken), candidate.Backups.Count);
+        }
+        await using (var logCommand = new NpgsqlCommand("""
+            INSERT INTO lhyy.followup_package_import_log
+                (hospital_code, package_id, operation, level, message, detail_json)
+            VALUES
+                (@hospitalCode, @packageId, 'storage-cleanup', 'Error', '存储清理失败，状态已恢复',
+                 jsonb_build_object('error', @errorMessage));
+            """, connection, transaction))
+        {
+            AddCleanupIdentityParameters(logCommand, candidate);
+            logCommand.Parameters.AddWithValue("errorMessage", Truncate(errorMessage, 1000) ?? string.Empty);
+            FollowUpStorageCleanupCas.EnsureAffected("cleanup cancellation audit log",
+                await logCommand.ExecuteNonQueryAsync(cancellationToken), 1);
+        }
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<FollowUpStorageCleanupDatabaseState> GetStorageCleanupDatabaseStateAsync(
+        string hospitalCode,
+        string packageId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT pull.pull_status, state.local_package_path,
+                   count(backup.id) FILTER (WHERE backup.backup_status = 'Archiving'),
+                   count(backup.id) FILTER (WHERE backup.backup_status = 'Archived'),
+                   count(backup.id) FILTER (WHERE backup.backup_status = 'Completed'),
+                   count(backup.id) FILTER (WHERE backup.backup_status NOT IN ('Archiving', 'Archived', 'Completed'))
+            FROM cyyy.followup_package_pull_state pull
+            INNER JOIN lhyy.followup_package_import_state state
+              ON state.hospital_code = pull.hospital_code AND state.package_id = pull.package_id
+            LEFT JOIN lhyy.followup_package_backup_record backup
+              ON backup.hospital_code = pull.hospital_code AND backup.package_id = pull.package_id
+            WHERE pull.hospital_code = @hospitalCode AND pull.package_id = @packageId
+            GROUP BY pull.pull_status, state.local_package_path
+            """, connection);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken)) return FollowUpStorageCleanupDatabaseState.Inconsistent;
+        var pullStatus = reader.GetString(0);
+        var localPath = reader.GetString(1);
+        var archivingBackups = reader.GetInt64(2);
+        var archivedBackups = reader.GetInt64(3);
+        var completedBackups = reader.GetInt64(4);
+        var unexpectedBackups = reader.GetInt64(5);
+        if (pullStatus == "Pulled" && archivingBackups == 0 && archivedBackups == 0 && unexpectedBackups == 0)
+            return FollowUpStorageCleanupDatabaseState.Original;
+        if (pullStatus == "Archiving" && archivedBackups == 0 && unexpectedBackups == 0)
+            return FollowUpStorageCleanupDatabaseState.Prepared;
+        if (pullStatus == "Archived" && localPath.Length == 0 && archivingBackups == 0
+            && completedBackups == 0 && unexpectedBackups == 0)
+            return FollowUpStorageCleanupDatabaseState.Archived;
+        return FollowUpStorageCleanupDatabaseState.Inconsistent;
+    }
+
     internal static string ResolveDiscoveryStatus(string? currentStatus, string pullStatus)
     {
         var discoveredStatus = pullStatus == "Pulled" ? "Pending" : "AwaitingPackage";
@@ -166,6 +537,34 @@ public sealed class FollowUpPackageImportRepository(
             ORDER BY COALESCE(finished_at, updated_at) DESC, sequence_no DESC LIMIT 1
             """, connection);
         command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        return await command.ExecuteScalarAsync(cancellationToken) as string;
+    }
+
+    public async Task<string?> GetTableContentHashAsync(
+        string hospitalCode,
+        string? packageId,
+        string schema,
+        string table,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(packageId))
+            return null;
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var command = new NpgsqlCommand("""
+            SELECT item ->> 'contentHash'
+            FROM lhyy.followup_package_import_state state
+            CROSS JOIN LATERAL jsonb_array_elements(COALESCE(state.table_manifest_json, '[]'::jsonb)) item
+            WHERE state.hospital_code = @hospitalCode
+              AND state.package_id = @packageId
+              AND state.import_status = 'Imported'
+              AND LOWER(item ->> 'schema') = LOWER(@schema)
+              AND LOWER(item ->> 'tableName') = LOWER(@table)
+            LIMIT 1
+            """, connection);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        command.Parameters.AddWithValue("schema", schema);
+        command.Parameters.AddWithValue("table", table);
         return await command.ExecuteScalarAsync(cancellationToken) as string;
     }
 
@@ -227,7 +626,7 @@ public sealed class FollowUpPackageImportRepository(
             command.Parameters.AddWithValue("stagingPath", package.StagingPath);
             command.Parameters.AddWithValue("contractVersion", package.Manifest.ExportContractVersion);
             command.Parameters.AddWithValue("minImporterVersion", package.Manifest.MinImporterVersion);
-            command.Parameters.AddWithValue("importerVersion", "1.0.0");
+            command.Parameters.AddWithValue("importerVersion", _importerVersion);
             command.Parameters.AddWithValue("checkStatus", check.Status);
             command.Parameters.AddWithValue("diffLevel", check.DiffLevel);
             command.Parameters.AddWithValue("requiresReview", !check.Compatible);
@@ -258,7 +657,7 @@ public sealed class FollowUpPackageImportRepository(
             command.Parameters.AddWithValue("packageId", package.Manifest.PackageId);
             command.Parameters.AddWithValue("status", check.Status);
             command.Parameters.AddWithValue("contract", package.Manifest.ExportContractVersion);
-            command.Parameters.AddWithValue("importer", "1.0.0");
+            command.Parameters.AddWithValue("importer", _importerVersion);
             command.Parameters.AddWithValue("level", check.DiffLevel);
             command.Parameters.AddWithValue("compatible", check.Compatible);
             command.Parameters.AddWithValue("result", JsonSerializer.Serialize(check, FollowUpJson.Options));
@@ -341,6 +740,10 @@ public sealed class FollowUpPackageImportRepository(
         await using var command = new NpgsqlCommand("""
             UPDATE lhyy.followup_package_import_state SET
                 import_status = @status, error_code = @errorCode, error_message = @errorMessage,
+                requires_schema_review = CASE
+                    WHEN @status = 'WaitingForDecision' AND @errorCode = @schemaReviewCode THEN true
+                    ELSE requires_schema_review
+                END,
                 import_summary_json = CASE WHEN @summary IS NULL THEN import_summary_json ELSE @summary::jsonb END,
                 staging_path = CASE WHEN @status IN ('BackingUp','Importing') THEN staging_path ELSE NULL END,
                 started_at = CASE WHEN @status IN ('Validating','BackingUp','Importing','Restoring') THEN COALESCE(started_at, now()) ELSE started_at END,
@@ -354,6 +757,7 @@ public sealed class FollowUpPackageImportRepository(
             """, connection);
         command.Parameters.AddWithValue("status", status);
         command.Parameters.Add(new NpgsqlParameter("errorCode", NpgsqlDbType.Text) { Value = DbValue(errorCode) });
+        command.Parameters.AddWithValue("schemaReviewCode", FollowUpErrorCodes.SchemaReviewRequired);
         command.Parameters.Add(new NpgsqlParameter("errorMessage", NpgsqlDbType.Text) { Value = DbValue(Truncate(errorMessage, 1000)) });
         command.Parameters.Add(new NpgsqlParameter("summary", NpgsqlDbType.Text) { Value = summary is null ? DBNull.Value : JsonSerializer.Serialize(summary, FollowUpJson.Options) });
         command.Parameters.AddWithValue("hospitalCode", hospitalCode);
@@ -361,6 +765,228 @@ public sealed class FollowUpPackageImportRepository(
         await command.ExecuteNonQueryAsync(cancellationToken);
         operationCoordinator.InvalidatePersistentStateGate();
     }
+
+    public async Task CompleteRestoreAsync(
+        string hospitalCode,
+        string packageId,
+        string? errorMessage,
+        object summary,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await RollbackPatientIdentityMappingsCoreAsync(
+            connection,
+            transaction,
+            hospitalCode,
+            packageId,
+            cancellationToken);
+
+        await using var command = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_import_state SET
+                import_status = 'Restored',
+                error_code = NULL,
+                error_message = @errorMessage,
+                import_summary_json = @summary::jsonb,
+                staging_path = NULL,
+                finished_at = now(),
+                updated_at = now()
+            WHERE hospital_code = @hospitalCode
+              AND package_id = @packageId
+              AND import_status IN ('Restoring', 'Restored')
+            """, connection, transaction);
+        command.Parameters.Add(new NpgsqlParameter("errorMessage", NpgsqlDbType.Text)
+        {
+            Value = DbValue(Truncate(errorMessage, 1000))
+        });
+        command.Parameters.AddWithValue("summary", JsonSerializer.Serialize(summary, FollowUpJson.Options));
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            throw new InvalidOperationException("FollowUp 恢复完成时导入状态已发生变化。");
+
+        await transaction.CommitAsync(cancellationToken);
+        operationCoordinator.InvalidatePersistentStateGate();
+    }
+
+    internal static async Task RollbackPatientIdentityMappingsCoreAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string hospitalCode,
+        string packageId,
+        CancellationToken cancellationToken)
+    {
+        await using var command = new NpgsqlCommand(BuildPatientIdentityMapRollbackSql(), connection, transaction);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    internal static string BuildPatientIdentityMapRollbackSql() => """
+        DELETE FROM lhyy.followup_patient_identity_map
+        WHERE hospital_code = @hospitalCode
+          AND first_package_id = @packageId;
+
+        UPDATE lhyy.followup_patient_identity_map AS identity_map
+        SET last_package_id = COALESCE(
+                (SELECT state.previous_package_id
+                 FROM lhyy.followup_package_import_state AS state
+                 WHERE state.hospital_code = @hospitalCode
+                   AND state.package_id = @packageId),
+                identity_map.first_package_id),
+            updated_at = now()
+        WHERE identity_map.hospital_code = @hospitalCode
+          AND identity_map.last_package_id = @packageId;
+        """;
+
+    internal async Task CompleteImportAsync(
+        string hospitalCode,
+        string packageId,
+        IReadOnlyCollection<FollowUpPatientIdentityMap> mappings,
+        string warningCode,
+        string warningMessage,
+        object summary,
+        CancellationToken cancellationToken = default)
+    {
+        await using var connection = await OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        var mappingCount = await UpsertPatientIdentityMappingsCoreAsync(
+            connection,
+            transaction,
+            hospitalCode,
+            packageId,
+            mappings,
+            cancellationToken);
+
+        await using var command = new NpgsqlCommand("""
+            UPDATE lhyy.followup_package_import_state SET
+                import_status = 'Imported',
+                error_code = @errorCode,
+                error_message = @errorMessage,
+                import_summary_json = @summary::jsonb || jsonb_build_object('patientIdentityMappings', @mappingCount),
+                staging_path = NULL,
+                finished_at = now(),
+                updated_at = now()
+            WHERE hospital_code = @hospitalCode
+              AND package_id = @packageId
+              AND import_status IN ('Importing', 'Imported')
+            """, connection, transaction);
+        command.Parameters.AddWithValue("errorCode", warningCode);
+        command.Parameters.AddWithValue("errorMessage", Truncate(warningMessage, 1000) ?? string.Empty);
+        command.Parameters.AddWithValue("summary", JsonSerializer.Serialize(summary, FollowUpJson.Options));
+        command.Parameters.AddWithValue("mappingCount", mappingCount);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) != 1)
+            throw new InvalidOperationException("FollowUp 患者映射落库时导入状态已发生变化。");
+
+        await transaction.CommitAsync(cancellationToken);
+        operationCoordinator.InvalidatePersistentStateGate();
+    }
+
+    internal static async Task<int> UpsertPatientIdentityMappingsCoreAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        string hospitalCode,
+        string packageId,
+        IReadOnlyCollection<FollowUpPatientIdentityMap> mappings,
+        CancellationToken cancellationToken)
+    {
+        var distinct = mappings
+            .GroupBy(mapping => mapping.SourcePatientId)
+            .Select(group => group.Last())
+            .ToArray();
+        if (distinct.Length == 0)
+            return 0;
+
+        await using var command = new NpgsqlCommand(BuildPatientIdentityMapUpsertSql(), connection, transaction);
+        command.Parameters.AddWithValue("hospitalCode", hospitalCode);
+        command.Parameters.AddWithValue("packageId", packageId);
+        command.Parameters.Add(new NpgsqlParameter<Guid[]>("sourcePatientIds", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            TypedValue = distinct.Select(mapping => mapping.SourcePatientId).ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter<Guid[]>("targetPatientIds", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            TypedValue = distinct.Select(mapping => mapping.TargetPatientId).ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter("sourceUniquePatientIds", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            Value = distinct.Select(mapping => mapping.SourceUniquePatientId).ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter("targetUniquePatientIds", NpgsqlDbType.Array | NpgsqlDbType.Uuid)
+        {
+            Value = distinct.Select(mapping => mapping.TargetUniquePatientId).ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter<string[]>("matchBases", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            TypedValue = distinct.Select(mapping => mapping.MatchBasis).ToArray()
+        });
+        command.Parameters.Add(new NpgsqlParameter<string?[]>("originalSourceTypes", NpgsqlDbType.Array | NpgsqlDbType.Text)
+        {
+            TypedValue = distinct.Select(mapping => mapping.OriginalSourceType).ToArray()
+        });
+        var affected = await command.ExecuteNonQueryAsync(cancellationToken);
+        if (affected != distinct.Length)
+            throw new FollowUpPackageException(
+                FollowUpErrorCodes.PatientIdentityConflict,
+                "DataSyncDb 中的 FollowUp 患者映射已发生漂移，已阻断导入成功状态落库。");
+        return affected;
+    }
+
+    internal static string BuildPatientIdentityMapUpsertSql() => """
+        INSERT INTO lhyy.followup_patient_identity_map
+            (hospital_code, source_patient_id, target_patient_id,
+             source_unique_patient_id, target_unique_patient_id,
+             identity_match_basis, original_source_type,
+             first_package_id, last_package_id, created_at, updated_at)
+        SELECT @hospitalCode,
+               source.source_patient_id,
+               source.target_patient_id,
+               source.source_unique_patient_id,
+               source.target_unique_patient_id,
+               source.identity_match_basis,
+               source.original_source_type,
+               @packageId,
+               @packageId,
+               now(),
+               now()
+        FROM unnest(
+            @sourcePatientIds,
+            @targetPatientIds,
+            @sourceUniquePatientIds,
+            @targetUniquePatientIds,
+            @matchBases,
+            @originalSourceTypes)
+            AS source(
+                source_patient_id,
+                target_patient_id,
+                source_unique_patient_id,
+                target_unique_patient_id,
+                identity_match_basis,
+                original_source_type)
+        ON CONFLICT (hospital_code, source_patient_id) DO UPDATE SET
+            source_unique_patient_id = COALESCE(
+                lhyy.followup_patient_identity_map.source_unique_patient_id,
+                EXCLUDED.source_unique_patient_id),
+            target_unique_patient_id = COALESCE(
+                lhyy.followup_patient_identity_map.target_unique_patient_id,
+                EXCLUDED.target_unique_patient_id),
+            original_source_type = COALESCE(
+                EXCLUDED.original_source_type,
+                lhyy.followup_patient_identity_map.original_source_type),
+            last_package_id = EXCLUDED.last_package_id,
+            updated_at = now()
+        WHERE lhyy.followup_patient_identity_map.target_patient_id = EXCLUDED.target_patient_id
+          AND (
+              lhyy.followup_patient_identity_map.source_unique_patient_id IS NULL
+              OR EXCLUDED.source_unique_patient_id IS NULL
+              OR lhyy.followup_patient_identity_map.source_unique_patient_id = EXCLUDED.source_unique_patient_id)
+          AND (
+              lhyy.followup_patient_identity_map.target_unique_patient_id IS NULL
+              OR EXCLUDED.target_unique_patient_id IS NULL
+              OR lhyy.followup_patient_identity_map.target_unique_patient_id = EXCLUDED.target_unique_patient_id)
+        """;
 
     public async Task<Guid> AddBackupAsync(string hospitalCode, string packageId, FollowUpBackupArtifact artifact, CancellationToken cancellationToken = default)
     {
@@ -380,7 +1006,12 @@ public sealed class FollowUpPackageImportRepository(
         command.Parameters.AddWithValue("attachmentPath", artifact.AttachmentBackupPath);
         command.Parameters.AddWithValue("hash", artifact.Hash);
         command.Parameters.AddWithValue("size", artifact.SizeBytes);
-        command.Parameters.AddWithValue("detail", JsonSerializer.Serialize(new { artifact.RootPath }, FollowUpJson.Options));
+        command.Parameters.AddWithValue("detail", JsonSerializer.Serialize(new
+        {
+            artifact.RootPath,
+            artifact.AttachmentManifestHash,
+            artifact.AttachmentEntryCount
+        }, FollowUpJson.Options));
         return (Guid)(await command.ExecuteScalarAsync(cancellationToken))!;
     }
 
@@ -388,7 +1019,14 @@ public sealed class FollowUpPackageImportRepository(
     {
         await using var connection = await OpenAsync(cancellationToken);
         await using var command = new NpgsqlCommand("""
-            SELECT id, database_backup_path, attachment_backup_path, backup_hash, backup_size_bytes, detail_json->>'rootPath'
+            SELECT id,
+                   database_backup_path,
+                   attachment_backup_path,
+                   backup_hash,
+                   backup_size_bytes,
+                   detail_json->>'rootPath',
+                   detail_json->>'attachmentManifestHash',
+                   (detail_json->>'attachmentEntryCount')::integer
             FROM lhyy.followup_package_backup_record
             WHERE hospital_code = @hospitalCode AND package_id = @packageId AND backup_status = 'Completed'
             ORDER BY created_at DESC LIMIT 1
@@ -397,7 +1035,15 @@ public sealed class FollowUpPackageImportRepository(
         command.Parameters.AddWithValue("packageId", packageId);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
-        return new FollowUpBackupArtifact(reader.GetGuid(0), ReadString(reader, 5) ?? Path.GetDirectoryName(reader.GetString(1))!, reader.GetString(1), reader.GetString(2), ReadString(reader, 3) ?? "", reader.GetInt64(4));
+        return new FollowUpBackupArtifact(
+            reader.GetGuid(0),
+            ReadString(reader, 5) ?? Path.GetDirectoryName(reader.GetString(1))!,
+            reader.GetString(1),
+            reader.GetString(2),
+            ReadString(reader, 3) ?? "",
+            reader.GetInt64(4),
+            ReadString(reader, 6),
+            reader.IsDBNull(7) ? null : reader.GetInt32(7));
     }
 
     public async Task<Guid> StartRestoreAsync(
@@ -694,6 +1340,12 @@ public sealed class FollowUpPackageImportRepository(
         stateUpdated = ShouldUpdateRestoredState(marker.RestoreId, currentRestoreId, importStatus);
         if (stateUpdated)
         {
+            await RollbackPatientIdentityMappingsCoreAsync(
+                connection,
+                transaction,
+                marker.HospitalCode,
+                marker.PackageId,
+                cancellationToken);
             await using var stateCommand = new NpgsqlCommand("""
                 UPDATE lhyy.followup_package_import_state SET
                     import_status = 'Restored',
@@ -842,6 +1494,41 @@ public sealed class FollowUpPackageImportRepository(
         var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         return connection;
+    }
+
+    private static void AddCleanupIdentityParameters(
+        NpgsqlCommand command,
+        FollowUpStorageCleanupCandidate candidate)
+    {
+        command.Parameters.AddWithValue("hospitalCode", candidate.HospitalCode);
+        command.Parameters.AddWithValue("packageId", candidate.PackageId);
+    }
+
+    private sealed class PackageAdvisoryLease(NpgsqlConnection connection, string lockName) : IAsyncDisposable
+    {
+        private NpgsqlConnection? _connection = connection;
+
+        public async ValueTask DisposeAsync()
+        {
+            var current = Interlocked.Exchange(ref _connection, null);
+            if (current is null) return;
+            try
+            {
+                await using var command = new NpgsqlCommand(
+                    "SELECT pg_advisory_unlock(hashtextextended(@lockName, 0));", current);
+                command.Parameters.AddWithValue("lockName", lockName);
+                await command.ExecuteNonQueryAsync();
+            }
+            catch
+            {
+                NpgsqlConnection.ClearPool(current);
+                throw;
+            }
+            finally
+            {
+                await current.DisposeAsync();
+            }
+        }
     }
 
     private static FollowUpPackageImportState ReadState(NpgsqlDataReader reader) => new()

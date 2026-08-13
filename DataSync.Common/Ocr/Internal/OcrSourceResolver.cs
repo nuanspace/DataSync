@@ -1,6 +1,5 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Sockets;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DataSync.Common.Ocr.Internal;
@@ -10,12 +9,10 @@ public sealed class OcrSourceResolver
     private const int MaxRedirectCount = 5;
     private readonly HttpClient _client;
     private readonly OcrRuntimeOptions _runtimeOptions;
-    private readonly ILogger<OcrSourceResolver> _logger;
 
-    public OcrSourceResolver(IOptions<OcrRuntimeOptions> runtimeOptions, ILogger<OcrSourceResolver> logger)
+    public OcrSourceResolver(IOptions<OcrRuntimeOptions> runtimeOptions)
     {
         _runtimeOptions = runtimeOptions.Value;
-        _logger = logger;
         _client = new HttpClient(new SocketsHttpHandler
         {
             AllowAutoRedirect = false,
@@ -73,7 +70,6 @@ public sealed class OcrSourceResolver
         var localPath = Path.Combine(workDirectory, "source.pdf");
         await DownloadUrlAsync(uri, localPath, options.MaxInputBytes, timeoutCts.Token);
 
-        _logger.LogInformation("OCR URL 来源已下载到临时文件，大小 {Length} 字节", new FileInfo(localPath).Length);
         return new ResolvedOcrSource(localPath, true);
     }
 

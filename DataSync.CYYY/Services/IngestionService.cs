@@ -17,8 +17,12 @@ public class IngestionService
     public const string SourceTypeDatabase = "Database";
     public const string SourceTypeSqlServer = "SqlServer";
     public const string SourceTypeOracle = "Oracle";
+    public const string SourceTypeDoris = "Doris";
+    public const string SourceTypeMySql = "MySql";
     public const string DatabaseTypeSqlServer = "SqlServer";
     public const string DatabaseTypeOracle = "Oracle";
+    public const string DatabaseTypeDoris = "Doris";
+    public const string DatabaseTypeMySql = "MySql";
 
     private readonly DataLakeClient _dataLakeClient;
     private readonly DynamicApiClient _dynamicApiClient;
@@ -397,10 +401,20 @@ public class IngestionService
         IsDatabaseSource(source) &&
         IsOracleDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
 
+    public static bool IsDorisSource(IngestionSource source) =>
+        IsDatabaseSource(source) &&
+        IsDorisDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
+
+    public static bool IsMySqlSource(IngestionSource source) =>
+        IsDatabaseSource(source) &&
+        IsMySqlDatabaseType(NormalizeDatabaseType(source.DatabaseType, source.SourceType));
+
     public static bool IsDatabaseSourceType(string? sourceType) =>
         string.Equals(sourceType, SourceTypeDatabase, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(sourceType, SourceTypeSqlServer, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(sourceType, SourceTypeOracle, StringComparison.OrdinalIgnoreCase);
+        string.Equals(sourceType, SourceTypeOracle, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, SourceTypeDoris, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(sourceType, SourceTypeMySql, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsDynamicApiSourceType(string? sourceType) =>
         string.Equals(sourceType, SourceTypeDynamicApi, StringComparison.OrdinalIgnoreCase);
@@ -421,6 +435,18 @@ public class IngestionService
             return DatabaseTypeOracle;
         }
 
+        if (string.Equals(sourceType, SourceTypeDoris, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(databaseType, DatabaseTypeDoris, StringComparison.OrdinalIgnoreCase))
+        {
+            return DatabaseTypeDoris;
+        }
+
+        if (string.Equals(sourceType, SourceTypeMySql, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(databaseType, DatabaseTypeMySql, StringComparison.OrdinalIgnoreCase))
+        {
+            return DatabaseTypeMySql;
+        }
+
         return DatabaseTypeSqlServer;
     }
 
@@ -429,6 +455,15 @@ public class IngestionService
 
     public static bool IsOracleDatabaseType(string? databaseType) =>
         string.Equals(NormalizeDatabaseType(databaseType), DatabaseTypeOracle, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsDorisDatabaseType(string? databaseType) =>
+        string.Equals(NormalizeDatabaseType(databaseType), DatabaseTypeDoris, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsMySqlDatabaseType(string? databaseType) =>
+        string.Equals(NormalizeDatabaseType(databaseType), DatabaseTypeMySql, StringComparison.OrdinalIgnoreCase);
+
+    public static bool IsMySqlProtocolDatabaseType(string? databaseType) =>
+        IsDorisDatabaseType(databaseType) || IsMySqlDatabaseType(databaseType);
 
     private static (DateTime? From, DateTime? To) ExtractTimeRange(
         IngestionSource source,

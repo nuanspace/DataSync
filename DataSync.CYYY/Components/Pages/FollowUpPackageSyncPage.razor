@@ -45,8 +45,32 @@
             @PreflightItem("SSH 公钥", _preflight.PublicKeyReady)
             @PreflightItem("主机指纹", _preflight.KnownHostsReady)
             @PreflightItem("DMZ 访问令牌", _preflight.TokenReady)
-            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="GenerateKeyAsync" Disabled="@(_busy || _preflight.PrivateKeyReady)">生成密钥</MudButton>
-            <MudButton Variant="Variant.Text" OnClick="CopyPublicKeyAsync" Disabled="@(!_preflight.PublicKeyReady)">复制公钥</MudButton>
+            @PreflightItem("医院来源", _overview.Sources.Count > 0)
+            <MudText Typo="Typo.caption" Color="Color.Secondary">首次密钥与信任配置请在同机 LHYY 的“医院端统一初始化”中完成。</MudText>
+        </section>
+
+        @if (_overview.Sources.Count == 0)
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">
+                医院来源尚未配置，连接诊断、手工拉取和自动拉取均不可执行。请点击“DMZ 来源”右侧的“+”，填写医院编码、名称、DMZ 地址/端口、SSH 用户和包仓库目录后保存。
+            </MudAlert>
+        }
+
+        <section class="package-section" aria-label="存储状态">
+            <div class="section-heading">
+                <div>
+                    <MudText Typo="Typo.subtitle1">包仓库存储</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">这里只显示共享包目录容量；旧包与备份统一在 LHYY 导入页面按恢复基线规则清理。</MudText>
+                </div>
+            </div>
+            @foreach (var storage in _overview.Storage)
+            {
+                <MudAlert Severity="@StorageSeverity(storage)" Variant="Variant.Outlined" Dense="true" Class="mb-2">
+                    <strong>@storage.Name</strong>：目录 @FormatBytes(storage.DirectoryBytes)，卷使用率 @storage.UsedPercent%，
+                    可用 @FormatBytes(storage.AvailableBytes) / @FormatBytes(storage.TotalBytes)
+                    @if (!storage.Ready) { <span>；检查失败：@storage.Error</span> }
+                </MudAlert>
+            }
         </section>
 
         <section class="followup-workspace">
@@ -116,11 +140,6 @@
                             <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.Replay" OnClick="RepullAsync" Disabled="@_busy">执行重拉</MudButton>
                         </div>
                     </details>
-                    <details class="advanced-panel">
-                        <summary>DMZ 主机指纹</summary>
-                        <MudTextField @bind-Value="_knownHostsText" Label="导入主机指纹（known-hosts）" HelperText="核对无误后保存，防止连接到错误的 DMZ 主机。" Lines="3" Variant="Variant.Outlined" Class="known-hosts-field" />
-                        <MudButton Variant="Variant.Text" OnClick="SaveKnownHostsAsync" Disabled="@string.IsNullOrWhiteSpace(_knownHostsText)">保存主机指纹</MudButton>
-                    </details>
                 }
             </div>
         </section>
@@ -158,7 +177,6 @@
     private FollowUpPackageSyncOverview _overview = new();
     private FollowUpPackageSourceConfig? _selectedSource;
     private FollowUpKeyPreflight _preflight = new(false, false, false, false);
-    private string? _knownHostsText;
     private string? _repullPackageId;
     private DateTime? _repullFrom;
     private DateTime? _repullTo;
@@ -250,24 +268,6 @@
         }
     }
 
-    private async Task GenerateKeyAsync()
-    {
-        try { _ = await KeyService.GenerateKeyAsync(CancellationToken); inj_snackbar.Add("SSH 密钥已生成，请复制公钥到 DMZ 授权。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
-    }
-
-    private async Task CopyPublicKeyAsync()
-    {
-        var key = await KeyService.ReadPublicKeyAsync(CancellationToken);
-        if (!string.IsNullOrWhiteSpace(key)) { await inj_jsRuntime.InvokeVoidAsync("navigator.clipboard.writeText", key); inj_snackbar.Add("公钥已复制。", Severity.Success); }
-    }
-
-    private async Task SaveKnownHostsAsync()
-    {
-        try { await KeyService.SaveKnownHostsAsync(_knownHostsText ?? "", CancellationToken); _knownHostsText = null; inj_snackbar.Add("known-hosts 已保存。", Severity.Success); await LoadAsync(); }
-        catch (Exception ex) { inj_snackbar.Add(ex.Message, Severity.Error); }
-    }
-
     private static RenderFragment PreflightItem(string label, bool ready) => builder =>
     {
         builder.OpenElement(0, "span"); builder.AddAttribute(1, "class", $"preflight-item {(ready ? "is-ready" : "")}");
@@ -280,7 +280,9 @@
         ? $"{item.FromWatermark:yyyy-MM-dd HH:mm} → {item.ToWatermark:yyyy-MM-dd HH:mm}"
         : $"截至 {item.ToWatermark:yyyy-MM-dd HH:mm}";
     private static string FormatBytes(long bytes) => bytes >= 1024 * 1024 * 1024 ? $"{bytes / 1024d / 1024 / 1024:F2} GB" : bytes >= 1024 * 1024 ? $"{bytes / 1024d / 1024:F1} MB" : bytes > 0 ? $"{bytes / 1024d:F1} KB" : "0 B";
-    private static Color StatusColor(string status) => status switch { "Pulled" => Color.Success, "Failed" => Color.Error, "Pulling" => Color.Info, _ => Color.Default };
+    private static Color StatusColor(string status) => status switch { "Pulled" => Color.Success, "Archived" => Color.Secondary, "Failed" => Color.Error, "Pulling" or "Archiving" => Color.Info, _ => Color.Default };
     private static Color AckColor(string status) => status switch { "Imported" => Color.Success, "ImportFailed" or "RejectedSchemaMismatch" => Color.Error, _ => Color.Default };
     private static Color ForwardColor(string status) => status switch { "Forwarded" => Color.Success, "Failed" => Color.Error, "Forwarding" => Color.Info, _ => Color.Default };
+    private static Severity StorageSeverity(FollowUpStorageStatus status) =>
+        !status.Ready || status.IsCritical ? Severity.Error : status.IsWarning ? Severity.Warning : Severity.Success;
 }

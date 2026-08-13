@@ -30,6 +30,8 @@ else
                         <MudSelect T="string" @bind-Value="_editing.DatabaseType" Label="数据库类型" Variant="Variant.Outlined">
                             <MudSelectItem Value="@(IngestionService.DatabaseTypeSqlServer)">SqlServer</MudSelectItem>
                             <MudSelectItem Value="@(IngestionService.DatabaseTypeOracle)">Oracle</MudSelectItem>
+                            <MudSelectItem Value="@(IngestionService.DatabaseTypeDoris)">Doris</MudSelectItem>
+                            <MudSelectItem Value="@(IngestionService.DatabaseTypeMySql)">MySql</MudSelectItem>
                         </MudSelect>
                     </MudItem>
                     <MudItem xs="12" sm="6">
@@ -123,13 +125,33 @@ else
     private bool IsOracleDatabase =>
         IngestionService.IsOracleDatabaseType(_editing.DatabaseType);
 
-    private string DatabaseHostLabel => IsOracleDatabase ? "Oracle 主机" : "SQL Server 主机";
+    private bool IsDorisDatabase =>
+        IngestionService.IsDorisDatabaseType(_editing.DatabaseType);
 
-    private string DatabaseNameLabel => IsOracleDatabase ? "服务名" : "数据库";
+    private bool IsMySqlDatabase =>
+        IngestionService.IsMySqlDatabaseType(_editing.DatabaseType);
+
+    private string DatabaseHostLabel => IsOracleDatabase
+        ? "Oracle 主机"
+        : IsDorisDatabase
+            ? "Doris FE 主机"
+            : IsMySqlDatabase
+                ? "MySQL 主机"
+                : "SQL Server 主机";
+
+    private string DatabaseNameLabel => IsOracleDatabase
+        ? "服务名"
+        : IsDorisDatabase
+            ? "Catalog/数据库"
+            : "数据库";
 
     private string DatabaseHostHelperText => IsOracleDatabase
         ? "可填写主机或 host:port，端口默认 1521"
-        : "可包含端口或实例名";
+        : IsDorisDatabase
+            ? "填写 FE 查询地址，可包含端口，默认 9030"
+            : IsMySqlDatabase
+                ? "可填写 host:port，端口默认 3306"
+                : "可包含端口或实例名";
 
     protected override async Task OnPageInitializedAsync()
     {

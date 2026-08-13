@@ -23,8 +23,20 @@ status: ready
 - CYYY 将导入回执转发至 FollowUp 云端。
 - 重复拉取、重复导入和重复回执的幂等验证。
 
-> [!important] 推荐测试方式
-> 当前基础包和上一增量包已经成功导入。不要重置数据库，也不要使用旧包重复导入。本轮人工验收应由云端生成一个新的增量包，并使用该包完成全流程验证。
+> [!important] 首次 v3 部署
+> 首次验收从新的 `Baseline` 开始。Baseline 必须满足 `followup-hospital-sync.v3` 且 `previousPackageId` 为空，但不要求 `sequenceNo=1`。旧 v2 数据包不得导入。只有 Baseline、NTCare 展示和 ACK 闭环全部通过后，才继续验证 Incremental。
+
+### 1.1 首次部署后的执行顺序
+
+1. 关闭云端定时生成、CYYY 定时拉取和 LHYY 自动导入。
+2. 检查六个容器、两个管理页面、云端 Web/Gateway 及版本：v3 / 1.2.0，并确认医院端拒绝旧 v2 包。
+3. 恢复 Cube 模拟库并确认其既有 `form.vector` 与患者范围映射结构；仅在 DataSyncDb 执行 `20260811.sql`，不得对 CubeDb 执行 `20260722.sql`、`20260810.sql` 或其他自定义 DDL。存量升级另运行一次患者映射迁移工具。
+4. 保存恢复后初始备份，按四包顺序完成三端统一初始化并执行三端“一键验证”，再在 CYYY 执行连接诊断。
+5. 云端手工生成 Baseline；CYYY 手工拉取；LHYY 人工确认并导入。
+6. 导入后重启 NTCare 或执行既有缓存刷新，在患者管理核对患者基础信息和合格表单。
+7. 核对目标适配、CYYY `Forwarded` ACK 和云端 `Imported` 状态。
+8. 制造状态晋级或新增无表单患者，生成并导入 Incremental，检查前驱、增量和幂等。
+9. 完成错误 Token/密钥/篡改包拒绝验证后，再按云端授权 → CYYY 定时 → LHYY 自动导入 → 云端定时的顺序开启自动模式。
 
 ## 2. 测试入口
 
@@ -33,7 +45,7 @@ status: ready
 | FollowUp 云端 | `http://120.46.184.202:1448/debugHospitalData` |
 | CYYY 包同步 | `http://127.0.0.1:18080/followup-packages` |
 | LHYY 回传导入 | `http://127.0.0.1:18081/followup-import` |
-| DMZ | WSL 容器 `followup-lab-dmz`，通过 CYYY“连接诊断”和容器日志检查 |
+| DMZ | 宿主机回环管理页 `http://127.0.0.1:8080`（模拟环境按端口映射访问） |
 
 ## 3. 测试前控制要求
 
@@ -383,6 +395,35 @@ docker exec followup-lab-cube-db psql -U postgres -d debug -c "SELECT * FROM <sc
 - [ ] 测试字段与云端一致。
 - [ ] 未发生无关字段覆盖。
 - [ ] 未发生目标记录物理删除。
+
+#### 4.11.1 验证同一自然人合并
+
+准备独立的测试患者，分别验证以下场景：
+
+1. 云端与院端 `unique_patient.id` 相同时，继续按 ID 处理。
+2. ID 不同、双方身份证号都非空且忽略首尾空格和 `X/x` 大小写后相同时，复用院端 `unique_patient`。
+3. 任一方身份证号为空，双方完整的姓名、出生日期、性别都相同时，复用院端 `unique_patient`。
+4. 双方身份证号都非空但不同时，不得退回三要素匹配。
+5. 同一医院、课题下已有唯一 `patient` 时，包内患者事件、住院、门诊和动态表记录都应指向该院端 `patient.id`，院端现有患者字段不被云端覆盖。
+6. 同一判定条件命中多条 `unique_patient`，或院端同一患者范围存在多条 `patient` 时，整包应进入 `ImportFailed`，错误码为 `PATIENT_IDENTITY_CONFLICT`，且错误信息不包含姓名或身份证号。
+7. 再导入后续 `Incremental` 或重试包，即使包内没有 `patient` 行，也应按持久映射指向原院端患者。
+
+可在 DataSyncDb 执行以下只读 SQL 核对映射：
+
+```sql
+SELECT hospital_code, source_patient_id, target_patient_id,
+       source_unique_patient_id, target_unique_patient_id, identity_match_basis
+FROM lhyy.followup_patient_identity_map
+ORDER BY updated_at DESC
+LIMIT 20;
+```
+
+验收记录：
+
+- [ ] ID、身份证号和三要素三种匹配路径符合规则。
+- [ ] 院端已有患者被复用，现有字段未被覆盖，所有关联表指向正确。
+- [ ] 冲突场景整包失败且无患者隐私泄漏。
+- [ ] 后续包稳定复用原映射。
 
 ### 4.12 验证回执向云端返回
 

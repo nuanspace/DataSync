@@ -290,22 +290,40 @@ else
     private bool IsOracleDatabase =>
         IsDatabaseSource && IngestionService.IsOracleDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
 
+    private bool IsDorisDatabase =>
+        IsDatabaseSource && IngestionService.IsDorisDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
+
+    private bool IsMySqlDatabase =>
+        IsDatabaseSource && IngestionService.IsMySqlDatabaseType(SelectedDatabaseResource?.DatabaseType ?? _source.DatabaseType);
+
     private DatabaseResource? SelectedDatabaseResource =>
         _databaseResources.FirstOrDefault(r => r.Id == _source.DatabaseResourceId);
 
     private string SelectedDatabaseTypeText => SelectedDatabaseResource?.DatabaseType ?? "未选择";
 
-    private string DatabaseHostLabel => IsOracleDatabase ? "Oracle 主机" : "SQL Server 主机";
+    private string DatabaseHostLabel => IsOracleDatabase
+        ? "Oracle 主机"
+        : IsDorisDatabase
+            ? "Doris FE 主机"
+            : IsMySqlDatabase
+                ? "MySQL 主机"
+                : "SQL Server 主机";
 
-    private string DatabaseNameLabel => IsOracleDatabase ? "服务名" : "数据库";
+    private string DatabaseNameLabel => IsOracleDatabase ? "服务名" : IsDorisDatabase ? "Catalog/数据库" : "数据库";
 
     private string DatabaseHostHelperText => IsOracleDatabase
         ? "可填写主机或 host:port，端口默认 1521"
-        : "可包含端口或实例名";
+        : IsDorisDatabase
+            ? "填写 FE 查询地址，可包含端口，默认 9030"
+            : IsMySqlDatabase
+                ? "可填写 host:port，端口默认 3306"
+                : "可包含端口或实例名";
 
     private string SqlTemplateHelperText => IsOracleDatabase
         ? "时间参数可写 :from/:to，也兼容 @from/@to"
-        : "时间参数使用 @from 和 @to";
+        : IsDorisDatabase || IsMySqlDatabase
+            ? "时间参数使用 @from 和 @to；仅允许 SELECT 或 WITH 查询"
+            : "时间参数使用 @from 和 @to";
 
     private static string GetDatabaseResourceOption(DatabaseResource resource) =>
         $"{resource.Name}（{resource.DatabaseType} {resource.Host}/{resource.DatabaseName}）";
