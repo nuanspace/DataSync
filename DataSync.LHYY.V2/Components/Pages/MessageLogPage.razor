@@ -16,6 +16,19 @@
         </div>
     </header>
 
+    @if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Filled" Class="mb-4">
+            <div class="d-flex align-center justify-space-between gap-2">
+                <span>@_loadError</span>
+                <MudButton Variant="Variant.Outlined" Color="Color.Inherit" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Refresh" OnClick="RetryLoadAsync" Disabled="_loading">
+                    重新加载
+                </MudButton>
+            </div>
+        </MudAlert>
+    }
+
     <MudAlert Severity="Severity.Warning" Variant="Variant.Filled" Dense="true" Class="message-log-hot-alert">
         未设置接收开始/结束时间时，默认查询近 @_hotRetentionDays 天热数据；需要查看历史数据请指定接收时间范围。
     </MudAlert>
@@ -157,6 +170,7 @@
 
 @code {
     [Inject] private MessageQueryService QueryService { get; set; } = default!;
+    [Inject] private ILogger<MessageLogPage> Logger { get; set; } = default!;
     [SupplyParameterFromQuery(Name = "tranCode")] public string? QueryTranCode { get; set; }
     [SupplyParameterFromQuery(Name = "status")] public string? QueryStatus { get; set; }
     [SupplyParameterFromQuery(Name = "startDate")] public string? QueryStartDate { get; set; }
@@ -170,6 +184,7 @@
     private MudTable<EsbMessageListItem>? _table;
     private bool _loading;
     private bool _batchRetrying;
+    private string? _loadError;
     private int _hotRetentionDays = 30;
     private List<string> _tranCodes = [];
     private string? _lastTranCodeRangeSignature;
@@ -186,20 +201,29 @@
     private string? _lastQuerySignature;
 
     private bool ShowFailureReasonColumn => _filterStatus == MessageStatus.Failed;
-    private bool CanBatchRetry => !_batchRetrying && (!_filterStatus.HasValue || _filterStatus == MessageStatus.Failed);
+    protected override bool RequiresIntegrationProject => false;
+    private bool CanBatchRetry => _loadError is null
+                                  && !_batchRetrying
+                                  && (!_filterStatus.HasValue || _filterStatus == MessageStatus.Failed);
 
     protected override async Task OnPageInitializedAsync()
     {
         ApplyFiltersFromQuery();
-        _hotRetentionDays = await QueryService.GetHotRetentionDaysAsync();
-        await ReloadTranCodesIfNeededAsync();
+        await LoadPageOptionsAsync();
         _lastQuerySignature = GetQuerySignature();
     }
 
     protected override async Task OnParametersSetAsync()
     {
         ApplyFiltersFromQuery();
-        await ReloadTranCodesIfNeededAsync();
+        try
+        {
+            await ReloadTranCodesIfNeededAsync();
+        }
+        catch (Exception ex)
+        {
+            SetLoadError(ex);
+        }
 
         var querySignature = GetQuerySignature();
         if (_lastQuerySignature == querySignature)
@@ -228,12 +252,52 @@
                 _filterEventStartTime,
                 _filterEventEndTime);
 
+            _loadError = null;
             return new TableData<EsbMessageListItem> { Items = items, TotalItems = totalCount };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return new TableData<EsbMessageListItem> { Items = [], TotalItems = 0 };
+        }
+        catch (Exception ex)
+        {
+            SetLoadError(ex);
+            return new TableData<EsbMessageListItem> { Items = [], TotalItems = 0 };
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    private async Task RetryLoadAsync()
+    {
+        _loadError = null;
+        _lastTranCodeRangeSignature = null;
+        await LoadPageOptionsAsync();
+
+        if (_loadError is null && _table is not null)
+            await _table.ReloadServerData();
+    }
+
+    private async Task LoadPageOptionsAsync()
+    {
+        try
+        {
+            _hotRetentionDays = await QueryService.GetHotRetentionDaysAsync();
+            await ReloadTranCodesIfNeededAsync();
+            _loadError = null;
+        }
+        catch (Exception ex)
+        {
+            SetLoadError(ex);
+        }
+    }
+
+    private void SetLoadError(Exception exception)
+    {
+        Logger.LogError(exception, "消息日志加载失败，DataSync 管理库当前不可用。");
+        _loadError = "暂时无法连接 DataSync 管理库。请检查 PostgreSQL 服务、网络或 VPN 以及 DataSyncDb 配置后重新加载。";
     }
 
     private Task OnTranCodeChanged(string? value)

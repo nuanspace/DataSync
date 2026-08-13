@@ -107,6 +107,19 @@ else
 
 <MappingEditDialog Visible="_editDialogVisible" VisibleChanged="OnEditDialogVisibleChanged" EditItem="_editDialogItem" Title="编辑映射" JsonText="@_editableJson" MainRecordArrayPath="@GetMainRecordArrayPath()" JsonTreeLayout="JsonTreeLayout.SidePanel" DialogMaxWidth="MaxWidth.Large" MappingTargetEditable="false" UseTargetFieldSelector="false" LicenseCode="@_defaultLicenseCode" ShowIsRequired="true" ShowIsEnabled="true" ShowFilterRules="true" ShowSubCardArrayPathEditor="false" FilterRules="_editDialogFilterRules" FilterRulesChanged="v => _editDialogFilterRules = v" OnSave="OnEditDialogSave" />
 
+<MudDialog @bind-Visible="_jsonFieldTranslationEditVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.ExtraSmall, FullWidth = true })">
+    <TitleContent><MudText Typo="Typo.h6">临时修改中文名称</MudText></TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-3">路径：@_jsonFieldTranslationEditPath</MudText>
+        <MudTextField @bind-Value="_jsonFieldTranslationEditValue" Label="中文名称" Immediate="true" AutoFocus="true" MaxLength="40" />
+        <MudAlert Severity="Severity.Info" Dense="true" Class="mt-3">修改仅在当前页面有效，不会保存到数据库或配置同步。</MudAlert>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _jsonFieldTranslationEditVisible = false)">取消</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(string.IsNullOrWhiteSpace(_jsonFieldTranslationEditValue))" OnClick="SaveJsonFieldTranslationEdit">确定</MudButton>
+    </DialogActions>
+</MudDialog>
+
 <MudDialog @bind-Visible="_settingsDialogVisible" Options="@(new DialogOptions { MaxWidth = MaxWidth.Small, FullWidth = true })">
     <TitleContent><MudText Typo="Typo.h6">工作台设置</MudText></TitleContent>
     <DialogContent>
@@ -290,6 +303,18 @@ else
                             <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
                             <MudText Typo="Typo.caption" Color="Color.Success">有效</MudText>
                         }
+                        @if (_jsonFieldTranslations.Count > 0)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">中文名 @_jsonFieldTranslations.Count 项</MudText>
+                        }
+                        <MudButton Variant="Variant.Outlined"
+                                   Color="Color.Secondary"
+                                   Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.Translate"
+                                   Disabled="@(_parsedJson == null || _jsonFieldTranslationLoading)"
+                                   OnClick="CompleteJsonFieldTranslationsAsync">
+                            @(_jsonFieldTranslationLoading ? "补全中..." : "智能补全中文名")
+                        </MudButton>
                         <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@(_jsonEditorExpanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)" OnClick="@(() => _jsonEditorExpanded = !_jsonEditorExpanded)">
                             @(_jsonEditorExpanded ? "收起原始 JSON" : "展开原始 JSON")
                         </MudButton>
@@ -328,7 +353,17 @@ else
             </div>
             <MudPaper Outlined="true" Class="json-tree-shell" Style="flex:1 1 auto;min-height:0;display:flex;flex-direction:column;padding:8px;overflow:hidden;">
                 <div class="json-tree-scroll-body" style="flex:1 1 auto;min-height:0;overflow-y:auto;overflow-x:hidden;">
-                    <JsonTreeViewer JsonText="@_editableJson" MaxNodesToRender="0" MaxArrayItemsToRender="0" ShowSearch="true" UseArrayBrackets="@UseArrayBracketsInWorkbenchTree" PreferFirstArrayItemAsRoot="true" SelectedPath="@_selectedJsonTreePath" SelectionVersion="@_selectedJsonTreeVersion" OnPathSelected="OnJsonPathSelected" />
+                    <JsonTreeViewer JsonText="@_editableJson"
+                                    MaxNodesToRender="0"
+                                    MaxArrayItemsToRender="0"
+                                    ShowSearch="true"
+                                    UseArrayBrackets="@UseArrayBracketsInWorkbenchTree"
+                                    PreferFirstArrayItemAsRoot="true"
+                                    SelectedPath="@_selectedJsonTreePath"
+                                    SelectionVersion="@_selectedJsonTreeVersion"
+                                    FieldTranslations="@_jsonFieldTranslations"
+                                    OnTranslationEditRequested="BeginEditJsonFieldTranslation"
+                                    OnPathSelected="OnJsonPathSelected" />
                 </div>
             </MudPaper>
         </MudPaper>

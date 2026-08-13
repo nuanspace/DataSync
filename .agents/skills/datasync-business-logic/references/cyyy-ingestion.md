@@ -42,6 +42,8 @@
 - SQL 已显式包含 `@queryValue` 或 `:queryValue` 时，配置 SQL自行决定过滤位置。
 - Oracle `WITH` CTE 等未包含占位符的查询可在外层按任务配置的 `PatientIdField` 或 `VisitSnField` 过滤；最终结果必须含对应字段。
 - 修改过滤策略时同时检查 SQL Server、Oracle、数据湖和本地数据池路径，避免只修一个来源。
+- Active 病历入口使用 LHYY `/api/active-medical-records`，必须返回 JSON；仅配置服务根地址时客户端自动补全该路径，HTML 页面不得作为病例列表解析。
+- 单个 Active 补采任务遇到暂时无法连接或响应格式错误时，按任务轮询间隔重试，不中断同轮其他任务。
 
 ## 推送边界
 

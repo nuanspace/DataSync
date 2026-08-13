@@ -13,6 +13,7 @@ public partial class InterfaceWizardPage
 {
     [Inject] private BioCoreIntegrationService BioCoreService { get; set; } = default!;
     [Inject] private LlmService LlmService { get; set; } = default!;
+    [Inject] private JsonFieldTranslationService JsonFieldTranslationService { get; set; } = default!;
     [Inject] private ConfigService ConfigSvc { get; set; } = default!;
     [Inject] private InterfaceRecognitionService InterfaceRecognitionService { get; set; } = default!;
     [Inject] private IdempotentKeyService IdempotentKeyService { get; set; } = default!;
@@ -36,6 +37,12 @@ public partial class InterfaceWizardPage
     private string? _jsonValidationError;
     private bool _jsonEditorExpanded;
     private bool _projectDocumentsVisible;
+    private Dictionary<string, string> _jsonFieldTranslations = new(StringComparer.OrdinalIgnoreCase);
+    private bool _jsonFieldTranslationLoading;
+    private bool _jsonFieldTranslationEditVisible;
+    private string? _jsonFieldTranslationEditPath;
+    private string _jsonFieldTranslationEditValue = "";
+    private int _jsonFieldTranslationVersion;
 
     private int _existingMappingCount;
     private List<EsbFieldMapping> _existingMappings = [];
@@ -896,6 +903,7 @@ public partial class InterfaceWizardPage
         _selectedJsonTreePath = null;
         _selectedJsonTreeVersion = 0;
         _selectedQuestionField = null;
+        ResetJsonFieldTranslations();
     }
 
     private Task OnProjectDocumentsVisibleChanged(bool visible)
@@ -947,6 +955,7 @@ public partial class InterfaceWizardPage
         {
             _parsedJson = null;
             _jsonValidationError = null;
+            ResetJsonFieldTranslations();
             ResetSampleAnalysis();
             return;
         }
@@ -955,6 +964,8 @@ public partial class InterfaceWizardPage
         {
             _parsedJson = JToken.Parse(json);
             _jsonValidationError = null;
+            ResetJsonFieldTranslations();
+            _jsonFieldTranslations = JsonFieldTranslationService.BuildBuiltInTranslations(GetJsonTreeTranslationRoot());
             foreach (var row in _mappingRows)
             {
                 ValidateMappingRowPath(row);
@@ -965,8 +976,99 @@ public partial class InterfaceWizardPage
         {
             _parsedJson = null;
             _jsonValidationError = ex.Message.Length > 80 ? ex.Message[..80] + "..." : ex.Message;
+            ResetJsonFieldTranslations();
             ResetSampleAnalysis();
         }
+    }
+
+    private void ResetJsonFieldTranslations()
+    {
+        _jsonFieldTranslationVersion++;
+        _jsonFieldTranslations = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        _jsonFieldTranslationLoading = false;
+        _jsonFieldTranslationEditVisible = false;
+        _jsonFieldTranslationEditPath = null;
+        _jsonFieldTranslationEditValue = "";
+    }
+
+    private async Task CompleteJsonFieldTranslationsAsync()
+    {
+        if (_parsedJson == null || _jsonFieldTranslationLoading)
+        {
+            return;
+        }
+
+        var requestVersion = _jsonFieldTranslationVersion;
+        _jsonFieldTranslationLoading = true;
+        try
+        {
+            var beforeCount = _jsonFieldTranslations.Count;
+            var translations = await JsonFieldTranslationService.CompleteWithLlmAsync(
+                GetJsonTreeTranslationRoot(),
+                _jsonFieldTranslations,
+                CancellationToken);
+            if (requestVersion != _jsonFieldTranslationVersion)
+            {
+                return;
+            }
+
+            _jsonFieldTranslations = translations;
+            var addedCount = Math.Max(0, _jsonFieldTranslations.Count - beforeCount);
+            inj_snackbar.Add(
+                addedCount > 0 ? $"已智能补全 {addedCount} 个字段中文名称" : "没有需要补全的字段中文名称",
+                addedCount > 0 ? Severity.Success : Severity.Info);
+        }
+        catch (OperationCanceledException) when (CancellationToken.IsCancellationRequested)
+        {
+            // 页面离开时不提示错误。
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"智能补全中文名失败：{ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            if (requestVersion == _jsonFieldTranslationVersion)
+            {
+                _jsonFieldTranslationLoading = false;
+            }
+        }
+    }
+
+    private JToken GetJsonTreeTranslationRoot()
+    {
+        if (_parsedJson is JArray array
+            && array.Count > 0
+            && array[0] is JObject or JArray)
+        {
+            return array[0];
+        }
+
+        return _parsedJson!;
+    }
+
+    private Task BeginEditJsonFieldTranslation(string path)
+    {
+        var normalizedPath = JsonFieldTranslationService.NormalizePath(path);
+        _jsonFieldTranslationEditPath = normalizedPath;
+        _jsonFieldTranslationEditValue = _jsonFieldTranslations.TryGetValue(normalizedPath, out var currentValue)
+            ? currentValue
+            : "";
+        _jsonFieldTranslationEditVisible = true;
+        return Task.CompletedTask;
+    }
+
+    private void SaveJsonFieldTranslationEdit()
+    {
+        if (string.IsNullOrWhiteSpace(_jsonFieldTranslationEditPath)
+            || string.IsNullOrWhiteSpace(_jsonFieldTranslationEditValue))
+        {
+            return;
+        }
+
+        _jsonFieldTranslations[_jsonFieldTranslationEditPath] = _jsonFieldTranslationEditValue.Trim();
+        _jsonFieldTranslationEditVisible = false;
+        inj_snackbar.Add("中文名称已在当前页面更新，刷新页面后不会保留", Severity.Info);
     }
 
     private async Task RefreshSampleAnalysisAsync()

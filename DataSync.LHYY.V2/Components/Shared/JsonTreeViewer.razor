@@ -76,6 +76,10 @@
 
     [Parameter] public bool AllowValueWrap { get; set; }
 
+    [Parameter] public IReadOnlyDictionary<string, string>? FieldTranslations { get; set; }
+
+    [Parameter] public EventCallback<string> OnTranslationEditRequested { get; set; }
+
     private List<JsonTreeNode> _rootNodes = [];
     private string? _errorMessage;
     private string? _lastJsonText;
@@ -288,7 +292,8 @@
 
         return ContainsKeyword(node.Key, keyword)
             || ContainsKeyword(node.Path, keyword)
-            || ContainsKeyword(node.Value, keyword);
+            || ContainsKeyword(node.Value, keyword)
+            || ContainsKeyword(GetNodeTranslation(node), keyword);
     }
 
     private static bool ContainsKeyword(string? source, string keyword) =>
@@ -364,7 +369,7 @@
                 }
 
                 var path = string.IsNullOrEmpty(parentPath) ? prop.Name : $"{parentPath}.{prop.Name}";
-                var node = CreateNodeShell(prop.Name, path, prop.Value);
+                var node = CreateNodeShell(prop.Name, path, prop.Value, isField: true);
                 nodes.Add(node);
                 nodeCount++;
 
@@ -396,7 +401,7 @@
                     }
 
                     var path = $"{parentPath}[]";
-                    var node = CreateNodeShell("[*]", path, arr);
+                    var node = CreateNodeShell("[*]", path, arr, isField: false);
                     node.IsExpanded = true;
                     var firstItem = arr[0];
                     nodes.Add(node);
@@ -425,7 +430,7 @@
                     }
 
                     var path = $"{parentPath}[{i}]";
-                    var node = CreateNodeShell($"[{i}]", path, arr[i]);
+                    var node = CreateNodeShell($"[{i}]", path, arr[i], isField: false);
                     nodes.Add(node);
                     nodeCount++;
 
@@ -468,7 +473,7 @@
         return Math.Min(totalCount, MaxArrayItemsToRender);
     }
 
-    private JsonTreeNode CreateNodeShell(string key, string path, JToken value)
+    private JsonTreeNode CreateNodeShell(string key, string path, JToken value, bool isField)
     {
         var node = new JsonTreeNode
         {
@@ -476,6 +481,7 @@
             Path = path,
             NodeType = GetNodeType(value),
             DomId = $"json-tree-node-{Guid.NewGuid():N}",
+            IsField = isField,
         };
 
         if (value is JObject || value is JArray)
@@ -544,7 +550,7 @@
         var isExpanded = canExpand && IsNodeExpanded(node);
         var rowClass = BuildNodeRowClass(node);
         <div class="json-tree-node" role="treeitem" aria-expanded="@(canExpand ? isExpanded : (bool?)null)" aria-selected="@node.IsSelected">
-            <div id="@node.DomId" class="@rowClass" title="@node.Path" @onclick="@(async () => await OnNodeClicked(node))">
+            <div id="@node.DomId" class="@rowClass" title="@GetNodeTitle(node)" @onclick="@(async () => await OnNodeClicked(node))">
                 @if (canExpand)
                 {
                     <button type="button" class="json-tree-toggle" title="@(isExpanded ? "收起" : "展开")" @onclick="() => ToggleNode(node)" @onclick:stopPropagation="true">
@@ -559,6 +565,10 @@
                     <div class="json-tree-node-line">
                         <MudIcon Icon="@GetNodeIcon(node.NodeType)" Size="Size.Small" Class="json-tree-node-icon" />
                         <span class="json-tree-node-key">@node.Key</span>
+                        @if (!string.IsNullOrWhiteSpace(GetNodeTranslation(node)))
+                        {
+                            <span class="json-tree-node-translation">（@GetNodeTranslation(node)）</span>
+                        }
                         <span class="@GetNodeTypeClass(node.NodeType)">@GetNodeTypeText(node.NodeType)</span>
                         @if (isBranchNode)
                         {
@@ -570,6 +580,16 @@
                         else if (!string.IsNullOrEmpty(node.Value))
                         {
                             <span class="json-tree-node-value">@FormatNodeValue(node)</span>
+                        }
+                        @if (node.IsField && OnTranslationEditRequested.HasDelegate)
+                        {
+                            <button type="button"
+                                    class="json-tree-translation-edit"
+                                    title="临时修改中文名称"
+                                    @onclick="@(async () => await OnTranslationEditRequested.InvokeAsync(node.Path))"
+                                    @onclick:stopPropagation="true">
+                                <MudIcon Icon="@Icons.Material.Filled.Edit" Size="Size.Small" />
+                            </button>
                         }
                     </div>
                     @if (ShowPathInRow)
@@ -631,6 +651,27 @@
     private static string FormatNodeValue(JsonTreeNode node) =>
         node.NodeType == "String" ? $"\"{node.Value}\"" : node.Value ?? "";
 
+    private string? GetNodeTranslation(JsonTreeNode node)
+    {
+        if (!node.IsField || FieldTranslations == null)
+        {
+            return null;
+        }
+
+        var normalizedPath = JsonFieldTranslationService.NormalizePath(node.Path);
+        return FieldTranslations.TryGetValue(normalizedPath, out var translation)
+            ? translation
+            : null;
+    }
+
+    private string GetNodeTitle(JsonTreeNode node)
+    {
+        var translation = GetNodeTranslation(node);
+        return string.IsNullOrWhiteSpace(translation)
+            ? node.Path
+            : $"{node.Path}\n中文名称：{translation}";
+    }
+
     private static string GetScalarValueText(JToken value)
     {
         if (value.Type == JTokenType.Null)
@@ -655,6 +696,7 @@
         public string NodeType { get; set; } = "Unknown";
         public bool IsExpanded { get; set; }
         public bool IsSelected { get; set; }
+        public bool IsField { get; set; }
         public List<JsonTreeNode> Children { get; set; } = [];
     }
 }

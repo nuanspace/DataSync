@@ -196,6 +196,41 @@
     white-space: nowrap;
 }
 
+.json-tree-node-translation {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: #0f766e;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.json-tree-translation-edit {
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    margin-left: auto;
+    padding: 2px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: #64748b;
+    cursor: pointer;
+    opacity: 0;
+    transition: color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.json-tree-node-row:hover .json-tree-translation-edit,
+.json-tree-translation-edit:focus-visible {
+    opacity: 1;
+}
+
+.json-tree-translation-edit:hover {
+    background-color: #e0f2fe;
+    color: #0369a1;
+}
+
 .json-tree-node-value,
 .json-tree-node-meta {
     flex: 1 1 180px;

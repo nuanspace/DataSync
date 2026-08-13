@@ -31,9 +31,36 @@ public class ActiveMedicalRecordClient
         using var response = await client.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
 
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-        var items = ResolveItemsElement(doc.RootElement);
+        var responseText = await response.Content.ReadAsStringAsync(ct);
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (string.Equals(mediaType, "text/html", StringComparison.OrdinalIgnoreCase)
+            || responseText.AsSpan().TrimStart().StartsWith("<", StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "Active 病历接口返回了 HTML，预期为 JSON；请检查接口地址是否指向 /api/active-medical-records");
+        }
+
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(responseText);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"Active 病历接口返回内容不是有效 JSON（Content-Type: {mediaType ?? "未知"}）",
+                ex);
+        }
+
+        using (doc)
+        {
+            return ParseRecords(doc.RootElement, url);
+        }
+    }
+
+    private List<ActiveMedicalRecordInfo> ParseRecords(JsonElement root, string url)
+    {
+        var items = ResolveItemsElement(root);
         if (items.ValueKind != JsonValueKind.Array)
         {
             _logger.LogWarning("Active 病历接口返回格式不正确，地址 {Url}", url);
@@ -64,6 +91,7 @@ public class ActiveMedicalRecordClient
 
     private static string BuildUrl(ActiveSyncTask task)
     {
+        var activeRecordsUrl = NormalizeActiveRecordsUrl(task.ActiveRecordsUrl);
         var parameters = new List<string>
         {
             $"limit={Math.Max(1, task.CaseBatchSize)}"
@@ -72,8 +100,25 @@ public class ActiveMedicalRecordClient
         if (!string.IsNullOrWhiteSpace(task.IntegrationProjectCode))
             parameters.Add($"integrationProjectCode={Uri.EscapeDataString(task.IntegrationProjectCode)}");
 
-        var separator = task.ActiveRecordsUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return $"{task.ActiveRecordsUrl}{separator}{string.Join("&", parameters)}";
+        var separator = activeRecordsUrl.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return $"{activeRecordsUrl}{separator}{string.Join("&", parameters)}";
+    }
+
+    private static string NormalizeActiveRecordsUrl(string url)
+    {
+        var normalizedUrl = url.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var uri)
+            || !string.IsNullOrWhiteSpace(uri.AbsolutePath.Trim('/')))
+        {
+            return normalizedUrl;
+        }
+
+        var builder = new UriBuilder(uri)
+        {
+            Path = "/api/active-medical-records",
+            Fragment = ""
+        };
+        return builder.Uri.AbsoluteUri;
     }
 
     private static JsonElement ResolveItemsElement(JsonElement root)

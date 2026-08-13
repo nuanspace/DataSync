@@ -141,6 +141,7 @@ public class Program
             builder.Services.AddScoped<FilterRuleService>();
             builder.Services.AddScoped<MappingPreviewService>();
             builder.Services.AddScoped<MessageMappingPreviewService>();
+            builder.Services.AddScoped<JsonFieldTranslationService>();
             builder.Services.AddScoped<ConfigSyncService>();
             builder.Services.AddScoped<FollowUpPackageImportRepository>();
             builder.Services.AddScoped<IFollowUpRestoreCompletionReconciler>(sp =>

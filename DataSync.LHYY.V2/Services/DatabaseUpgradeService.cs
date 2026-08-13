@@ -40,6 +40,7 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
     private readonly FollowUpCubeOperationCoordinator _cubeOperationCoordinator;
     private readonly string _cubeConnectionKey;
     private Task? _managedScriptWorker;
+    private int _disposed;
 
     public DatabaseUpgradeService(
         IConfiguration configuration,
@@ -74,6 +75,9 @@ public sealed class DatabaseUpgradeService : IHostedService, IDisposable
 
     public void Dispose()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
         _serviceStoppingCts.Cancel();
         _serviceStoppingCts.Dispose();
         _stateLock.Dispose();

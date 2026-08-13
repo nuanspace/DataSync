@@ -14,6 +14,12 @@ namespace DataSync.LHYY.V2.Services;
 /// </summary>
 public class LlmService
 {
+    private static readonly IReadOnlyDictionary<string, string> KnownModelAliases =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["google/gemini-2.5-flash-lite-preview-09-2025"] = "google/gemini-2.5-flash-lite"
+        };
+
     private const int MaxJsonDepth = 5;
     private const int MaxArraySampleCount = 3;
     private const int MaxTypedArrayHintCount = 8;
@@ -540,9 +546,59 @@ public class LlmService
     }
 
     /// <summary>
+    /// 批量生成 JSON 源字段的中文展示名称。
+    /// 输入仅包含字段结构和经过脱敏的示例，结果不参与运行时映射。
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, string>> SuggestChineseFieldNamesAsync(
+        IReadOnlyList<JsonFieldTranslationCandidate> candidates,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var batch in candidates.Chunk(80))
+        {
+            var requestFields = batch.Select(candidate => new
+            {
+                path = candidate.Path,
+                fieldName = candidate.FieldName,
+                nodeType = candidate.NodeType,
+                sampleValue = candidate.SampleValue
+            });
+
+            var systemPrompt = """
+                你是医疗数据接口字段命名助手。请根据字段名、完整路径、节点类型和已经脱敏的示例值，
+                为每个技术字段生成简洁、准确、便于实施人员理解的中文名称。
+
+                规则：
+                1. 只翻译字段含义，不修改原字段名和 JSONPath。
+                2. 结合父级路径理解缩写；含义不确定时使用中性名称，不虚构业务语义。
+                3. 不复述、还原或猜测脱敏示例值。
+                4. 中文名称建议控制在 2～16 个汉字，可以保留 HIS、ICU 等通用缩写。
+                5. 只返回 JSON 数组，不要 Markdown 和解释文字。
+                6. 每项格式为：{"path":"原始路径","chineseName":"中文名称"}。
+                """;
+            var userPrompt = $"字段结构：\n{JsonSerializer.Serialize(requestFields)}";
+            var responseText = await CallLlmAsync(systemPrompt, userPrompt, ct, suppressContentLogging: true);
+            var allowedPaths = batch
+                .Select(candidate => candidate.Path)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (path, chineseName) in ParseChineseFieldTranslations(responseText, allowedPaths))
+            {
+                result[path] = chineseName;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// 调用 Ollama OpenAI 兼容 API
     /// </summary>
-    private async Task<string> CallLlmAsync(string systemPrompt, string userPrompt, CancellationToken ct)
+    private async Task<string> CallLlmAsync(
+        string systemPrompt,
+        string userPrompt,
+        CancellationToken ct,
+        bool suppressContentLogging = false)
     {
         var options = await GetEffectiveOptionsAsync();
         if (string.IsNullOrWhiteSpace(options.BaseUrl))
@@ -550,12 +606,18 @@ public class LlmService
             throw new InvalidOperationException("未配置 LLM BaseUrl");
         }
 
-        var url = $"{options.BaseUrl.TrimEnd('/')}/chat/completions";
-        _logger.LogInformation("LLM 请求: {Url}, Model: {Model}", url, options.Model);
+        var url = BuildChatCompletionsUrl(options.BaseUrl);
+        var model = NormalizeModelName(options.Model);
+        if (!string.Equals(model, options.Model, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning("LLM 模型配置使用了已停用别名，已自动切换到 {Model}", model);
+        }
+
+        _logger.LogInformation("LLM 请求: {Url}, Model: {Model}", url, model);
 
         var requestBody = new
         {
-            model = options.Model,
+            model,
             messages = new[]
             {
                 new { role = "system", content = systemPrompt },
@@ -584,6 +646,12 @@ public class LlmService
             responseJson = await response.Content.ReadAsStringAsync(timeoutCts.Token);
             if (!response.IsSuccessStatusCode)
             {
+                if (suppressContentLogging)
+                {
+                    _logger.LogError("LLM 敏感请求响应错误: {StatusCode}", response.StatusCode);
+                    throw new HttpRequestException($"LLM 返回 {(int)response.StatusCode}");
+                }
+
                 _logger.LogError("LLM 响应错误: {StatusCode}, Body: {Body}", response.StatusCode, responseJson);
                 throw new HttpRequestException($"LLM 返回 {(int)response.StatusCode}: {responseJson}");
             }
@@ -597,7 +665,14 @@ public class LlmService
             throw new TimeoutException($"LLM 请求超时（{options.TimeoutSeconds} 秒），请调高本地 LLM 超时时间或检查模型是否响应。", ex);
         }
 
-        _logger.LogDebug("LLM 原始响应: {Response}", responseJson.Length > 1000 ? responseJson[..1000] + "..." : responseJson);
+        if (suppressContentLogging)
+        {
+            _logger.LogDebug("LLM 敏感请求响应完成，响应长度: {Length}", responseJson.Length);
+        }
+        else
+        {
+            _logger.LogDebug("LLM 原始响应: {Response}", responseJson.Length > 1000 ? responseJson[..1000] + "..." : responseJson);
+        }
 
         using var doc = JsonDocument.Parse(responseJson);
         var messageContent = doc.RootElement
@@ -607,6 +682,97 @@ public class LlmService
             .GetString();
 
         return messageContent?.Trim() ?? "";
+    }
+
+    /// <summary>
+    /// 兼容服务根地址、OpenAI v1 基础地址和完整聊天补全地址。
+    /// </summary>
+    internal static string BuildChatCompletionsUrl(string baseUrl)
+    {
+        var normalizedBaseUrl = baseUrl.Trim().TrimEnd('/');
+        if (normalizedBaseUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        {
+            return normalizedBaseUrl;
+        }
+
+        if (normalizedBaseUrl.EndsWith("/v1", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{normalizedBaseUrl}/chat/completions";
+        }
+
+        if (Uri.TryCreate(normalizedBaseUrl, UriKind.Absolute, out var baseUri)
+            && string.IsNullOrWhiteSpace(baseUri.AbsolutePath.Trim('/')))
+        {
+            return $"{normalizedBaseUrl}/v1/chat/completions";
+        }
+
+        if (baseUri != null
+            && baseUri.Host.EndsWith("openrouter.ai", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(baseUri.AbsolutePath.TrimEnd('/'), "/api", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"{normalizedBaseUrl}/v1/chat/completions";
+        }
+
+        // 带有自定义代理路径时保持原有拼接规则，避免破坏 /api/v3 等兼容服务。
+        return $"{normalizedBaseUrl}/chat/completions";
+    }
+
+    internal static string NormalizeModelName(string model)
+    {
+        var normalizedModel = model.Trim();
+        return KnownModelAliases.TryGetValue(normalizedModel, out var replacement)
+            ? replacement
+            : normalizedModel;
+    }
+
+    internal static IReadOnlyDictionary<string, string> ParseChineseFieldTranslations(
+        string responseText,
+        IReadOnlySet<string> allowedPaths)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var startIndex = responseText.IndexOf('[');
+        var endIndex = responseText.LastIndexOf(']');
+        if (startIndex < 0 || endIndex <= startIndex)
+        {
+            return result;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseText[startIndex..(endIndex + 1)]);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return result;
+            }
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                var path = item.TryGetProperty("path", out var pathProperty)
+                    ? pathProperty.GetString()?.Trim()
+                    : null;
+                var chineseName = item.TryGetProperty("chineseName", out var nameProperty)
+                    ? nameProperty.GetString()?.Trim()
+                    : null;
+
+                if (string.IsNullOrWhiteSpace(path)
+                    || string.IsNullOrWhiteSpace(chineseName)
+                    || !allowedPaths.Contains(path)
+                    || chineseName.Length > 40
+                    || chineseName.Contains('\r')
+                    || chineseName.Contains('\n'))
+                {
+                    continue;
+                }
+
+                result[path] = chineseName;
+            }
+        }
+        catch (JsonException)
+        {
+            return result;
+        }
+
+        return result;
     }
 
     private async Task<LlmOptions> GetEffectiveOptionsAsync()
