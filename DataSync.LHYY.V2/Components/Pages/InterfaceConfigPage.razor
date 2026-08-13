@@ -126,6 +126,13 @@
     </div>
 }
 
+<HtmlManualTestDialog Visible="_htmlManualTestVisible"
+                      VisibleChanged="value => _htmlManualTestVisible = value"
+                      Profile="_editHtmlProfile"
+                      Rules="_editHtmlExtractionRules"
+                      MainRecordArrayPath="@(_editItem?.MainRecordArrayPath)"
+                      OnApply="ApplyHtmlManualTestResult" />
+
 <OcrFieldSelectorDialog Visible="_ocrFieldSelectorVisible"
                         VisibleChanged="value => _ocrFieldSelectorVisible = value"
                         PreviewResult="_ocrPreviewResult"
@@ -236,6 +243,9 @@
     private List<EsbIdempotentKeyPart> _editIdempotentKeyParts = [];
     private EsbOcrProfile _editOcrProfile = new();
     private List<OcrExtractionRule> _editOcrExtractionRules = [];
+    private EsbHtmlProfile _editHtmlProfile = new();
+    private List<HtmlExtractionRule> _editHtmlExtractionRules = [];
+    private bool _htmlManualTestVisible;
     private List<EsbMessageListItem> _ocrSampleMessages = [];
     private long? _selectedOcrSampleMessageId;
     private EsbMessage? _selectedOcrSampleMessage;
@@ -275,7 +285,10 @@
     private bool _openWizardAfterCreateFromMessageSave;
 
     // 路径选取目标枚举（与 MappingEditDialog 模式一致）
-    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, CombinedVisitIdentity, SourceMessageId, MainRecordArray, OcrSource, FilterRule, MatchRule, IdempotentKeyPart }
+
+
+    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, SourceMessageId, MainRecordArray, OcrSource, HtmlSource, FilterRule, MatchRule, IdempotentKeyPart }
+
     private enum EventIdentityModeOption
     {
         RequireEventTime,
@@ -295,6 +308,7 @@
     private int _selectedJsonTreeVersion;
     private bool _advancedExpanded;
     private bool _ocrExpanded;
+    private bool _htmlExpanded;
     private bool _dedupeExpanded;
     private bool _webServiceExpanded;
     private bool _recognitionExpanded;
@@ -303,12 +317,13 @@
     // 当前编辑项是否有 SampleJson
     private bool _hasSampleJson => !string.IsNullOrWhiteSpace(_editItem?.SampleJson);
     private bool _supportsEventIdentity => _editItem != null
-        && (RequiresEventStartTimePath(_editItem.HandlerType) || _isOcrHandler);
+        && (RequiresEventStartTimePath(_editItem.HandlerType) || _isOcrHandler || _isHtmlHandler);
     private bool _showVisitIdentityFields => _supportsEventIdentity;
     private bool _isMrnPathRequired => _editItem?.HandlerType != HandlerType.GenericQuestionWriteBack &&
                                        (_editItem?.HandlerType != HandlerType.Generic ||
                                         string.IsNullOrWhiteSpace(_editItem.CombinedVisitIdentitySourcePath));
     private bool _isOcrHandler => OcrProfileService.IsOcrHandler(_editItem);
+    private bool _isHtmlHandler => HtmlProfileService.IsHtmlHandler(_editItem);
     private string EnabledTabText => $"启用接口 ({_enabledItems.Count})";
     private string DisabledTabText => $"未启用接口 ({_disabledItems.Count})";
 
@@ -386,6 +401,7 @@
     {
         _advancedExpanded = false;
         _ocrExpanded = _isOcrHandler && (hasExistingAdvancedConfig || _editOcrExtractionRules.Count > 0);
+        _htmlExpanded = _isHtmlHandler && (hasExistingAdvancedConfig || _editHtmlExtractionRules.Count > 0);
         _dedupeExpanded = false;
         _webServiceExpanded = _editItem?.SoapEnabled == true;
         _recognitionExpanded = hasExistingAdvancedConfig && _editMatchRules.Count > 0;
@@ -408,6 +424,7 @@
             PathPickTarget.SourceMessageId => "当前正在为上游消息号路径选取节点。",
             PathPickTarget.MainRecordArray => "当前正在为主记录数组路径选取节点，请尽量点击数组节点。",
             PathPickTarget.OcrSource => "当前正在为 OCR 的 PDF 来源路径选取节点。",
+            PathPickTarget.HtmlSource => "当前正在为 HTML 的 Base64 来源路径选取节点。",
             PathPickTarget.FilterRule => $"当前正在为过滤规则 #{_pickFilterRuleIndex + 1} 选取源路径。",
             PathPickTarget.MatchRule => $"当前正在为识别规则 #{_pickMatchRuleIndex + 1} 选取源路径。",
             PathPickTarget.IdempotentKeyPart => $"当前正在为幂等键片段 #{_pickIdempotentKeyPartIndex + 1} 选取源路径。",
@@ -704,6 +721,17 @@
                                               OnManageFields="OpenOcrRulesDialog" />
                         </MudExpansionPanel>
                     }
+                    @if (_isHtmlHandler)
+                    {
+                        <MudExpansionPanel Text="HTML 文本与字段提取" Icon="@Icons.Material.Filled.Article" @bind-Expanded="_htmlExpanded">
+                            <HtmlProfileEditor Profile="_editHtmlProfile"
+                                               Rules="_editHtmlExtractionRules"
+                                               SourcePathPickEnabled="_hasSampleJson"
+                                               SourcePathPickActive="@(_pathPickTarget == PathPickTarget.HtmlSource)"
+                                               OnSourcePathPickActivated="@(() => ActivatePathPickTarget(PathPickTarget.HtmlSource))"
+                                               OnManualTest="@(() => _htmlManualTestVisible = true)" />
+                        </MudExpansionPanel>
+                    }
                     <MudExpansionPanel Text="去重与批量" Icon="@Icons.Material.Filled.ContentCopy" @bind-Expanded="_dedupeExpanded">
                         <MudGrid Class="mt-1">
                     <MudItem xs="12" sm="6">
@@ -889,6 +917,7 @@
         _editMatchRules = [];
         _editIdempotentKeyParts = [];
         ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
+        ResetHtmlProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
         ResetPathPickState();
         PrepareDialogLayout();
         _isNew = true;
@@ -962,6 +991,7 @@
             _editMatchRules = [];
             _editIdempotentKeyParts = [];
             ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
+            ResetHtmlProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
             ResetPathPickState();
             PrepareDialogLayout();
             _isNew = true;
@@ -1495,6 +1525,137 @@
             root["Ocr"] = ocrResult;
     }
 
+    private void ApplyHtmlManualTestResult(HtmlManualTestApplyRequest request)
+    {
+        if (_editItem == null)
+            return;
+
+        var addedRuleCount = Math.Max(0, request.Rules.Count - _editHtmlExtractionRules.Count);
+        _editHtmlExtractionRules = request.Rules;
+        PrepareHtmlExtractionRules();
+
+        var templateRoot = BuildHtmlTemplateRoot(request.Input);
+        List<JToken> templateRecords;
+        try
+        {
+            templateRecords = HtmlManualTestService.ResolveRecords(templateRoot, _editItem.MainRecordArrayPath);
+        }
+        catch (InvalidDataException ex)
+        {
+            inj_snackbar.Add($"更新 HTML 消息模板失败：{ex.Message}", Severity.Error);
+            return;
+        }
+
+        for (var index = 0; index < templateRecords.Count; index++)
+        {
+            if (templateRecords[index] is not JObject record)
+                continue;
+
+            var sourceToken = MessageJsonHelper.ResolveScopedToken(
+                templateRoot,
+                record,
+                _editHtmlProfile.SourcePath,
+                record);
+            if (sourceToken is JValue { Type: JTokenType.String })
+                sourceToken.Replace(new JValue("[HTML Base64 内容已省略]"));
+
+            var extraction = request.Result.Items.ElementAtOrDefault(index)?.Extraction;
+            record["Html"] = BuildHtmlTemplatePayload(extraction, _editHtmlExtractionRules);
+        }
+
+        MessageJsonHelper.SanitizeLargeStringValues(templateRoot);
+        _editItem.SampleJson = templateRoot.ToString(Newtonsoft.Json.Formatting.Indented);
+        _selectedJsonTreeVersion++;
+        ResetPathPickState();
+        inj_snackbar.Add($"已新增 {addedRuleCount} 个 HTML 字段，并更新消息模板", Severity.Success);
+    }
+
+    private JToken BuildHtmlTemplateRoot(string input)
+    {
+        var trimmed = input.Trim();
+        if (MessageJsonHelper.TryParseToken(trimmed, out var inputRoot, out _))
+        {
+            // 直接粘贴 FBC-027 原始响应只用于手工解析。若正式接口已配置主记录数组，
+            // 优先保留与该路径匹配的组合消息模板，避免应用候选字段后退化成 027 根数组。
+            if (InputMatchesConfiguredMainRecordPath(inputRoot))
+                return inputRoot.DeepClone();
+
+            if (TryGetCurrentHtmlTemplateRoot(out var currentTemplateRoot))
+                return currentTemplateRoot.DeepClone();
+
+            return inputRoot.DeepClone();
+        }
+
+        if (TryGetCurrentHtmlTemplateRoot(out var sampleRoot))
+            return sampleRoot.DeepClone();
+
+        return new JObject
+        {
+            ["FILE_CONTENT"] = "[HTML Base64 内容已省略]"
+        };
+    }
+
+    private bool InputMatchesConfiguredMainRecordPath(JToken inputRoot)
+    {
+        var mainRecordArrayPath = SubCardPathHelper.NormalizeArrayContainerPath(_editItem?.MainRecordArrayPath);
+        if (string.IsNullOrWhiteSpace(mainRecordArrayPath))
+            return true;
+
+        var selected = MessageJsonHelper.SafeSelectToken(inputRoot, mainRecordArrayPath);
+        return selected is JArray
+            || SubCardPathHelper.IsRootContainerPath(mainRecordArrayPath) && selected is JObject;
+    }
+
+    private bool TryGetCurrentHtmlTemplateRoot(out JToken root)
+    {
+        if (MessageJsonHelper.TryParseToken(_editItem?.SampleJson ?? "", out root, out _)
+            && InputMatchesConfiguredMainRecordPath(root))
+        {
+            return true;
+        }
+
+        root = JValue.CreateNull();
+        return false;
+    }
+
+    private static JObject BuildHtmlTemplatePayload(
+        HtmlExtractionResult? extraction,
+        IReadOnlyList<HtmlExtractionRule> rules)
+    {
+        var sections = extraction == null
+            ? new JObject()
+            : JObject.FromObject(extraction.Sections);
+        var extractedFields = new JObject();
+        foreach (var rule in rules)
+        {
+            var fieldCode = rule.FieldCode.Trim();
+            extractedFields[fieldCode] = extraction?.ExtractedFields.TryGetValue(fieldCode, out var value) == true
+                && value != null
+                    ? new JValue(value)
+                    : JValue.CreateNull();
+        }
+
+        return new JObject
+        {
+            ["Mode"] = "Fields",
+            ["Sections"] = sections,
+            ["ExtractedFields"] = extractedFields
+        };
+    }
+
+    private void PrepareHtmlExtractionRules()
+    {
+        for (var index = 0; index < _editHtmlExtractionRules.Count; index++)
+        {
+            var rule = _editHtmlExtractionRules[index];
+            rule.FieldCode = rule.FieldCode.Trim();
+            rule.SourceSection = string.IsNullOrWhiteSpace(rule.SourceSection) ? null : rule.SourceSection.Trim();
+            rule.SourceLabel = string.IsNullOrWhiteSpace(rule.SourceLabel) ? null : rule.SourceLabel.Trim();
+            rule.Pattern = string.IsNullOrWhiteSpace(rule.Pattern) ? null : rule.Pattern.Trim();
+            rule.SortOrder = index;
+        }
+    }
+
     private bool IsOcrSampleForCurrentInterface(EsbMessage message)
     {
         var currentTranCode = _editItem?.TranCode;
@@ -1518,6 +1679,7 @@
         _editMatchRules = [];
         _editIdempotentKeyParts = [];
         ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
+        ResetHtmlProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
         ResetPathPickState();
         PrepareDialogLayout();
         _isNew = true;
@@ -1593,6 +1755,7 @@
             .OrderBy(p => p.SortOrder)
             .ToListAsync();
         await LoadOcrProfileAsync(db, item.TranCode, item.IntegrationProjectCode);
+        await LoadHtmlProfileAsync(db, item.TranCode, item.IntegrationProjectCode);
         NormalizeOcrReceiveMode();
 
         // 级联加载事件类型
@@ -1623,6 +1786,68 @@
         };
         _editOcrExtractionRules = [];
         ResetOcrPreviewState();
+    }
+
+    private void ResetHtmlProfile(string? tranCode, string? integrationProjectCode)
+    {
+        _editHtmlProfile = new EsbHtmlProfile
+        {
+            TranCode = tranCode ?? "",
+            IntegrationProjectCode = integrationProjectCode,
+            IsEnabled = true,
+            SourcePath = "$main.FILE_CONTENT",
+            MaxInputBytes = HtmlProfileService.DefaultMaxInputBytes,
+            PreserveSections = true,
+            SectionHeadings = HtmlProfileService.DefaultSectionHeadingsText
+        };
+        _editHtmlExtractionRules = [];
+    }
+
+    private async Task LoadHtmlProfileAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var profiles = await db.EsbHtmlProfiles
+            .AsNoTracking()
+            .Where(profile => profile.TranCode == tranCode
+                && (profile.IntegrationProjectCode == integrationProjectCode || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync();
+        var profile = profiles.FirstOrDefault(item => string.Equals(
+                item.IntegrationProjectCode,
+                integrationProjectCode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(item => string.IsNullOrWhiteSpace(item.IntegrationProjectCode));
+        if (profile == null)
+        {
+            ResetHtmlProfile(tranCode, integrationProjectCode);
+            return;
+        }
+
+        var isProjectProfile = string.Equals(profile.IntegrationProjectCode, integrationProjectCode, StringComparison.OrdinalIgnoreCase);
+        _editHtmlProfile = new EsbHtmlProfile
+        {
+            Id = isProjectProfile ? profile.Id : 0,
+            TranCode = profile.TranCode,
+            IntegrationProjectCode = integrationProjectCode,
+            ProfileName = profile.ProfileName,
+            IsEnabled = profile.IsEnabled,
+            SourcePath = profile.SourcePath,
+            MaxInputBytes = profile.MaxInputBytes,
+            PreserveSections = profile.PreserveSections,
+            SectionHeadings = profile.SectionHeadings,
+            ExtractionRules = profile.ExtractionRules,
+            Description = profile.Description,
+            CreatedAt = profile.CreatedAt,
+            UpdatedAt = profile.UpdatedAt
+        };
+        try
+        {
+            _editHtmlExtractionRules = HtmlProfileService.DeserializeExtractionRules(profile.ExtractionRules);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _editHtmlExtractionRules = [];
+            inj_snackbar.Add($"HTML 字段提取规则解析失败: {ex.Message}", Severity.Error);
+        }
     }
 
     private void ResetOcrPreviewState()
@@ -1936,6 +2161,7 @@
             PathPickTarget.SourceMessageId => _editItem.SourceMessageIdPath,
             PathPickTarget.MainRecordArray => _editItem.MainRecordArrayPath,
             PathPickTarget.OcrSource => _editOcrProfile.SourcePath,
+            PathPickTarget.HtmlSource => _editHtmlProfile.SourcePath,
             PathPickTarget.FilterRule when targetIndex >= 0 && targetIndex < _editFilterRules.Count => _editFilterRules[targetIndex].SourcePath,
             PathPickTarget.MatchRule when targetIndex >= 0 && targetIndex < _editMatchRules.Count => _editMatchRules[targetIndex].SourcePath,
             PathPickTarget.IdempotentKeyPart when targetIndex >= 0 && targetIndex < _editIdempotentKeyParts.Count => _editIdempotentKeyParts[targetIndex].SourcePath,
@@ -2010,6 +2236,9 @@
             case PathPickTarget.OcrSource:
                 _editOcrProfile.SourcePath = normalizedPath;
                 break;
+            case PathPickTarget.HtmlSource:
+                _editHtmlProfile.SourcePath = normalizedPath;
+                break;
             case PathPickTarget.FilterRule:
                 if (_pickFilterRuleIndex >= 0 && _pickFilterRuleIndex < _editFilterRules.Count)
                     _editFilterRules[_pickFilterRuleIndex].SourcePath = normalizedPath;
@@ -2079,6 +2308,30 @@
                 _editOcrProfile.SourcePath = NormalizePickedPath(_editOcrProfile.SourcePath) ?? "";
                 _editOcrProfile.ExtractionRules = OcrProfileService.SerializeExtractionRules(_editOcrExtractionRules);
                 RebuildOcrSampleJson();
+            }
+
+            if (_isHtmlHandler)
+            {
+                _editHtmlProfile.SourcePath = NormalizePickedPath(_editHtmlProfile.SourcePath);
+                _editHtmlExtractionRules = _editHtmlExtractionRules
+                    .Select((rule, index) =>
+                    {
+                        rule.FieldCode = rule.FieldCode?.Trim() ?? "";
+                        rule.SourceSection = string.IsNullOrWhiteSpace(rule.SourceSection) ? null : rule.SourceSection.Trim();
+                        rule.SourceLabel = string.IsNullOrWhiteSpace(rule.SourceLabel) ? null : rule.SourceLabel.Trim();
+                        rule.Pattern = string.IsNullOrWhiteSpace(rule.Pattern) ? null : rule.Pattern.Trim();
+                        rule.SortOrder = index;
+                        return rule;
+                    })
+                    .ToList();
+                var htmlErrors = HtmlProfileService.ValidateProfile(_editHtmlProfile, _editHtmlExtractionRules, _editItem.IsEnabled);
+                if (htmlErrors.Count > 0)
+                {
+                    foreach (var error in htmlErrors)
+                        inj_snackbar.Add(error, Severity.Error);
+                    return;
+                }
+                _editHtmlProfile.ExtractionRules = HtmlProfileService.SerializeExtractionRules(_editHtmlExtractionRules);
             }
 
             // 启用时校验关键路径
@@ -2182,6 +2435,8 @@
             await SyncIdempotentKeyPartsAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
             if (_isOcrHandler)
                 await SyncOcrProfileAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
+            if (_isHtmlHandler)
+                await SyncHtmlProfileAsync(db, _editItem.TranCode, _editItem.IntegrationProjectCode);
 
             await transaction.CommitAsync();
             _isNew = false;
@@ -2280,6 +2535,7 @@
             _editMatchRules = [];
             _editIdempotentKeyParts = [];
             ResetOcrProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
+            ResetHtmlProfile(_editItem.TranCode, _editItem.IntegrationProjectCode);
             ResetPathPickState();
             PrepareDialogLayout();
             _isNew = true;
@@ -2543,6 +2799,36 @@
         _editOcrProfile.Id = profile.Id;
     }
 
+    private async Task SyncHtmlProfileAsync(DataSyncDbContext db, string tranCode, string? integrationProjectCode)
+    {
+        var profile = _editHtmlProfile.Id > 0
+            ? await db.EsbHtmlProfiles.FindAsync(_editHtmlProfile.Id)
+            : await db.EsbHtmlProfiles
+                .Where(item => item.TranCode == tranCode && item.IntegrationProjectCode == integrationProjectCode)
+                .OrderBy(item => item.Id)
+                .FirstOrDefaultAsync();
+        if (profile == null)
+        {
+            profile = new EsbHtmlProfile { CreatedAt = DateTime.Now };
+            db.EsbHtmlProfiles.Add(profile);
+        }
+
+        profile.TranCode = tranCode;
+        profile.IntegrationProjectCode = integrationProjectCode;
+        profile.ProfileName = _editHtmlProfile.ProfileName;
+        profile.IsEnabled = _editHtmlProfile.IsEnabled;
+        profile.SourcePath = _editHtmlProfile.SourcePath;
+        profile.MaxInputBytes = _editHtmlProfile.MaxInputBytes;
+        profile.PreserveSections = _editHtmlProfile.PreserveSections;
+        profile.SectionHeadings = _editHtmlProfile.SectionHeadings;
+        profile.ExtractionRules = _editHtmlProfile.ExtractionRules;
+        profile.Description = _editHtmlProfile.Description;
+        profile.UpdatedAt = DateTime.Now;
+
+        await db.SaveChangesAsync();
+        _editHtmlProfile.Id = profile.Id;
+    }
+
     private async Task Delete(EsbInterfaceConfig item)
     {
         var confirmed = await inj_dialogService.ShowMessageBox("确认删除",
@@ -2565,10 +2851,15 @@
                 var oldIdempotentParts = await db.EsbIdempotentKeyParts
                     .Where(p => p.TranCode == item.TranCode && p.IntegrationProjectCode == item.IntegrationProjectCode)
                     .ToListAsync();
+                var oldHtmlProfiles = await db.EsbHtmlProfiles
+                    .Where(profile => profile.TranCode == item.TranCode
+                        && profile.IntegrationProjectCode == item.IntegrationProjectCode)
+                    .ToListAsync();
 
                 db.EsbFilterRules.RemoveRange(oldFilterRules);
                 db.EsbInterfaceMatchRules.RemoveRange(oldMatchRules);
                 db.EsbIdempotentKeyParts.RemoveRange(oldIdempotentParts);
+                db.EsbHtmlProfiles.RemoveRange(oldHtmlProfiles);
                 db.EsbInterfaceConfigs.Remove(entity);
                 await db.SaveChangesAsync();
                 ConfigSvc.ClearCache();
@@ -2604,6 +2895,8 @@
                 var errors = ConfigSvc.ValidateInterfaceConfig(entity);
                 if (OcrProfileService.IsOcrHandler(entity))
                     errors.AddRange(await ValidateStoredOcrProfileAsync(db, entity));
+                if (HtmlProfileService.IsHtmlHandler(entity))
+                    errors.AddRange(await ValidateStoredHtmlProfileAsync(db, entity));
 
                 if (errors.Count > 0)
                 {
@@ -2657,6 +2950,37 @@
         catch (System.Text.Json.JsonException ex)
         {
             return [$"OCR 字段提取规则解析失败：{ex.Message}"];
+        }
+    }
+
+    private static async Task<List<string>> ValidateStoredHtmlProfileAsync(
+        DataSyncDbContext db,
+        EsbInterfaceConfig config)
+    {
+        var profiles = await db.EsbHtmlProfiles
+            .AsNoTracking()
+            .Where(profile => profile.IsEnabled
+                && profile.TranCode == config.TranCode
+                && (profile.IntegrationProjectCode == config.IntegrationProjectCode
+                    || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync();
+        var profile = profiles.FirstOrDefault(item => string.Equals(
+                item.IntegrationProjectCode,
+                config.IntegrationProjectCode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(item => string.IsNullOrWhiteSpace(item.IntegrationProjectCode));
+        if (profile == null)
+            return ["未找到启用的 HTML 配置"];
+
+        try
+        {
+            var rules = HtmlProfileService.DeserializeExtractionRules(profile.ExtractionRules);
+            return HtmlProfileService.ValidateProfile(profile, rules).ToList();
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return [$"HTML 字段提取规则解析失败：{ex.Message}"];
         }
     }
 }

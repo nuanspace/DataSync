@@ -25,6 +25,7 @@ public class DataSyncDbContext : DbContext
     public DbSet<EsbIntegrationProjectConfig> EsbIntegrationProjectConfigs => Set<EsbIntegrationProjectConfig>();
     public DbSet<EsbIntegrationProjectDocument> EsbIntegrationProjectDocuments => Set<EsbIntegrationProjectDocument>();
     public DbSet<EsbOcrProfile> EsbOcrProfiles => Set<EsbOcrProfile>();
+    public DbSet<EsbHtmlProfile> EsbHtmlProfiles => Set<EsbHtmlProfile>();
     public DbSet<EsbMessageListItem> EsbMessageListItems => Set<EsbMessageListItem>();
     public DbSet<ActiveMedicalRecord> ActiveMedicalRecords => Set<ActiveMedicalRecord>();
 
@@ -187,6 +188,13 @@ public class DataSyncDbContext : DbContext
         });
 
         modelBuilder.Entity<EsbOcrProfile>(e =>
+        {
+            e.HasIndex(p => p.TranCode);
+            e.HasIndex(p => p.IntegrationProjectCode);
+            e.HasIndex(p => new { p.IntegrationProjectCode, p.TranCode });
+        });
+
+        modelBuilder.Entity<EsbHtmlProfile>(e =>
         {
             e.HasIndex(p => p.TranCode);
             e.HasIndex(p => p.IntegrationProjectCode);

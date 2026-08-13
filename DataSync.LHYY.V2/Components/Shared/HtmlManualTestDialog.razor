@@ -1,0 +1,280 @@
+@if (Visible)
+{
+    <div class="html-manual-test-overlay" @onclick="CloseAsync">
+        <div class="html-manual-test-modal" @onclick:stopPropagation="true">
+            <div class="html-manual-test-header">
+                <div>
+                    <MudText Typo="Typo.h6">HTML 手工解析测试</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">粘贴医院响应或单独 Base64，使用当前草稿规则执行只读测试。</MudText>
+                </div>
+                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                               Disabled="_testing" OnClick="CloseAsync" />
+            </div>
+            <div class="html-manual-test-body">
+                <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-3">
+                    测试内容只保存在当前页面内存中，不创建消息、不执行字段映射、不写业务表，关闭弹窗后立即清除。
+                </MudAlert>
+                <MudTextField @bind-Value="_input"
+                              Label="医院接口响应 JSON 或 FILE_CONTENT Base64"
+                              Placeholder="可粘贴完整 JSON 对象、JSON 数组，或只粘贴 FILE_CONTENT 的 Base64 内容"
+                              Variant="Variant.Outlined"
+                              Lines="12"
+                              Disabled="_testing" />
+                <div class="d-flex align-center mt-3 mb-3">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.PlayArrow"
+                               Disabled="_testing || string.IsNullOrWhiteSpace(_input)"
+                               OnClick="RunAsync">
+                        @(_testing ? "解析中..." : "执行解析测试")
+                    </MudButton>
+                    <MudButton Variant="Variant.Text" Color="Color.Default" Class="ml-2"
+                               Disabled="_testing" OnClick="Clear">
+                        清空
+                    </MudButton>
+                    @if (_result != null)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-4">
+                            输入类型：@_result.InputMode；记录数：@_result.Items.Count；
+                            成功：@_result.Items.Count(item => item.IsSuccess)；
+                            失败：@_result.Items.Count(item => !item.IsSuccess)
+                        </MudText>
+                    }
+                </div>
+                @if (_testing)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Info" Class="mb-3" />
+                }
+                @if (!string.IsNullOrWhiteSpace(_error))
+                {
+                    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@_error</MudAlert>
+                }
+                @if (_result != null)
+                {
+                    <MudPaper Outlined="true" Class="pa-3 mb-3">
+                        <div class="d-flex align-center flex-wrap gap-2 mb-2">
+                            <div>
+                                <MudText Typo="Typo.subtitle2">字段候选（@_candidates.Count）</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    章节生成完整章节规则，“标题：值”生成标题值规则；已有同名字段不会被覆盖。
+                                </MudText>
+                            </div>
+                            <MudSpacer />
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(!HasSelectableCandidates)"
+                                       OnClick="SelectAllCandidates">全选未配置字段</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="@(!HasSelectedCandidates)"
+                                       OnClick="ClearCandidateSelection">清除选择</MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.PlaylistAddCheck"
+                                       Disabled="_testing || !HasSelectedCandidates" OnClick="ApplySelectedAsync">
+                                应用到字段明细（@SelectedCandidateCount）
+                            </MudButton>
+                        </div>
+                        @if (_candidates.Count == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Dense="true">当前结果中没有发现可配置的章节或“标题：值”。</MudAlert>
+                        }
+                        else
+                        {
+                            <div class="html-field-candidate-list">
+                                @foreach (var candidate in _candidates)
+                                {
+                                    <div class="html-field-candidate-row" @key="candidate.FieldCode">
+                                        <MudCheckBox T="bool" Value="candidate.IsSelected"
+                                                     ValueChanged="value => candidate.IsSelected = value"
+                                                     Dense="true" Disabled="candidate.IsConfigured" />
+                                        <div class="html-field-candidate-name">
+                                            <MudText Typo="Typo.body2">@candidate.FieldCode</MudText>
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                @GetCandidateTypeText(candidate)@GetCandidateSourceText(candidate)
+                                            </MudText>
+                                        </div>
+                                        <MudText Typo="Typo.caption" Class="html-field-candidate-value">
+                                            @GetCandidatePreview(candidate)
+                                        </MudText>
+                                        @if (candidate.IsConfigured)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">已配置</MudChip>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </MudPaper>
+                    <MudExpansionPanels MultiExpansion="true">
+                        @foreach (var item in _result.Items)
+                        {
+                            <MudExpansionPanel Text="@GetRecordTitle(item)" Expanded="@(_result.Items.Count == 1)">
+                                @if (!string.IsNullOrWhiteSpace(item.ErrorMessage))
+                                {
+                                    <MudAlert Severity="Severity.Error" Dense="true" Class="mb-3">@item.ErrorMessage</MudAlert>
+                                }
+                                @if (item.Extraction != null)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
+                                        编码：@item.Extraction.EncodingName；文本长度：@item.Extraction.TextLength；
+                                        章节数：@item.Extraction.Sections.Count；字段数：@item.Extraction.ExtractedFields.Count；
+                                        耗时：@item.ElapsedMs ms
+                                    </MudText>
+                                    <MudTabs Elevation="0" Rounded="false" ApplyEffectsToContainer="false" PanelClass="pt-3">
+                                        <MudTabPanel Text="清洗后的文本">
+                                            <pre class="html-cleaned-text">@BuildCompactText(item.Extraction.CleanedText)</pre>
+                                        </MudTabPanel>
+                                        <MudTabPanel Text="Sections">
+                                            <MudTextField Value="@BuildSectionsJson(item.Extraction)" ReadOnly="true"
+                                                          Variant="Variant.Outlined" Lines="18" />
+                                        </MudTabPanel>
+                                        <MudTabPanel Text="ExtractedFields">
+                                            <MudTextField Value="@BuildFieldsJson(item.Extraction)" ReadOnly="true"
+                                                          Variant="Variant.Outlined" Lines="18" />
+                                        </MudTabPanel>
+                                    </MudTabs>
+                                }
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+                }
+            </div>
+            <div class="html-manual-test-actions">
+                <MudButton Disabled="_testing" OnClick="CloseAsync">关闭并清除</MudButton>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Inject] private HtmlManualTestService ManualTestService { get; set; } = default!;
+
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter, EditorRequired] public EsbHtmlProfile Profile { get; set; } = new();
+    [Parameter] public IReadOnlyList<HtmlExtractionRule> Rules { get; set; } = [];
+    [Parameter] public string? MainRecordArrayPath { get; set; }
+    [Parameter] public EventCallback<HtmlManualTestApplyRequest> OnApply { get; set; }
+
+    private bool _testing;
+    private string _input = "";
+    private string? _error;
+    private HtmlManualTestBatchResult? _result;
+    private List<HtmlFieldCandidate> _candidates = [];
+    private int SelectedCandidateCount => _candidates.Count(candidate => candidate.IsSelected && !candidate.IsConfigured);
+    private bool HasSelectedCandidates => SelectedCandidateCount > 0;
+    private bool HasSelectableCandidates => _candidates.Any(candidate => !candidate.IsConfigured);
+
+    private async Task RunAsync()
+    {
+        _testing = true;
+        _error = null;
+        _result = null;
+        await Task.Yield();
+        try
+        {
+            _result = ManualTestService.Test(_input, Profile, Rules, MainRecordArrayPath);
+            _candidates = ManualTestService.DiscoverCandidates(_result, Rules);
+        }
+        catch (InvalidDataException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _error = $"HTML 字段提取规则解析失败：{ex.Message}";
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private async Task CloseAsync()
+    {
+        if (_testing)
+            return;
+
+        Clear();
+        await VisibleChanged.InvokeAsync(false);
+    }
+
+    private void Clear()
+    {
+        _input = "";
+        _error = null;
+        _result = null;
+        _candidates = [];
+    }
+
+    private void SelectAllCandidates()
+    {
+        foreach (var candidate in _candidates.Where(candidate => !candidate.IsConfigured))
+            candidate.IsSelected = true;
+    }
+
+    private void ClearCandidateSelection()
+    {
+        foreach (var candidate in _candidates)
+            candidate.IsSelected = false;
+    }
+
+    private async Task ApplySelectedAsync()
+    {
+        if (_result == null || !HasSelectedCandidates)
+            return;
+
+        _testing = true;
+        _error = null;
+        await Task.Yield();
+        try
+        {
+            var mergedRules = HtmlManualTestService.MergeCandidateRules(Rules, _candidates);
+            var verifiedResult = ManualTestService.Test(_input, Profile, mergedRules, MainRecordArrayPath);
+            await OnApply.InvokeAsync(new HtmlManualTestApplyRequest
+            {
+                Input = _input,
+                Rules = mergedRules,
+                Result = verifiedResult
+            });
+            Clear();
+            await VisibleChanged.InvokeAsync(false);
+        }
+        catch (InvalidDataException ex)
+        {
+            _error = ex.Message;
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            _error = $"HTML 字段提取规则解析失败：{ex.Message}";
+        }
+        finally
+        {
+            _testing = false;
+        }
+    }
+
+    private static string GetRecordTitle(HtmlManualTestItemResult item)
+        => $"第 {item.RecordIndex} 条 · {(item.IsSuccess ? "成功" : "失败")} · {item.ElapsedMs} ms";
+
+    private static string BuildSectionsJson(HtmlExtractionResult result)
+        => Newtonsoft.Json.JsonConvert.SerializeObject(result.Sections, Newtonsoft.Json.Formatting.Indented);
+
+    private static string BuildFieldsJson(HtmlExtractionResult result)
+        => Newtonsoft.Json.JsonConvert.SerializeObject(result.ExtractedFields, Newtonsoft.Json.Formatting.Indented);
+
+    private static string BuildCompactText(string value)
+        => string.Join('\n', value
+            .Split('\n')
+            .Where(line => !string.IsNullOrWhiteSpace(line)));
+
+    private static string GetCandidateTypeText(HtmlFieldCandidate candidate)
+        => candidate.ExtractionType == HtmlExtractionType.Section ? "完整章节" : "标题值";
+
+    private static string GetCandidateSourceText(HtmlFieldCandidate candidate)
+        => string.IsNullOrWhiteSpace(candidate.SourceSection) ? "" : $" · {candidate.SourceSection}";
+
+    private static string GetCandidatePreview(HtmlFieldCandidate candidate)
+    {
+        const int maxLength = 120;
+        var value = candidate.PreviewValue?.Replace('\n', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(value))
+            return "null（未提取到值）";
+        return value.Length <= maxLength ? value : $"{value[..maxLength]}…";
+    }
+}

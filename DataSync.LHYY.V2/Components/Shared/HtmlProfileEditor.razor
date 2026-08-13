@@ -1,0 +1,126 @@
+<MudGrid Class="mt-1">
+    <MudItem xs="12">
+        <MudAlert Severity="Severity.Info" Dense="true">
+            Base64 解码后优先按 UTF-8 读取，失败时回退 GB18030；仅使用确定性规则，不会调用大模型。
+        </MudAlert>
+    </MudItem>
+    <MudItem xs="12" sm="8">
+        @if (SourcePathPickEnabled)
+        {
+            <PathPickTextField @bind-Value="Profile.SourcePath"
+                               Label="Base64 来源路径"
+                               HelperText="医院返回记录中的 FILE_CONTENT 路径"
+                               IsActive="SourcePathPickActive"
+                               OnActivated="OnSourcePathPickActivated" />
+        }
+        else
+        {
+            <MudTextField @bind-Value="Profile.SourcePath" Label="Base64 来源路径" Required="true"
+                          Placeholder="$main.FILE_CONTENT" />
+        }
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudNumericField T="long" @bind-Value="Profile.MaxInputBytes" Label="最大解码字节数" Min="1" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudSwitch @bind-Value="Profile.IsEnabled" Label="启用 HTML 配置" Color="Color.Primary" />
+    </MudItem>
+    <MudItem xs="12" sm="4">
+        <MudSwitch @bind-Value="Profile.PreserveSections" Label="保留完整章节原文" Color="Color.Primary" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudTextField @bind-Value="Profile.SectionHeadings" Label="章节标题" Lines="4"
+                      HelperText="每行一个标题；按正文中的标题切分并写入 Html.Sections" />
+    </MudItem>
+    <MudItem xs="12">
+        <MudDivider Class="mb-3" />
+        <div class="d-flex align-center mb-2">
+            <MudText Typo="Typo.subtitle2">细字段规则</MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Info" Class="mr-2"
+                       StartIcon="@Icons.Material.Filled.Science" OnClick="OnManualTest">
+                手工测试
+            </MudButton>
+            <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="AddRule">新增字段</MudButton>
+        </div>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            字段输出到 Html.ExtractedFields；Section 提取完整章节，其他类型在指定章节内按标题或正则提取原文。
+        </MudText>
+        @if (Rules.Count == 0)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">至少配置一个字段后才能启用接口。</MudAlert>
+        }
+        @foreach (var pair in Rules.Select((rule, index) => (rule, index)))
+        {
+            <MudPaper Outlined="true" Class="pa-3 mt-2">
+                <MudGrid>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="pair.rule.FieldCode" Label="输出字段名称" Required="true" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudTextField @bind-Value="pair.rule.SourceSection" Label="来源章节" Clearable="true"
+                                      Placeholder="如：体格检查" />
+                    </MudItem>
+                    <MudItem xs="12" sm="4">
+                        <MudSelect T="HtmlExtractionType" @bind-Value="pair.rule.ExtractionType" Label="提取类型">
+                            <MudSelectItem Value="HtmlExtractionType.LabelValue">标题值</MudSelectItem>
+                            <MudSelectItem Value="HtmlExtractionType.Section">完整章节</MudSelectItem>
+                            <MudSelectItem Value="HtmlExtractionType.VitalSign">生命体征</MudSelectItem>
+                            <MudSelectItem Value="HtmlExtractionType.DiagnosisList">诊断列表</MudSelectItem>
+                            <MudSelectItem Value="HtmlExtractionType.WhitespaceTable">空格表格</MudSelectItem>
+                            <MudSelectItem Value="HtmlExtractionType.Regex">正则表达式</MudSelectItem>
+                        </MudSelect>
+                    </MudItem>
+                    @if (pair.rule.ExtractionType != HtmlExtractionType.Section && pair.rule.ExtractionType != HtmlExtractionType.Regex)
+                    {
+                        <MudItem xs="12" sm="6">
+                            <MudTextField @bind-Value="pair.rule.SourceLabel" Label="来源标题" Required="true"
+                                          Placeholder="如：血压" />
+                        </MudItem>
+                    }
+                    @if (pair.rule.ExtractionType == HtmlExtractionType.Regex)
+                    {
+                        <MudItem xs="12" sm="8">
+                            <MudTextField @bind-Value="pair.rule.Pattern" Label="正则表达式" Required="true"
+                                          HelperText="优先读取命名组 value，其次读取第一个捕获组" />
+                        </MudItem>
+                    }
+                    <MudItem xs="12" sm="2" Class="d-flex align-center">
+                        <MudSwitch @bind-Value="pair.rule.IsRequired" Label="必填" Color="Color.Primary" />
+                    </MudItem>
+                    <MudItem xs="12" sm="2" Class="d-flex justify-end align-center">
+                        <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline" Color="Color.Error"
+                                       OnClick="@(() => RemoveRule(pair.index))" />
+                    </MudItem>
+                </MudGrid>
+            </MudPaper>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public EsbHtmlProfile Profile { get; set; } = new();
+    [Parameter] public List<HtmlExtractionRule> Rules { get; set; } = [];
+    [Parameter] public bool SourcePathPickEnabled { get; set; }
+    [Parameter] public bool SourcePathPickActive { get; set; }
+    [Parameter] public EventCallback OnSourcePathPickActivated { get; set; }
+    [Parameter] public EventCallback OnManualTest { get; set; }
+
+    private void AddRule()
+    {
+        Rules.Add(new HtmlExtractionRule
+        {
+            SortOrder = Rules.Count,
+            ExtractionType = HtmlExtractionType.LabelValue
+        });
+    }
+
+    private void RemoveRule(int index)
+    {
+        Rules.RemoveAt(index);
+        for (var ruleIndex = 0; ruleIndex < Rules.Count; ruleIndex++)
+            Rules[ruleIndex].SortOrder = ruleIndex;
+    }
+
+}

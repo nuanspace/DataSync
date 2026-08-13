@@ -310,7 +310,8 @@ public class ConfigService
 
     private static bool RequiresStandardEventIdentity(EsbInterfaceConfig config)
         => config.HandlerType is HandlerType.Generic or HandlerType.GenericQuestionWriteBack
-            || OcrProfileService.IsOcrHandler(config);
+            || OcrProfileService.IsOcrHandler(config)
+            || HtmlProfileService.IsHtmlHandler(config);
 
     private async Task<Dictionary<string, EsbInterfaceConfig>> GetAllInterfaceConfigsAsync(
         string? integrationProjectCode = null,

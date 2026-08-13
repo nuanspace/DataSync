@@ -63,7 +63,21 @@ public sealed class ConfigSyncInterfaceConfig
     public List<ConfigSyncInterfaceMatchRule> MatchRules { get; set; } = [];
     public List<ConfigSyncIdempotentKeyPart> IdempotentKeyParts { get; set; } = [];
     public ConfigSyncOcrProfile? OcrProfile { get; set; }
+    public ConfigSyncHtmlProfile? HtmlProfile { get; set; }
     public string ContentHash { get; set; } = "";
+}
+
+public sealed class ConfigSyncHtmlProfile
+{
+    public string? ProfileName { get; set; }
+    public bool IsEnabled { get; set; } = true;
+    public string SourcePath { get; set; } = "$main.FILE_CONTENT";
+    public long MaxInputBytes { get; set; } = 5L * 1024 * 1024;
+    public bool PreserveSections { get; set; } = true;
+    public string SectionHeadings { get; set; } =
+        "主诉\n现病史\n既往史\n个人史\n婚育史\n家族史\n体格检查\n专科检查\n辅助检查\n确定诊断\n初步诊断";
+    public string ExtractionRules { get; set; } = "[]";
+    public string? Description { get; set; }
 }
 
 public sealed class ConfigSyncOcrProfile

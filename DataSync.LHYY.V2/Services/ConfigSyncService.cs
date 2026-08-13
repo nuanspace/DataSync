@@ -185,6 +185,24 @@ public sealed class ConfigSyncService
                             StringComparison.OrdinalIgnoreCase))
                         ?? group.First(profile => string.IsNullOrWhiteSpace(profile.IntegrationProjectCode)),
                     StringComparer.OrdinalIgnoreCase);
+            var htmlProfiles = tranCodes.Count == 0
+                ? new List<EsbHtmlProfile>()
+                : await db.EsbHtmlProfiles
+                    .Where(profile => (profile.IntegrationProjectCode == projectCode
+                            || profile.IntegrationProjectCode == null)
+                        && tranCodes.Contains(profile.TranCode))
+                    .OrderBy(profile => profile.Id)
+                    .ToListAsync(cancellationToken);
+            var htmlProfileMap = htmlProfiles
+                .GroupBy(profile => profile.TranCode)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.FirstOrDefault(profile => string.Equals(
+                            profile.IntegrationProjectCode,
+                            projectCode,
+                            StringComparison.OrdinalIgnoreCase))
+                        ?? group.First(profile => string.IsNullOrWhiteSpace(profile.IntegrationProjectCode)),
+                    StringComparer.OrdinalIgnoreCase);
 
             package.Interfaces = interfaces.Select(config =>
             {
@@ -195,6 +213,9 @@ public sealed class ConfigSyncService
                     idempotentMap.GetValueOrDefault(config.TranCode) ?? [],
                     OcrProfileService.IsOcrHandler(config)
                         ? ocrProfileMap.GetValueOrDefault(config.TranCode)
+                        : null,
+                    HtmlProfileService.IsHtmlHandler(config)
+                        ? htmlProfileMap.GetValueOrDefault(config.TranCode)
                         : null);
                 item.ContentHash = ComputeInterfaceHash(item);
                 return item;
@@ -313,6 +334,9 @@ public sealed class ConfigSyncService
             var localOcrProfile = local == null
                 ? null
                 : await LoadOcrProfileAsync(db, local.TranCode, targetProjectCode, cancellationToken);
+            var localHtmlProfile = local == null
+                ? null
+                : await LoadHtmlProfileAsync(db, local.TranCode, targetProjectCode, cancellationToken);
             var localHash = local == null
                 ? ""
                 : ComputeInterfaceHash(ToPackageInterface(
@@ -320,7 +344,8 @@ public sealed class ConfigSyncService
                     await LoadInterfaceFilterRulesAsync(db, local.TranCode, targetProjectCode, cancellationToken),
                     await LoadInterfaceMatchRulesAsync(db, local.TranCode, targetProjectCode, cancellationToken),
                     await LoadIdempotentKeyPartsAsync(db, local.TranCode, targetProjectCode, cancellationToken),
-                    OcrProfileService.IsOcrHandler(local) ? localOcrProfile : null));
+                    OcrProfileService.IsOcrHandler(local) ? localOcrProfile : null,
+                    HtmlProfileService.IsHtmlHandler(local) ? localHtmlProfile : null));
             var changeType = local == null
                 ? ConfigSyncChangeType.New
                 : string.Equals(localHash, item.ContentHash, StringComparison.Ordinal)
@@ -523,6 +548,8 @@ public sealed class ConfigSyncService
 
             if (item.OcrProfile != null)
                 await ApplyOcrProfileAsync(db, item.TranCode, targetProjectCode, item.OcrProfile, cancellationToken);
+            if (item.HtmlProfile != null)
+                await ApplyHtmlProfileAsync(db, item.TranCode, targetProjectCode, item.HtmlProfile, cancellationToken);
 
             await db.SaveChangesAsync(cancellationToken);
         }
@@ -684,7 +711,8 @@ public sealed class ConfigSyncService
         List<ConfigSyncFilterRule> filterRules,
         List<ConfigSyncInterfaceMatchRule> matchRules,
         List<ConfigSyncIdempotentKeyPart> idempotentParts,
-        EsbOcrProfile? ocrProfile) => new()
+        EsbOcrProfile? ocrProfile,
+        EsbHtmlProfile? htmlProfile = null) => new()
     {
         TranCode = config.TranCode,
         TranName = config.TranName,
@@ -717,7 +745,8 @@ public sealed class ConfigSyncService
         FilterRules = filterRules,
         MatchRules = matchRules,
         IdempotentKeyParts = idempotentParts,
-        OcrProfile = ocrProfile == null ? null : ToPackageOcrProfile(ocrProfile)
+        OcrProfile = ocrProfile == null ? null : ToPackageOcrProfile(ocrProfile),
+        HtmlProfile = htmlProfile == null ? null : ToPackageHtmlProfile(htmlProfile)
     };
 
     private static ConfigSyncOcrProfile ToPackageOcrProfile(EsbOcrProfile profile) => new()
@@ -731,6 +760,19 @@ public sealed class ConfigSyncService
         AllowedFileRoots = profile.AllowedFileRoots,
         ExtractionRules = OcrProfileService.SerializeExtractionRules(
             OcrProfileService.DeserializeExtractionRules(profile.ExtractionRules)),
+        Description = profile.Description
+    };
+
+    private static ConfigSyncHtmlProfile ToPackageHtmlProfile(EsbHtmlProfile profile) => new()
+    {
+        ProfileName = profile.ProfileName,
+        IsEnabled = profile.IsEnabled,
+        SourcePath = profile.SourcePath,
+        MaxInputBytes = profile.MaxInputBytes,
+        PreserveSections = profile.PreserveSections,
+        SectionHeadings = profile.SectionHeadings,
+        ExtractionRules = HtmlProfileService.SerializeExtractionRules(
+            HtmlProfileService.DeserializeExtractionRules(profile.ExtractionRules)),
         Description = profile.Description
     };
 
@@ -975,6 +1017,58 @@ public sealed class ConfigSyncService
         profile.UpdatedAt = DateTime.Now;
     }
 
+    private static async Task<EsbHtmlProfile?> LoadHtmlProfileAsync(
+        DataSyncDbContext db,
+        string tranCode,
+        string targetProjectCode,
+        CancellationToken cancellationToken)
+    {
+        var profiles = await db.EsbHtmlProfiles
+            .AsNoTracking()
+            .Where(profile => profile.TranCode == tranCode
+                && (profile.IntegrationProjectCode == targetProjectCode || profile.IntegrationProjectCode == null))
+            .OrderBy(profile => profile.Id)
+            .ToListAsync(cancellationToken);
+        return profiles.FirstOrDefault(profile => string.Equals(
+                profile.IntegrationProjectCode,
+                targetProjectCode,
+                StringComparison.OrdinalIgnoreCase))
+            ?? profiles.FirstOrDefault(profile => string.IsNullOrWhiteSpace(profile.IntegrationProjectCode));
+    }
+
+    private static async Task ApplyHtmlProfileAsync(
+        DataSyncDbContext db,
+        string tranCode,
+        string targetProjectCode,
+        ConfigSyncHtmlProfile item,
+        CancellationToken cancellationToken)
+    {
+        var profile = await db.EsbHtmlProfiles
+            .Where(existing => existing.IntegrationProjectCode == targetProjectCode && existing.TranCode == tranCode)
+            .OrderBy(existing => existing.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (profile == null)
+        {
+            profile = new EsbHtmlProfile
+            {
+                TranCode = tranCode,
+                IntegrationProjectCode = targetProjectCode,
+                CreatedAt = DateTime.Now
+            };
+            db.EsbHtmlProfiles.Add(profile);
+        }
+
+        profile.ProfileName = item.ProfileName;
+        profile.IsEnabled = item.IsEnabled;
+        profile.SourcePath = item.SourcePath;
+        profile.MaxInputBytes = item.MaxInputBytes;
+        profile.PreserveSections = item.PreserveSections;
+        profile.SectionHeadings = item.SectionHeadings;
+        profile.ExtractionRules = item.ExtractionRules;
+        profile.Description = item.Description;
+        profile.UpdatedAt = DateTime.Now;
+    }
+
     private static EsbFieldMapping? ResolveLocalMapping(
         List<EsbFieldMapping> localMappings,
         Dictionary<string, EsbFieldMapping> bySyncKey,
@@ -1037,6 +1131,27 @@ public sealed class ConfigSyncService
                     throw new InvalidOperationException($"OCR 接口 {item.TranCode} 配置错误：{string.Join("；", profileErrors)}。");
             }
 
+            if (IsHtmlHandler(item))
+            {
+                if (item.HtmlProfile == null)
+                    throw new InvalidOperationException($"HTML 接口 {item.TranCode} 缺少 HTML 配置。");
+                var rules = HtmlProfileService.DeserializeExtractionRules(item.HtmlProfile.ExtractionRules);
+                item.HtmlProfile.ExtractionRules = HtmlProfileService.SerializeExtractionRules(rules);
+                var profileErrors = HtmlProfileService.ValidateProfile(
+                    new EsbHtmlProfile
+                    {
+                        IsEnabled = item.HtmlProfile.IsEnabled,
+                        SourcePath = item.HtmlProfile.SourcePath,
+                        MaxInputBytes = item.HtmlProfile.MaxInputBytes,
+                        PreserveSections = item.HtmlProfile.PreserveSections,
+                        SectionHeadings = item.HtmlProfile.SectionHeadings
+                    },
+                    rules,
+                    requireEnabled: item.IsEnabled);
+                if (profileErrors.Count > 0)
+                    throw new InvalidOperationException($"HTML 接口 {item.TranCode} 配置错误：{string.Join("；", profileErrors)}。");
+            }
+
             item.ContentHash = ComputeInterfaceHash(item);
         }
 
@@ -1087,6 +1202,7 @@ public sealed class ConfigSyncService
         item.SoapAction,
         item.SampleJson,
         item.OcrProfile,
+        item.HtmlProfile,
         FilterRules = OrderRules(item.FilterRules),
         MatchRules = item.MatchRules.OrderBy(r => r.MatchGroup).ThenBy(r => r.SortOrder).ThenBy(r => r.SourcePath),
         IdempotentKeyParts = item.IdempotentKeyParts.OrderBy(p => p.SortOrder).ThenBy(p => p.SourcePath).ThenBy(p => p.LiteralValue)
@@ -1095,6 +1211,10 @@ public sealed class ConfigSyncService
     private static bool IsOcrHandler(ConfigSyncInterfaceConfig config)
         => config.HandlerType == HandlerType.Custom
             && string.Equals(config.HandlerName, OcrProfileService.HandlerName, StringComparison.Ordinal);
+
+    private static bool IsHtmlHandler(ConfigSyncInterfaceConfig config)
+        => config.HandlerType == HandlerType.Custom
+            && string.Equals(config.HandlerName, HtmlProfileService.HandlerName, StringComparison.Ordinal);
 
     private static string ComputeMappingHash(ConfigSyncFieldMapping item) => ComputeHash(new
     {

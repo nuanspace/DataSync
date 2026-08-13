@@ -139,6 +139,9 @@ public class Program
             builder.Services.AddScoped<GenericQuestionWriteBackProcessor>();
             builder.Services.AddScoped<OcrProfileService>();
             builder.Services.AddHttpClient<OcrAiExtractionService>();
+            builder.Services.AddScoped<HtmlProfileService>();
+            builder.Services.AddSingleton<HtmlTextExtractionService>();
+            builder.Services.AddSingleton<HtmlManualTestService>();
             builder.Services.AddScoped<MessageExecutionService>();
             builder.Services.AddScoped<FilterRuleService>();
             builder.Services.AddScoped<MappingPreviewService>();
@@ -474,6 +477,30 @@ public class Program
         db.Database.ExecuteSqlRaw("""
             CREATE INDEX IF NOT EXISTS ix_esb_ocr_profile_project_tran
                 ON lhyy.esb_ocr_profile (integration_project_code, tran_code);
+            """);
+
+        db.Database.ExecuteSqlRaw("""
+            CREATE TABLE IF NOT EXISTS lhyy.esb_html_profile (
+                id                       SERIAL PRIMARY KEY,
+                tran_code                VARCHAR(20) NOT NULL,
+                integration_project_code VARCHAR(50),
+                profile_name             VARCHAR(100),
+                is_enabled               BOOLEAN NOT NULL DEFAULT TRUE,
+                source_path              VARCHAR(500) NOT NULL DEFAULT '$main.FILE_CONTENT',
+                max_input_bytes          BIGINT NOT NULL DEFAULT 5242880,
+                preserve_sections        BOOLEAN NOT NULL DEFAULT TRUE,
+                section_headings         TEXT NOT NULL DEFAULT '',
+                extraction_rules         JSONB NOT NULL DEFAULT '[]'::JSONB,
+                description              VARCHAR(500),
+                created_at               TIMESTAMP NOT NULL DEFAULT NOW(),
+                updated_at               TIMESTAMP NOT NULL DEFAULT NOW()
+            );
+
+            CREATE INDEX IF NOT EXISTS ix_esb_html_profile_tran_code
+                ON lhyy.esb_html_profile (tran_code);
+
+            CREATE INDEX IF NOT EXISTS ix_esb_html_profile_project_tran
+                ON lhyy.esb_html_profile (integration_project_code, tran_code);
             """);
     }
 
