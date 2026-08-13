@@ -1,4 +1,4 @@
-{
+﻿{
   "schema_version": 1,
   "project": "DataSync",
   "last_reviewed_commit": "20c92eac988986a61512cab803d35deb71377c36",
@@ -46,10 +46,10 @@
       "id": "interfaces-documents",
       "title": "医院接口、文档与文件处理",
       "skill": "datasync-business-logic",
-      "keywords": ["接口文档", "WebService", "生命体征", "评估单", "PDF", "OCR", "归档", "附件", "报告"],
-      "symbols": ["WebServiceController", "SoapWebServiceService", "ProjectDocumentService", "OcrMessageProcessor", "IOcrConversionService"],
-      "workflows": ["医院SOAP接入", "项目文档", "OCR转换", "报告归档"],
-      "source_paths": ["DataSync.Common/Ocr/**", "DataSync.LHYY.V2/Controllers/WebServiceController.cs", "DataSync.LHYY.V2/Controllers/ProjectDocumentsController.cs", "DataSync.LHYY.V2/Services/SoapWebServiceService.cs", "DataSync.LHYY.V2/Services/ProjectDocumentService.cs", "DataSync.LHYY.V2/Handlers/OcrMessageProcessor.cs", "DataSync.LHYY.V2/ProjectDocuments/**"],
+      "keywords": ["接口文档", "WebService", "生命体征", "评估单", "PDF", "OCR", "字段提取", "归档", "附件", "报告"],
+      "symbols": ["WebServiceController", "SoapWebServiceService", "ProjectDocumentService", "OcrMessageProcessor", "OcrAiExtractionService", "IOcrConversionService"],
+      "workflows": ["医院SOAP接入", "项目文档", "OCR转换", "OCR字段提取", "报告归档"],
+      "source_paths": ["DataSync.Common/Ocr/**", "DataSync.LHYY.V2/Controllers/WebServiceController.cs", "DataSync.LHYY.V2/Controllers/ProjectDocumentsController.cs", "DataSync.LHYY.V2/Services/SoapWebServiceService.cs", "DataSync.LHYY.V2/Services/ProjectDocumentService.cs", "DataSync.LHYY.V2/Services/OcrProfileService.cs", "DataSync.LHYY.V2/Services/OcrAiExtractionService.cs", "DataSync.LHYY.V2/Services/MessageQueryService.cs", "DataSync.LHYY.V2/Services/ConfigSyncService.cs", "DataSync.LHYY.V2/Handlers/OcrMessageProcessor.cs", "DataSync.LHYY.V2/Models/Entities/EsbOcrProfile.cs", "DataSync.LHYY.V2/Models/Dto/ConfigSyncModels.cs", "DataSync.LHYY.V2/Components/Pages/InterfaceConfigPage.razor", "DataSync.LHYY.V2/Components/Pages/MessageDetailPage.razor", "DataSync.LHYY.V2/Components/Shared/OcrProfileEditor.razor", "DataSync.LHYY.V2/Components/Shared/OcrFieldSelectorDialog.razor", "DataSync.LHYY.V2/ProjectDocuments/**"],
       "references": [".agents/skills/datasync-business-logic/references/interfaces-documents-and-ocr.md"],
       "review_record": ".agents/knowledge-reviews/interfaces-documents.json",
       "impact_types": ["医院协议", "文档入口", "文件安全", "OCR输入输出", "归档语义"],
