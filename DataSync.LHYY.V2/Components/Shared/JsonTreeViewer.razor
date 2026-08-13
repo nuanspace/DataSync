@@ -68,6 +68,8 @@
 
     [Parameter] public int MaxArrayItemsToRender { get; set; }
 
+    [Parameter] public int MaxStringValueLength { get; set; }
+
     [Parameter] public bool ShowSearch { get; set; }
 
     [Parameter] public string SearchPlaceholder { get; set; } = "按节点名、路径或值检索";
@@ -83,6 +85,7 @@
     private bool _lastPreferFirstArrayItemAsRoot;
     private int _lastMaxNodesToRender;
     private int _lastMaxArrayItemsToRender;
+    private int _lastMaxStringValueLength;
     private string? _lastSelectedPath;
     private int _lastSelectionVersion;
     private string? _selectedNodeDomId;
@@ -100,7 +103,8 @@
             || _lastUseArrayBrackets != UseArrayBrackets
             || _lastPreferFirstArrayItemAsRoot != PreferFirstArrayItemAsRoot
             || _lastMaxNodesToRender != MaxNodesToRender
-            || _lastMaxArrayItemsToRender != MaxArrayItemsToRender;
+            || _lastMaxArrayItemsToRender != MaxArrayItemsToRender
+            || _lastMaxStringValueLength != MaxStringValueLength;
 
         if (treeChanged)
         {
@@ -109,6 +113,7 @@
             _lastPreferFirstArrayItemAsRoot = PreferFirstArrayItemAsRoot;
             _lastMaxNodesToRender = MaxNodesToRender;
             _lastMaxArrayItemsToRender = MaxArrayItemsToRender;
+            _lastMaxStringValueLength = MaxStringValueLength;
             ParseJson();
         }
 
@@ -631,7 +636,7 @@
     private static string FormatNodeValue(JsonTreeNode node) =>
         node.NodeType == "String" ? $"\"{node.Value}\"" : node.Value ?? "";
 
-    private static string GetScalarValueText(JToken value)
+    private string GetScalarValueText(JToken value)
     {
         if (value.Type == JTokenType.Null)
         {
@@ -640,7 +645,10 @@
 
         if (value.Type == JTokenType.String)
         {
-            return value.Value<string>() ?? "";
+            var text = value.Value<string>() ?? "";
+            return MaxStringValueLength > 0 && text.Length > MaxStringValueLength
+                ? $"[大文本内容已省略，共 {text.Length} 个字符]"
+                : text;
         }
 
         return value.ToString(Newtonsoft.Json.Formatting.None);

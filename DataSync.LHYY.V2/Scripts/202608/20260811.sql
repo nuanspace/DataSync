@@ -1,4 +1,4 @@
--- FollowUp 患者身份映射属于 DataSync 管理状态，只允许在 ConnectionStrings:DataSyncDb 执行。
+﻿-- FollowUp 患者身份映射属于 DataSync 管理状态，只允许在 ConnectionStrings:DataSyncDb 执行。
 -- CubeDb 只承载 NTCare 既有业务表，本脚本不对 CubeDb 创建或修改任何结构。
 
 DO $migration$
@@ -46,3 +46,13 @@ BEGIN
         IS '唯一患者匹配依据：Id、SidNumber 或 Demographics。';
 END
 $migration$;
+
+BEGIN;
+
+ALTER TABLE IF EXISTS lhyy.esb_ocr_profile
+    ADD COLUMN IF NOT EXISTS sample_message_id BIGINT;
+
+COMMENT ON COLUMN lhyy.esb_ocr_profile.sample_message_id
+    IS '接口配置时选用的 OCR 样本消息编号；仅用于再次预览，不参与正式消息处理';
+
+COMMIT;

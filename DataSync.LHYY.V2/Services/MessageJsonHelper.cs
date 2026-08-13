@@ -9,6 +9,7 @@ namespace DataSync.LHYY.V2.Services;
 public static class MessageJsonHelper
 {
     public const string MainRecordScopePrefix = "$main.";
+    public const int LargeTextPreviewLength = 1000;
 
     public static bool TryParseToken(string rawJson, out JToken root, out string? error)
     {
@@ -304,6 +305,41 @@ public static class MessageJsonHelper
         catch
         {
             return null;
+        }
+    }
+
+    public static bool SanitizeLargeStringValues(
+        JToken token,
+        int maxLength = LargeTextPreviewLength,
+        bool includeLength = false)
+    {
+        var values = EnumerateJsonValues(token)
+            .Where(value => value.Type == JTokenType.String && value.Value<string>()?.Length > maxLength)
+            .ToList();
+
+        foreach (var value in values)
+        {
+            var length = value.Value<string>()?.Length ?? 0;
+            value.Value = includeLength
+                ? $"[大文本内容已省略，共 {length} 个字符]"
+                : "[大文本内容已省略]";
+        }
+
+        return values.Count > 0;
+    }
+
+    private static IEnumerable<JValue> EnumerateJsonValues(JToken token)
+    {
+        if (token is JValue value)
+        {
+            yield return value;
+            yield break;
+        }
+
+        foreach (var child in token.Children())
+        {
+            foreach (var descendant in EnumerateJsonValues(child))
+                yield return descendant;
         }
     }
 }

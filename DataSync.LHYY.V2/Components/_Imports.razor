@@ -21,6 +21,7 @@
 @using DataSync.LHYY.V2.Models.Dto
 @using DataSync.LHYY.V2.Models.FollowUp
 @using DataSync.Common.FollowUp
+@using DataSync.Common.Ocr
 @using DataSync.LHYY.V2.Models.Enums
 @using DataSync.LHYY.V2.Models.Options
 @using DataSync.LHYY.V2.Services
@@ -41,5 +42,7 @@
 @inject DictTemplateService inj_dictTemplateService
 @inject MappingPreviewService inj_mappingPreviewService
 @inject MessageMappingPreviewService inj_messageMappingPreviewService
+@inject IOcrConversionService inj_ocrConversionService
+@inject OcrAiExtractionService OcrAiExtractionSvc
 @inject DatabaseUpgradeService inj_databaseUpgradeService
 @inject DatabaseCompareService inj_databaseCompareService
