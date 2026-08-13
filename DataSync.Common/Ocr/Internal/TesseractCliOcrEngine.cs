@@ -1,6 +1,5 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace DataSync.Common.Ocr.Internal;
@@ -8,21 +7,23 @@ namespace DataSync.Common.Ocr.Internal;
 public sealed class TesseractCliOcrEngine
 {
     private readonly OcrRuntimeOptions _runtimeOptions;
-    private readonly ILogger<TesseractCliOcrEngine> _logger;
 
-    public TesseractCliOcrEngine(IOptions<OcrRuntimeOptions> runtimeOptions, ILogger<TesseractCliOcrEngine> logger)
+    public TesseractCliOcrEngine(IOptions<OcrRuntimeOptions> runtimeOptions)
     {
         _runtimeOptions = runtimeOptions.Value;
-        _logger = logger;
     }
 
     public async Task<OcrPageResult> ReadAsync(
         string imagePath,
         int pageNumber,
         OcrConversionOptions options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        int? pageSegMode = null,
+        string? outputSuffix = null)
     {
-        var outputBase = Path.Combine(Path.GetDirectoryName(imagePath) ?? "", $"ocr-{pageNumber:000}");
+        var outputBase = Path.Combine(
+            Path.GetDirectoryName(imagePath) ?? "",
+            $"ocr-{pageNumber:000}{outputSuffix}");
         var args = new[]
         {
             imagePath,
@@ -30,11 +31,15 @@ public sealed class TesseractCliOcrEngine
             "-l",
             options.Language,
             "--psm",
-            Math.Max(0, options.PageSegMode).ToString(CultureInfo.InvariantCulture),
+            Math.Max(0, pageSegMode ?? options.PageSegMode).ToString(CultureInfo.InvariantCulture),
             "-c",
             "preserve_interword_spaces=1",
-            "txt",
-            "tsv"
+            "-c",
+            "textord_tabfind_find_tables=0",
+            "-c",
+            "tessedit_create_txt=1",
+            "-c",
+            "tessedit_create_tsv=1"
         };
 
         var result = await ProcessRunner.RunAsync(
@@ -46,13 +51,15 @@ public sealed class TesseractCliOcrEngine
         if (result.ExitCode != 0)
             throw new InvalidOperationException($"Tesseract OCR 失败：{TrimProcessError(result)}");
 
+        if (HasLanguageLoadFailure(result))
+            throw new InvalidOperationException("OCR 语言组件未安装完整，请安装中文识别组件后重试。");
+
         var textPath = outputBase + ".txt";
         var tsvPath = outputBase + ".tsv";
         var text = File.Exists(textPath) ? NormalizeOcrText(await File.ReadAllTextAsync(textPath, cancellationToken)) : "";
         var items = File.Exists(tsvPath) ? await ParseTsvAsync(tsvPath, pageNumber, cancellationToken) : [];
         var confidence = items.Count == 0 ? 0 : Math.Round(items.Average(item => item.Confidence), 4);
 
-        _logger.LogDebug("OCR 第 {PageNumber} 页完成，文本长度 {Length}", pageNumber, text.Length);
         return new OcrPageResult
         {
             PageNumber = pageNumber,
@@ -124,4 +131,8 @@ public sealed class TesseractCliOcrEngine
         var value = string.IsNullOrWhiteSpace(result.Error) ? result.Output : result.Error;
         return value.Trim();
     }
+
+    private static bool HasLanguageLoadFailure(ProcessRunResult result)
+        => result.Error.Contains("Failed loading language", StringComparison.OrdinalIgnoreCase)
+            || result.Error.Contains("Error opening data file", StringComparison.OrdinalIgnoreCase);
 }

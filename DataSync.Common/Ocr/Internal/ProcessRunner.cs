@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 
 namespace DataSync.Common.Ocr.Internal;
@@ -11,7 +11,6 @@ internal static class ProcessRunner
         int timeoutSeconds,
         CancellationToken cancellationToken)
     {
-        var displayArguments = string.Join(" ", arguments.Select(QuoteForDisplay));
         using var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -62,7 +61,7 @@ internal static class ProcessRunner
             if (cancellationToken.IsCancellationRequested)
                 throw;
 
-            throw new TimeoutException($"命令执行超时：{fileName} {displayArguments}");
+            throw new TimeoutException($"OCR 外部命令执行超时：{Path.GetFileName(fileName)}");
         }
 
         return new ProcessRunResult(process.ExitCode, output.ToString(), error.ToString());
@@ -94,8 +93,6 @@ internal static class ProcessRunner
         }
     }
 
-    private static string QuoteForDisplay(string value)
-        => value.Contains(' ', StringComparison.Ordinal) ? $"\"{value}\"" : value;
 }
 
 internal sealed record ProcessRunResult(int ExitCode, string Output, string Error);
