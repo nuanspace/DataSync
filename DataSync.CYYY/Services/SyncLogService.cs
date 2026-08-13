@@ -179,7 +179,11 @@ public class SyncLogService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var cutoff = DateTime.Now.AddDays(-retentionDays);
-        return await db.SyncLogs.Where(l => l.CreatedAt < cutoff).ExecuteDeleteAsync(ct);
+        var syncLogCount = await db.SyncLogs.Where(l => l.CreatedAt < cutoff).ExecuteDeleteAsync(ct);
+        var continuousLogCount = await db.PatientContinuousSyncRunLogs
+            .Where(l => l.CreatedAt < cutoff)
+            .ExecuteDeleteAsync(ct);
+        return syncLogCount + continuousLogCount;
     }
 
     /// <summary>

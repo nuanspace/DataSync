@@ -19,11 +19,14 @@ public class IngestionSource
     [Column("server_code")]
     public string ServerCode { get; set; } = "";
 
+    [Column("api_interface_id")]
+    public int? ApiInterfaceId { get; set; }
+
     /// <summary>
-    /// 来源类型：DataLake / DynamicApi / Database
+    /// 来源类型：Api / Database
     /// </summary>
     [Column("source_type")]
-    public string SourceType { get; set; } = "DataLake";
+    public string SourceType { get; set; } = "Api";
 
     [Column("database_resource_id")]
     public int? DatabaseResourceId { get; set; }
@@ -77,10 +80,16 @@ public class IngestionSource
     public string? QuerySql { get; set; }
 
     /// <summary>
-    /// 动态接口采集查询路径，填写查询端点前缀后的相对路径。
+    /// API 采集查询路径，填写查询端点前缀后的相对路径。
     /// </summary>
     [Column("query_path")]
     public string? QueryPath { get; set; }
+
+    /// <summary>
+    /// 按对象补录时的请求字段映射 JSON。
+    /// </summary>
+    [Column("query_mappings")]
+    public string? QueryMappings { get; set; }
 
     [Column("time_field")]
     public string TimeField { get; set; } = "";
@@ -142,4 +151,7 @@ public class IngestionSource
 
     [ForeignKey(nameof(DatabaseResourceId))]
     public DatabaseResource? DatabaseResource { get; set; }
+
+    [ForeignKey(nameof(ApiInterfaceId))]
+    public ApiInterface? ApiInterface { get; set; }
 }

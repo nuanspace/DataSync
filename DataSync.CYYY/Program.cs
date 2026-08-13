@@ -50,24 +50,25 @@ public class Program
             builder.Services.AddDbContextFactory<SyncDbContext>(options =>
                 options.UseNpgsql(connectionString));
 
-            // HttpClient（数据湖 API 可能使用自签名证书，跳过 SSL 验证）
-            builder.Services.AddHttpClient("DataLake")
+            // 通用 API 平台，是否忽略证书由平台配置决定。
+            builder.Services.AddHttpClient("ApiPlatform");
+            builder.Services.AddHttpClient("ApiPlatformInsecure")
                 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
                 {
                     ServerCertificateCustomValidationCallback =
                         HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
                 });
-            builder.Services.AddHttpClient("DynamicApi");
 
             // 服务注册
-            builder.Services.AddSingleton<DataLakeClient>();
-            builder.Services.AddSingleton<DynamicApiClient>();
+            builder.Services.AddSingleton<ApiPlatformClient>();
             builder.Services.AddSingleton<SyncTaskSignalService>();
             builder.Services.AddScoped<SyncLogService>();
             builder.Services.AddScoped<PendingSyncService>();
             builder.Services.AddScoped<TaskManagementService>();
             builder.Services.AddScoped<ActiveMedicalRecordClient>();
             builder.Services.AddScoped<ActiveSyncService>();
+            builder.Services.AddScoped<PatientContinuousSyncService>();
+            builder.Services.AddScoped<PatientContinuousSyncRegistrationService>();
             builder.Services.Configure<FollowUpPackageSyncOptions>(builder.Configuration.GetSection("FollowUpPackageSync"));
             builder.Services.AddScoped<FollowUpPackageRepository>();
             builder.Services.AddScoped<FollowUpPackageSyncService>();
@@ -89,6 +90,7 @@ public class Program
             builder.Services.AddHostedService<SyncWorker>();
             builder.Services.AddHostedService<IngestionWorker>();
             builder.Services.AddHostedService<ActiveMedicalRecordSyncWorker>();
+            builder.Services.AddHostedService<PatientContinuousSyncWorker>();
             builder.Services.AddHostedService<FollowUpPackagePullWorker>();
 
             // MudBlazor

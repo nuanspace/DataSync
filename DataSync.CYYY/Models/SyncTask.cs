@@ -81,6 +81,30 @@ public class SyncTask
     public int PollingIntervalSeconds { get; set; } = 300;
 
     /// <summary>
+    /// 是否启用患者持续增量同步。
+    /// </summary>
+    [Column("patient_continuous_sync_enabled")]
+    public bool PatientContinuousSyncEnabled { get; set; }
+
+    [Column("patient_continuous_sync_interval_seconds")]
+    public int PatientContinuousSyncIntervalSeconds { get; set; } = 1800;
+
+    [Column("patient_continuous_sync_lookback_minutes")]
+    public int PatientContinuousSyncLookbackMinutes { get; set; } = 5;
+
+    [Column("admission_source_server_code")]
+    public string? AdmissionSourceServerCode { get; set; }
+
+    [Column("admission_time_field")]
+    public string? AdmissionTimeField { get; set; }
+
+    [Column("discharge_source_server_code")]
+    public string? DischargeSourceServerCode { get; set; }
+
+    [Column("discharge_time_field")]
+    public string? DischargeTimeField { get; set; }
+
+    /// <summary>
     /// 患者并发数 N
     /// </summary>
     [Column("patient_concurrency")]

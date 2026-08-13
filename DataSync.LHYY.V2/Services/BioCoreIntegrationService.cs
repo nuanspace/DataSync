@@ -74,6 +74,37 @@ public class BioCoreIntegrationService
         return result;
     }
 
+    public async Task<(Guid HospitalId, Guid ProjectId)> GetProjectContextByLicenseAsync(string licenseCode)
+    {
+        if (string.IsNullOrWhiteSpace(licenseCode))
+            return (Guid.Empty, Guid.Empty);
+
+        await using var db = await _cubeDbContextFactory.CreateDbContextAsync();
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT p.hospital_id, p.id
+            FROM system.sys_license l
+            JOIN form.form_project p ON p.id = l.project_id
+            WHERE l.code = @licenseCode
+              AND COALESCE(l.is_valid, TRUE) = TRUE
+            LIMIT 1
+            """;
+
+        var param = cmd.CreateParameter();
+        param.ParameterName = "@licenseCode";
+        param.Value = licenseCode;
+        cmd.Parameters.Add(param);
+
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (!await reader.ReadAsync() || reader.IsDBNull(0) || reader.IsDBNull(1))
+            return (Guid.Empty, Guid.Empty);
+
+        return (reader.GetGuid(0), reader.GetGuid(1));
+    }
+
     public async Task<List<HospitalInfo>> GetHospitalsAsync()
     {
         await using var db = await _cubeDbContextFactory.CreateDbContextAsync();

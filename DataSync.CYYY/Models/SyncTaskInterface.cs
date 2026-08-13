@@ -16,8 +16,11 @@ public class SyncTaskInterface
     [Column("task_id")]
     public int TaskId { get; set; }
 
+    [Column("api_interface_id")]
+    public int? ApiInterfaceId { get; set; }
+
     /// <summary>
-    /// 数据湖接口 serverCode
+    /// API 接口编码
     /// </summary>
     [Column("server_code")]
     public string ServerCode { get; set; } = "";
@@ -26,10 +29,10 @@ public class SyncTaskInterface
     public string DisplayName { get; set; } = "";
 
     /// <summary>
-    /// 查询来源类型：DataLake / Database
+    /// 查询来源类型：Api / Database
     /// </summary>
     [Column("source_type")]
-    public string SourceType { get; set; } = "DataLake";
+    public string SourceType { get; set; } = "Api";
 
     [Column("database_resource_id")]
     public int? DatabaseResourceId { get; set; }
@@ -83,7 +86,7 @@ public class SyncTaskInterface
     public string? QuerySql { get; set; }
 
     /// <summary>
-    /// 动态接口查询路径，填写 query/ 后的路径部分。
+    /// API 查询的平台相对路径。
     /// </summary>
     [Column("query_path")]
     public string? QueryPath { get; set; }
@@ -93,6 +96,70 @@ public class SyncTaskInterface
     /// </summary>
     [Column("use_today_time_range")]
     public bool UseTodayTimeRange { get; set; }
+
+    /// <summary>
+    /// 是否在患者住院期间持续轮询。
+    /// </summary>
+    [Column("continuous_polling_enabled")]
+    public bool ContinuousPollingEnabled { get; set; }
+
+    /// <summary>
+    /// 持续轮询间隔秒数。
+    /// </summary>
+    [Column("continuous_polling_interval_seconds")]
+    public int ContinuousPollingIntervalSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// 是否由患者持续增量同步引擎处理。
+    /// </summary>
+    [Column("patient_continuous_sync_enabled")]
+    public bool PatientContinuousSyncEnabled { get; set; }
+
+    /// <summary>
+    /// 患者持续同步查询时是否携带开始、结束时间。
+    /// </summary>
+    [Column("continuous_use_time_range")]
+    public bool ContinuousUseTimeRange { get; set; } = true;
+
+    /// <summary>
+    /// 持续同步记录唯一键字段，多个字段用逗号分隔。
+    /// </summary>
+    [Column("continuous_record_key_fields")]
+    public string ContinuousRecordKeyFields { get; set; } = "";
+
+    /// <summary>
+    /// 无业务主键且记录不可变时，是否使用规范化整行哈希。
+    /// </summary>
+    [Column("continuous_use_row_hash")]
+    public bool ContinuousUseRowHash { get; set; }
+
+    [NotMapped]
+    public string[] ContinuousRecordKeyArray => ContinuousRecordKeyFields
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// 入院时间来源采集接口编码。
+    /// </summary>
+    [Column("query_start_time_source_server_code")]
+    public string? QueryStartTimeSourceServerCode { get; set; }
+
+    /// <summary>
+    /// 触发记录中的入院时间字段。
+    /// </summary>
+    [Column("query_start_time_source_field")]
+    public string? QueryStartTimeSourceField { get; set; }
+
+    /// <summary>
+    /// 出院时间来源采集接口编码。
+    /// </summary>
+    [Column("query_end_time_source_server_code")]
+    public string? QueryEndTimeSourceServerCode { get; set; }
+
+    /// <summary>
+    /// 触发记录中的出院时间字段。
+    /// </summary>
+    [Column("query_end_time_source_field")]
+    public string? QueryEndTimeSourceField { get; set; }
 
     /// <summary>
     /// 是否仅在指定时间段访问。
@@ -153,6 +220,12 @@ public class SyncTaskInterface
     public string? QueryValueField { get; set; }
 
     /// <summary>
+    /// 根接口查询字段映射 JSON。
+    /// </summary>
+    [Column("query_mappings")]
+    public string? QueryMappings { get; set; }
+
+    /// <summary>
     /// 父接口结果取值字段。仅子接口使用。
     /// </summary>
     [Column("parent_result_field")]
@@ -210,8 +283,7 @@ public class SyncTaskInterface
     public string? InjectFields { get; set; }
 
     /// <summary>
-    /// 过滤条件 — 数据湖查询时的额外过滤条件（JSON 数组）
-    /// 格式：[{"column":"STATUS","type":"eq","value":"1"}]
+    /// 平台条件数组模式下的额外过滤条件（JSON 数组）。
     /// </summary>
     [Column("filter_conditions")]
     public string? FilterConditions { get; set; }
@@ -221,6 +293,9 @@ public class SyncTaskInterface
 
     [ForeignKey(nameof(DatabaseResourceId))]
     public DatabaseResource? DatabaseResource { get; set; }
+
+    [ForeignKey(nameof(ApiInterfaceId))]
+    public ApiInterface? ApiInterface { get; set; }
 }
 
 public class InterfaceLinkMapping

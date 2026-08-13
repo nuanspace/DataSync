@@ -247,7 +247,9 @@ else if (_item != null)
         if (string.IsNullOrWhiteSpace(log.ErrorMessage))
             return "失败";
 
-        if (log.ErrorMessage.StartsWith("[数据湖查询]"))
+        if (log.ErrorMessage.StartsWith("[API查询]") ||
+            log.ErrorMessage.StartsWith("[数据库查询]") ||
+            log.ErrorMessage.StartsWith("[SQL查询]"))
             return "查询失败";
 
         if (log.ErrorMessage.StartsWith("[推送]"))

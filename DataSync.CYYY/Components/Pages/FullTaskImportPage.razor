@@ -10,7 +10,7 @@
         <div>
             <MudText Typo="Typo.h5">导入完整同步任务</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                一次创建或更新 DynamicApi 采集源、同步任务和全部关联接口。
+                一次创建或更新 API 采集源、同步任务和全部关联接口。
             </MudText>
         </div>
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack"
@@ -111,15 +111,26 @@
         {
             var import = ParseAndValidate();
             await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
-            var sourceExists = await db.IngestionSources
+            var source = await db.IngestionSources
                 .AsNoTracking()
-                .AnyAsync(source => source.ServerCode == import.Source!.ServerCode, CancellationToken);
+                .FirstOrDefaultAsync(source => source.ServerCode == import.Source!.ServerCode, CancellationToken);
             var task = await db.SyncTasks
                 .AsNoTracking()
                 .Include(item => item.Interfaces)
                 .FirstOrDefaultAsync(item => item.Code == import.Task!.Code, CancellationToken);
+            var apiInterfaces = await db.ApiInterfaces.AsNoTracking().Include(item => item.Platform).ToListAsync(CancellationToken);
+            var ingestionSourceCodes = await db.IngestionSources.AsNoTracking()
+                .Select(item => item.ServerCode)
+                .ToListAsync(CancellationToken);
+            ingestionSourceCodes.Add(import.Source!.ServerCode);
+            ValidateContinuousSources(import.Task!, ingestionSourceCodes);
+            ResolveApiInterface(apiInterfaces, import.Source!.PlatformName, import.Source.ServerCode, import.Source.QueryPath);
+            foreach (var item in import.Interfaces!)
+                ValidatePatientContinuousApi(item,
+                    ResolveApiInterface(apiInterfaces, item.PlatformName, item.ServerCode, item.QueryPath));
 
-            ValidateMode(sourceExists, task);
+            ValidateMode(source != null, task);
+            ValidateExistingSource(source);
             ValidateExistingInterfaces(task, import.Interfaces!);
 
             _previewItems = BuildPreviewItems(import, task);
@@ -171,8 +182,15 @@
             var task = await db.SyncTasks
                 .Include(item => item.Interfaces)
                 .FirstOrDefaultAsync(item => item.Code == taskImport.Code, CancellationToken);
+            var apiInterfaces = await db.ApiInterfaces.AsNoTracking().Include(item => item.Platform).ToListAsync(CancellationToken);
+            var ingestionSourceCodes = await db.IngestionSources.AsNoTracking()
+                .Select(item => item.ServerCode)
+                .ToListAsync(CancellationToken);
+            ingestionSourceCodes.Add(sourceImport.ServerCode);
+            ValidateContinuousSources(taskImport, ingestionSourceCodes);
 
             ValidateMode(source != null, task);
+            ValidateExistingSource(source);
             ValidateExistingInterfaces(task, interfaceImports);
 
             if (source == null)
@@ -180,7 +198,8 @@
                 source = new IngestionSource();
                 db.IngestionSources.Add(source);
             }
-            ApplySource(source, sourceImport);
+            ApplySource(source, sourceImport,
+                ResolveApiInterface(apiInterfaces, sourceImport.PlatformName, sourceImport.ServerCode, sourceImport.QueryPath).Id);
 
             if (task == null)
             {
@@ -198,7 +217,22 @@
                     iface = new SyncTaskInterface();
                     task.Interfaces.Add(iface);
                 }
-                ApplyInterface(iface, interfaceImport);
+                var apiInterface = ResolveApiInterface(
+                    apiInterfaces,
+                    interfaceImport.PlatformName,
+                    interfaceImport.ServerCode,
+                    interfaceImport.QueryPath);
+                ValidatePatientContinuousApi(interfaceImport, apiInterface);
+                ApplyInterface(iface, interfaceImport, apiInterface.Id);
+            }
+
+            if (task.PatientContinuousSyncEnabled && task.Id > 0)
+            {
+                var activeTasks = await db.ActiveSyncTasks
+                    .Where(item => item.SyncTaskId == task.Id && item.Enabled)
+                    .ToListAsync(CancellationToken);
+                foreach (var activeTask in activeTasks)
+                    activeTask.Enabled = false;
             }
 
             await db.SaveChangesAsync(CancellationToken);
@@ -226,6 +260,7 @@
         var interfaces = import.Interfaces ?? throw new InvalidOperationException("interfaces 不能为空");
 
         source.Name = (source.Name ?? "").Trim();
+        source.PlatformName = (source.PlatformName ?? "").Trim();
         source.ServerCode = (source.ServerCode ?? "").Trim();
         source.QueryPath = NormalizePath(source.QueryPath);
         source.TimeField = (source.TimeField ?? "").Trim();
@@ -234,16 +269,25 @@
             .Select(value => value.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+        source.QueryMappings = NormalizeQueryMappings(source.QueryMappings, "source.queryMappings");
+        if (source.QueryMappings.Any(item =>
+                !string.Equals(item.SourceField, "PatientId", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(item.SourceField, "VisitId", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("source.queryMappings 的 sourceField 只支持 PatientId 或 VisitId");
         task.Name = (task.Name ?? "").Trim();
         task.Code = (task.Code ?? "").Trim();
         task.PushType = (task.PushType ?? "").Trim();
         task.PushTarget = (task.PushTarget ?? "").Trim();
         task.PatientIdField = (task.PatientIdField ?? "").Trim();
         task.VisitSnField = (task.VisitSnField ?? "").Trim();
+        task.AdmissionSourceServerCode = task.AdmissionSourceServerCode?.Trim();
+        task.AdmissionTimeField = task.AdmissionTimeField?.Trim();
+        task.DischargeSourceServerCode = task.DischargeSourceServerCode?.Trim();
+        task.DischargeTimeField = task.DischargeTimeField?.Trim();
 
-        if (string.IsNullOrWhiteSpace(source.Name) || string.IsNullOrWhiteSpace(source.ServerCode) ||
-            string.IsNullOrWhiteSpace(source.QueryPath) || string.IsNullOrWhiteSpace(source.TimeField))
-            throw new InvalidOperationException("source 的 name、serverCode、queryPath、timeField 均不能为空");
+        if (string.IsNullOrWhiteSpace(source.Name) || string.IsNullOrWhiteSpace(source.PlatformName) || string.IsNullOrWhiteSpace(source.ServerCode) ||
+            string.IsNullOrWhiteSpace(source.TimeField))
+            throw new InvalidOperationException("source 的 name、platformName、serverCode、timeField 均不能为空");
         if (source.PrimaryKeys.Count == 0)
             throw new InvalidOperationException("source.primaryKeys 至少包含一个字段");
         if (source.PollingIntervalSeconds < 10)
@@ -259,6 +303,14 @@
             throw new InvalidOperationException("task.pushType 只支持 Api 或 Database");
         if (task.PollingIntervalSeconds < 10 || task.PatientConcurrency < 1 || task.ApiConcurrency < 1)
             throw new InvalidOperationException("task 的轮询间隔或并发数配置无效");
+        if (task.PatientContinuousSyncEnabled &&
+            (task.PatientContinuousSyncIntervalSeconds < 60 ||
+             task.PatientContinuousSyncLookbackMinutes < 0 ||
+             string.IsNullOrWhiteSpace(task.AdmissionSourceServerCode) ||
+             string.IsNullOrWhiteSpace(task.AdmissionTimeField) ||
+             string.IsNullOrWhiteSpace(task.DischargeSourceServerCode) ||
+             string.IsNullOrWhiteSpace(task.DischargeTimeField)))
+            throw new InvalidOperationException("启用患者持续同步后，必须完整配置入院、出院来源，间隔不能小于 60 秒且回看分钟不能为负数");
         if (task.EnableTriggerRecordPush && string.IsNullOrWhiteSpace(task.TriggerPushTarget))
             throw new InvalidOperationException("启用触发记录单独推送后，triggerPushTarget 不能为空");
         if (interfaces.Count == 0)
@@ -267,19 +319,64 @@
         foreach (var iface in interfaces)
         {
             iface.InterfaceKey = (iface.InterfaceKey ?? "").Trim();
+            iface.PlatformName = (iface.PlatformName ?? "").Trim();
             iface.ServerCode = (iface.ServerCode ?? "").Trim();
             iface.DisplayName = (iface.DisplayName ?? "").Trim();
             iface.QueryPath = NormalizePath(iface.QueryPath);
+            iface.ParentInterfaceKey = string.IsNullOrWhiteSpace(iface.ParentInterfaceKey)
+                ? null
+                : iface.ParentInterfaceKey.Trim();
+            iface.MountField = string.IsNullOrWhiteSpace(iface.MountField) ? null : iface.MountField.Trim();
+            iface.QueryMappings = NormalizeQueryMappings(iface.QueryMappings, $"接口「{iface.InterfaceKey}」的 queryMappings");
+            iface.LinkMappings = NormalizeLinkMappings(iface.LinkMappings, $"接口「{iface.InterfaceKey}」的 linkMappings");
             iface.AccessWindowStart = iface.AccessWindowStart?.Trim();
             iface.AccessWindowEnd = iface.AccessWindowEnd?.Trim();
-            if (string.IsNullOrWhiteSpace(iface.InterfaceKey) || string.IsNullOrWhiteSpace(iface.ServerCode) ||
-                string.IsNullOrWhiteSpace(iface.DisplayName) || string.IsNullOrWhiteSpace(iface.QueryPath))
-                throw new InvalidOperationException("每个接口的 interfaceKey、serverCode、displayName、queryPath 均不能为空");
+            iface.QueryStartTimeSourceServerCode = iface.QueryStartTimeSourceServerCode?.Trim();
+            iface.QueryStartTimeSourceField = iface.QueryStartTimeSourceField?.Trim();
+            iface.QueryEndTimeSourceServerCode = iface.QueryEndTimeSourceServerCode?.Trim();
+            iface.QueryEndTimeSourceField = iface.QueryEndTimeSourceField?.Trim();
+            iface.ContinuousRecordKeyFields = (iface.ContinuousRecordKeyFields ?? [])
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (iface.ContinuousPollingEnabled)
+                iface.UseTodayTimeRange = false;
+            if (string.IsNullOrWhiteSpace(iface.InterfaceKey) || string.IsNullOrWhiteSpace(iface.PlatformName) || string.IsNullOrWhiteSpace(iface.ServerCode) ||
+                string.IsNullOrWhiteSpace(iface.DisplayName))
+                throw new InvalidOperationException("每个接口的 interfaceKey、platformName、serverCode、displayName 均不能为空");
+            if (string.IsNullOrWhiteSpace(iface.ParentInterfaceKey) &&
+                (iface.QueryMappings == null || iface.QueryMappings.Count == 0))
+                throw new InvalidOperationException($"根接口「{iface.InterfaceKey}」必须配置 queryMappings");
+            if (!string.IsNullOrWhiteSpace(iface.ParentInterfaceKey) &&
+                (iface.LinkMappings == null || iface.LinkMappings.Count == 0 || string.IsNullOrWhiteSpace(iface.MountField)))
+                throw new InvalidOperationException($"子接口「{iface.InterfaceKey}」必须配置 linkMappings 和 mountField");
             if (iface.InterfaceKey.Length > 100 || iface.InterfaceKey.Any(value =>
                     !char.IsLetterOrDigit(value) && value is not '-' and not '_'))
                 throw new InvalidOperationException($"interfaceKey「{iface.InterfaceKey}」格式无效");
             if (iface.SortOrder < 1)
                 throw new InvalidOperationException($"接口「{iface.InterfaceKey}」的 sortOrder 必须大于 0");
+            if (iface.ContinuousPollingEnabled)
+            {
+                if (!string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」只有顶层接口可以启用持续轮询");
+                if (string.IsNullOrWhiteSpace(task.VisitSnField))
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」启用持续轮询时，任务必须配置统一就诊号字段");
+                if (iface.ContinuousPollingIntervalSeconds < 1)
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」的持续轮询间隔必须大于 0");
+                if (string.IsNullOrWhiteSpace(iface.QueryStartTimeSourceServerCode) ||
+                    string.IsNullOrWhiteSpace(iface.QueryStartTimeSourceField) ||
+                    string.IsNullOrWhiteSpace(iface.QueryEndTimeSourceServerCode) ||
+                    string.IsNullOrWhiteSpace(iface.QueryEndTimeSourceField))
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」必须配置入院和出院时间来源");
+            }
+            if (iface.PatientContinuousSyncEnabled)
+            {
+                if (!string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」只有独立接口可以启用患者持续同步");
+                if (iface.ContinuousRecordKeyFields.Count == 0 && !iface.ContinuousUseRowHash)
+                    throw new InvalidOperationException($"接口「{iface.InterfaceKey}」必须配置记录唯一键，或明确启用不可变整行哈希");
+            }
 
             InterfaceAccessWindow.Validate(new SyncTaskInterface
             {
@@ -295,8 +392,18 @@
             .FirstOrDefault(group => group.Count() > 1)?.Key;
         if (duplicateKey != null)
             throw new InvalidOperationException($"interfaces 存在重复的 interfaceKey：{duplicateKey}");
+        var interfaceKeys = interfaces.Select(item => item.InterfaceKey).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var iface in interfaces.Where(item => item.ParentInterfaceKey != null))
+        {
+            if (!interfaceKeys.Contains(iface.ParentInterfaceKey!))
+                throw new InvalidOperationException($"子接口「{iface.InterfaceKey}」的 parentInterfaceKey 不存在");
+            if (string.Equals(iface.InterfaceKey, iface.ParentInterfaceKey, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"接口「{iface.InterfaceKey}」不能以自己作为父接口");
+        }
         if (task.Enabled && interfaces.All(item => !item.Enabled))
             throw new InvalidOperationException("启用任务时至少需要一个启用的关联接口");
+        if (task.PatientContinuousSyncEnabled && interfaces.All(item => !item.Enabled || !item.PatientContinuousSyncEnabled))
+            throw new InvalidOperationException("启用患者持续同步后至少需要选择一个启用的持续同步接口");
 
         return import;
     }
@@ -309,7 +416,7 @@
             throw new InvalidOperationException("更新方式要求采集源和同步任务均已存在");
     }
 
-    private static void ValidateExistingInterfaces(SyncTask? task, IEnumerable<DynamicApiTaskInterfaceImport> imports)
+    private static void ValidateExistingInterfaces(SyncTask? task, IEnumerable<ApiTaskInterfaceImport> imports)
     {
         if (task == null)
             return;
@@ -318,8 +425,8 @@
         {
             var existing = task.Interfaces.FirstOrDefault(item =>
                 string.Equals(item.InterfaceKey, import.InterfaceKey, StringComparison.OrdinalIgnoreCase));
-            if (existing != null && !IngestionService.IsDynamicApiSourceType(existing.SourceType))
-                throw new InvalidOperationException($"interfaceKey「{import.InterfaceKey}」已用于非 DynamicApi 接口，不能覆盖");
+            if (existing != null && IngestionService.IsDatabaseSourceType(existing.SourceType))
+                throw new InvalidOperationException($"interfaceKey「{import.InterfaceKey}」已用于数据库接口，不能覆盖");
         }
     }
 
@@ -334,12 +441,19 @@
         var items = new List<string>
         {
             $"操作：{(_mode == ModeCreate ? "创建" : "更新")}采集源「{import.Source!.Name}」与任务「{import.Task!.Name}」",
-            $"采集接口：{import.Source.QueryPath}；请求参数仅 startTime、endTime",
+            $"采集接口：{import.Source.PlatformName} / {import.Source.QueryPath}",
             $"关联接口：共 {interfaces.Count} 个，新增 {addCount} 个，更新 {updateCount} 个"
         };
+        if (import.Task.PatientContinuousSyncEnabled)
+        {
+            items.Add($"患者持续同步：每 {import.Task.PatientContinuousSyncIntervalSeconds} 秒执行，回看 {import.Task.PatientContinuousSyncLookbackMinutes} 分钟，接口 {interfaces.Count(item => item.PatientContinuousSyncEnabled)} 个");
+        }
         items.AddRange(interfaces
             .OrderBy(item => item.SortOrder)
-            .Select(item => $"第 {item.SortOrder} 步：{item.DisplayName}（{item.InterfaceKey}）→ {item.QueryPath}"));
+            .Select(item => $"第 {item.SortOrder} 步：{item.DisplayName}（{item.InterfaceKey}）→ {item.QueryPath}" +
+                (item.PatientContinuousSyncEnabled
+                    ? $"；{(item.ContinuousUseTimeRange ? "时间窗口增量" : "无时间窗口轮询")}"
+                    : "")));
         if (_mode == ModeUpdate)
             items.Add("JSON 未列出的已有接口将保留，不会删除");
         return items;
@@ -356,11 +470,12 @@
         Enabled = import.Task.Enabled
     };
 
-    private static void ApplySource(IngestionSource target, DynamicApiIngestionImport source)
+    private static void ApplySource(IngestionSource target, ApiIngestionImport source, int apiInterfaceId)
     {
         target.Name = source.Name;
         target.ServerCode = source.ServerCode;
-        target.SourceType = IngestionService.SourceTypeDynamicApi;
+        target.SourceType = IngestionService.SourceTypeApi;
+        target.ApiInterfaceId = apiInterfaceId;
         target.QueryPath = source.QueryPath;
         target.TimeField = source.TimeField;
         target.PrimaryKeys = string.Join(",", source.PrimaryKeys);
@@ -372,6 +487,7 @@
         target.EndOffsetUnit = "minutes";
         target.Enabled = source.Enabled;
         target.Conditions = null;
+        target.QueryMappings = SerializeQueryMappings(source.QueryMappings);
         target.DatabaseResourceId = null;
         target.DatabaseType = IngestionService.DatabaseTypeSqlServer;
         target.ConnectionStringName = null;
@@ -393,6 +509,13 @@
         target.PatientIdField = task.PatientIdField;
         target.VisitSnField = task.VisitSnField;
         target.PollingIntervalSeconds = task.PollingIntervalSeconds;
+        target.PatientContinuousSyncEnabled = task.PatientContinuousSyncEnabled;
+        target.PatientContinuousSyncIntervalSeconds = task.PatientContinuousSyncIntervalSeconds;
+        target.PatientContinuousSyncLookbackMinutes = task.PatientContinuousSyncLookbackMinutes;
+        target.AdmissionSourceServerCode = task.AdmissionSourceServerCode;
+        target.AdmissionTimeField = task.AdmissionTimeField;
+        target.DischargeSourceServerCode = task.DischargeSourceServerCode;
+        target.DischargeTimeField = task.DischargeTimeField;
         target.PatientConcurrency = task.PatientConcurrency;
         target.ApiConcurrency = task.ApiConcurrency;
         target.Enabled = task.Enabled;
@@ -403,14 +526,25 @@
             : null;
     }
 
-    private static void ApplyInterface(SyncTaskInterface target, DynamicApiTaskInterfaceImport iface)
+    private static void ApplyInterface(SyncTaskInterface target, ApiTaskInterfaceImport iface, int apiInterfaceId)
     {
         target.InterfaceKey = iface.InterfaceKey;
         target.ServerCode = iface.ServerCode;
         target.DisplayName = iface.DisplayName;
-        target.SourceType = IngestionService.SourceTypeDynamicApi;
+        target.SourceType = IngestionService.SourceTypeApi;
+        target.ApiInterfaceId = apiInterfaceId;
         target.QueryPath = iface.QueryPath;
         target.UseTodayTimeRange = iface.UseTodayTimeRange;
+        target.ContinuousPollingEnabled = iface.ContinuousPollingEnabled;
+        target.ContinuousPollingIntervalSeconds = iface.ContinuousPollingIntervalSeconds;
+        target.PatientContinuousSyncEnabled = iface.PatientContinuousSyncEnabled;
+        target.ContinuousUseTimeRange = iface.ContinuousUseTimeRange;
+        target.ContinuousRecordKeyFields = string.Join(",", iface.ContinuousRecordKeyFields ?? []);
+        target.ContinuousUseRowHash = iface.ContinuousUseRowHash;
+        target.QueryStartTimeSourceServerCode = iface.QueryStartTimeSourceServerCode?.Trim();
+        target.QueryStartTimeSourceField = iface.QueryStartTimeSourceField?.Trim();
+        target.QueryEndTimeSourceServerCode = iface.QueryEndTimeSourceServerCode?.Trim();
+        target.QueryEndTimeSourceField = iface.QueryEndTimeSourceField?.Trim();
         target.AccessWindowEnabled = iface.AccessWindowEnabled;
         target.AccessWindowStart = iface.AccessWindowStart?.Trim();
         target.AccessWindowEnd = iface.AccessWindowEnd?.Trim();
@@ -441,14 +575,127 @@
         target.QuerySql = null;
         target.QueryField = "";
         target.QueryValueField = null;
+        target.QueryMappings = iface.ParentInterfaceKey == null
+            ? SerializeQueryMappings(iface.QueryMappings)
+            : null;
         target.FilterConditions = null;
-        target.ParentInterfaceKey = null;
+        target.ParentInterfaceKey = string.IsNullOrWhiteSpace(iface.ParentInterfaceKey) ? null : iface.ParentInterfaceKey.Trim();
         target.ParentResultField = null;
-        target.LinkMappings = null;
-        target.MountField = null;
+        target.LinkMappings = iface.ParentInterfaceKey != null && iface.LinkMappings?.Count > 0
+            ? JsonSerializer.Serialize(iface.LinkMappings)
+            : null;
+        target.MountField = string.IsNullOrWhiteSpace(iface.MountField) ? null : iface.MountField.Trim();
         target.RouteField = null;
         target.RouteOperator = "eq";
         target.RouteValue = null;
+    }
+
+    private static void ValidateContinuousSources(
+        SyncTaskImport task,
+        IEnumerable<string> ingestionSourceCodes)
+    {
+        if (!task.PatientContinuousSyncEnabled)
+            return;
+
+        var codes = ingestionSourceCodes.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!codes.Contains(task.AdmissionSourceServerCode!) ||
+            !codes.Contains(task.DischargeSourceServerCode!))
+            throw new InvalidOperationException("患者持续同步配置的入院或出院采集源不存在");
+    }
+
+    private static void ValidateExistingSource(IngestionSource? source)
+    {
+        if (source != null && IngestionService.IsDatabaseSource(source))
+            throw new InvalidOperationException($"采集源「{source.ServerCode}」已用于数据库采集，不能通过 API 任务导入覆盖");
+    }
+
+    private static ApiInterface ResolveApiInterface(
+        IEnumerable<ApiInterface> interfaces,
+        string platformName,
+        string serverCode,
+        string queryPath)
+    {
+        var normalizedPath = queryPath.Trim('/');
+        var matches = interfaces.Where(item =>
+                string.Equals(item.Platform!.Name, platformName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.Code, serverCode, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(item.RelativePath.Trim('/'), normalizedPath, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return matches.Count switch
+        {
+            1 => matches[0],
+            0 => throw new InvalidOperationException(
+                $"API 接口目录中不存在「{platformName} / {serverCode} / {normalizedPath}」"),
+            _ => throw new InvalidOperationException(
+                $"API 接口目录中存在多个「{platformName} / {serverCode} / {normalizedPath}」")
+        };
+    }
+
+    private static void ValidatePatientContinuousApi(ApiTaskInterfaceImport item, ApiInterface apiInterface)
+    {
+        if (!item.PatientContinuousSyncEnabled)
+            return;
+
+        var queryConfig = apiInterface.Platform!.GetQueryConfig();
+        if (!string.Equals(
+                queryConfig.ParameterMode,
+                ApiParameterModes.DirectProperties,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"接口「{item.InterfaceKey}」启用患者持续同步时只支持直接参数 API");
+        }
+        if (item.ContinuousUseTimeRange &&
+            (string.IsNullOrWhiteSpace(queryConfig.StartTimeField) ||
+             string.IsNullOrWhiteSpace(queryConfig.EndTimeField)))
+        {
+            throw new InvalidOperationException(
+                $"接口「{item.InterfaceKey}」启用患者持续同步时，API 平台必须配置开始、结束时间请求字段");
+        }
+    }
+
+    private static string? SerializeQueryMappings(IEnumerable<InterfaceQueryMapping>? mappings)
+    {
+        var values = mappings?
+            .Where(item => !string.IsNullOrWhiteSpace(item.TargetField) && !string.IsNullOrWhiteSpace(item.SourceField))
+            .Select(item => new InterfaceQueryMapping
+            {
+                TargetField = item.TargetField.Trim(),
+                SourceField = item.SourceField.Trim()
+            })
+            .ToList();
+        return values?.Count > 0 ? JsonSerializer.Serialize(values) : null;
+    }
+
+    private static List<InterfaceQueryMapping> NormalizeQueryMappings(
+        IEnumerable<InterfaceQueryMapping>? mappings,
+        string name)
+    {
+        var values = mappings?.Select(item => new InterfaceQueryMapping
+        {
+            TargetField = (item.TargetField ?? "").Trim(),
+            SourceField = (item.SourceField ?? "").Trim()
+        }).ToList() ?? [];
+        if (values.Any(item => string.IsNullOrWhiteSpace(item.TargetField) || string.IsNullOrWhiteSpace(item.SourceField)))
+            throw new InvalidOperationException($"{name} 的字段名不能为空");
+        if (values.GroupBy(item => item.TargetField, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            throw new InvalidOperationException($"{name} 存在重复的 targetField");
+        return values;
+    }
+
+    private static List<InterfaceLinkMapping> NormalizeLinkMappings(
+        IEnumerable<InterfaceLinkMapping>? mappings,
+        string name)
+    {
+        var values = mappings?.Select(item => new InterfaceLinkMapping
+        {
+            ParentField = (item.ParentField ?? "").Trim(),
+            ChildField = (item.ChildField ?? "").Trim()
+        }).ToList() ?? [];
+        if (values.Any(item => string.IsNullOrWhiteSpace(item.ParentField) || string.IsNullOrWhiteSpace(item.ChildField)))
+            throw new InvalidOperationException($"{name} 的字段名不能为空");
+        if (values.GroupBy(item => item.ChildField, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            throw new InvalidOperationException($"{name} 存在重复的 childField");
+        return values;
     }
 
     private static string NormalizePath(string? path)

@@ -68,7 +68,7 @@
             </MudItem>
         </MudGrid>
         <MudText Typo="Typo.body2" Color="Color.Secondary">
-            可只填一项；两项都填写时按输入顺序一一对应。DynamicApi 采集源必须同时填写。
+            可只填一项；两项都填写时按输入顺序一一对应。按对象调用 API 时需在采集源中配置请求字段映射。
         </MudText>
         @TaskSelector
         @SkipSyncedSwitch
@@ -355,20 +355,11 @@
     {
         var logService = new SyncLogService(ContextFactory);
         var enabledTasks = await logService.GetEnabledTasksAsync(CancellationToken);
-        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
-        var sourceTypes = (await db.IngestionSources
-                .AsNoTracking()
-                .Select(s => new { s.ServerCode, s.SourceType })
-                .ToListAsync(CancellationToken))
-            .ToDictionary(s => s.ServerCode, s => s.SourceType, StringComparer.OrdinalIgnoreCase);
-
         _tasks = enabledTasks.Select(t => new TaskSelection
         {
             Task = t,
             Selected = true,
             TriggerRecordSelected = t.EnableTriggerRecordPush,
-            IsDynamicApiSource = sourceTypes.TryGetValue(t.TriggerServerCode, out var sourceType) &&
-                                 IngestionService.IsDynamicApiSourceType(sourceType),
             Interfaces = t.Interfaces
                 .Where(i => string.IsNullOrWhiteSpace(i.ParentInterfaceKey))
                 .OrderBy(i => i.SortOrder)
@@ -541,16 +532,6 @@
                 inj_snackbar.Add($"以下目标未配置就诊号字段：{string.Join("、", invalidTasks)}", Severity.Warning);
                 return;
             }
-        }
-
-        var invalidDynamicTasks = _tasks
-            .Where(t => t.Selected && t.IsDynamicApiSource && (patientIds.Count == 0 || visitSns.Count == 0))
-            .Select(t => t.Task.Name)
-            .ToList();
-        if (invalidDynamicTasks.Count > 0)
-        {
-            inj_snackbar.Add($"以下 DynamicApi 目标必须同时填写患者ID和就诊号：{string.Join("、", invalidDynamicTasks)}", Severity.Warning);
-            return;
         }
 
         _executing = true;
@@ -788,7 +769,6 @@
         public SyncTask Task { get; set; } = default!;
         public bool Selected { get; set; }
         public bool TriggerRecordSelected { get; set; }
-        public bool IsDynamicApiSource { get; set; }
         public List<InterfaceSelection> Interfaces { get; set; } = [];
     }
 

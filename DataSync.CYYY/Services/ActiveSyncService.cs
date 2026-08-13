@@ -13,8 +13,6 @@ namespace DataSync.CYYY.Services;
 /// </summary>
 public class ActiveSyncService
 {
-    private const int MaxRetryCount = 3;
-
     private readonly IDbContextFactory<SyncDbContext> _dbFactory;
     private readonly ActiveMedicalRecordClient _activeClient;
     private readonly DatabaseQueryService _databaseQueryService;
@@ -49,7 +47,7 @@ public class ActiveSyncService
                     .ThenInclude(i => i!.DatabaseResource)
             .Include(t => t.Sources)
                 .ThenInclude(s => s.DatabaseResource)
-            .Where(t => t.Enabled)
+            .Where(t => t.Enabled && (t.SyncTask == null || !t.SyncTask.PatientContinuousSyncEnabled))
             .OrderBy(t => t.Id)
             .ToListAsync(ct);
     }
@@ -64,7 +62,23 @@ public class ActiveSyncService
                 batch = await _activeClient.GetActiveRecordsAsync(task, null, ct);
 
             await UpdateCursorAsync(task, batch.NextCursor, ct);
-            cases = batch.Items;
+            var invalidCaseCount = batch.Items.Count(item => string.IsNullOrWhiteSpace(item.InpatientNo));
+            cases = batch.Items
+                .Where(item => !string.IsNullOrWhiteSpace(item.InpatientNo))
+                .ToList();
+            if (invalidCaseCount > 0)
+            {
+                await AddRunLogAsync(
+                    task,
+                    null,
+                    null,
+                    "Warning",
+                    $"Active 病历中有 {invalidCaseCount} 条缺少 inpatientNo，未加入同步队列",
+                    invalidCaseCount,
+                    0,
+                    0,
+                    ct);
+            }
             if (cases.Count == 0)
             {
                 _logger.LogInformation("Active 补采任务 [{TaskName}] 未获取到 Active 病历", task.Name);
@@ -127,6 +141,38 @@ public class ActiveSyncService
         }
     }
 
+    public async Task<List<ActiveMedicalRecordInfo>> GetCurrentActiveCasesAsync(
+        int activeTaskId,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var task = await db.ActiveSyncTasks
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.Id == activeTaskId, ct);
+        if (task == null)
+            return [];
+
+        var result = new List<ActiveMedicalRecordInfo>();
+        var seenCursors = new HashSet<long>();
+        long? cursor = null;
+        while (true)
+        {
+            var batch = await _activeClient.GetActiveRecordsAsync(task, cursor, ct);
+            result.AddRange(batch.Items);
+            if (!batch.NextCursor.HasValue)
+                break;
+            if (!seenCursors.Add(batch.NextCursor.Value))
+                throw new InvalidOperationException($"Active 病历接口返回了重复游标 {batch.NextCursor.Value}");
+
+            cursor = batch.NextCursor;
+        }
+
+        return result
+            .GroupBy(BuildActiveCaseKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.First())
+            .ToList();
+    }
+
     private async Task QueueCasesAsync(
         ActiveSyncTask task,
         ActiveSyncSource source,
@@ -179,8 +225,7 @@ public class ActiveSyncService
         var states = await db.ActiveSyncCaseSourceStates
             .Where(state => state.TaskId == task.Id &&
                 state.SourceId == source.Id &&
-                state.PendingCaseJson != null &&
-                state.RetryCount < MaxRetryCount)
+                state.PendingCaseJson != null)
             .ToListAsync(ct);
 
         foreach (var state in states)
@@ -204,7 +249,6 @@ public class ActiveSyncService
             .Where(state => state.TaskId == task.Id &&
                 state.SourceId == source.Id &&
                 state.PendingCaseJson != null &&
-                state.RetryCount < MaxRetryCount &&
                 (!state.NextQueryTime.HasValue || state.NextQueryTime <= now))
             .Select(state => state.PendingCaseJson!)
             .ToListAsync(ct);
@@ -494,31 +538,14 @@ public class ActiveSyncService
         }
         else
         {
-            state.RetryCount++;
+            state.RetryCount = 0;
             state.EmptyCount = 0;
-            state.LastError = state.RetryCount >= MaxRetryCount
-                ? $"{error}；已达到最大自动重试次数 {MaxRetryCount}，请手动重试"
-                : error;
-            state.NextQueryTime = state.RetryCount >= MaxRetryCount
-                ? null
-                : now.AddSeconds(Math.Max(60, task.PollingIntervalSeconds));
+            state.LastError = error;
+            state.PendingCaseJson = null;
+            state.NextQueryTime = now.AddSeconds(Math.Max(60, source.PollingIntervalSeconds));
         }
         state.UpdatedAt = now;
 
-        await db.SaveChangesAsync(ct);
-    }
-
-    public async Task RetryCaseAsync(long stateId, CancellationToken ct)
-    {
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var state = await db.ActiveSyncCaseSourceStates.FindAsync([stateId], ct);
-        if (state == null || string.IsNullOrWhiteSpace(state.PendingCaseJson))
-            return;
-
-        state.RetryCount = 0;
-        state.LastError = null;
-        state.NextQueryTime = DateTime.Now;
-        state.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync(ct);
     }
 
@@ -580,6 +607,7 @@ public class ActiveSyncService
         TryAdd(record, "MRN", activeCase.Mrn);
         TryAdd(record, "INPATIENT_NO", activeCase.InpatientNo);
         TryAdd(record, "VISIT_NO", activeCase.VisitNo ?? "");
+        TryAdd(record, "VISIT_ID", activeCase.VisitNo ?? "");
         TryAdd(record, "PATIENT_ID", activeCase.PatientId?.ToString() ?? "");
         TryAdd(record, "EVENT_ID", activeCase.EventId?.ToString() ?? "");
         if (activeCase.AdmissionTime.HasValue)
@@ -587,7 +615,7 @@ public class ActiveSyncService
         return record;
     }
 
-    private static string ResolveActiveCaseValue(ActiveMedicalRecordInfo activeCase, string? source)
+    internal static string ResolveActiveCaseValue(ActiveMedicalRecordInfo activeCase, string? source)
         => source?.Trim().ToLowerInvariant() switch
         {
             "mrn" => activeCase.Mrn,
@@ -717,5 +745,15 @@ public class ActiveSyncService
 
     private static string EscapeKeyPart(string value)
         => value.Replace("\\", "\\\\").Replace("|", "\\|").Replace("=", "\\=");
+
+    private static string BuildActiveCaseKey(ActiveMedicalRecordInfo activeCase)
+    {
+        if (activeCase.Cursor > 0)
+            return $"cursor:{activeCase.Cursor}";
+        if (activeCase.EventId.HasValue)
+            return $"event:{activeCase.EventId.Value}";
+
+        return $"{activeCase.Mrn}|{activeCase.InpatientNo}|{activeCase.VisitNo}|{activeCase.AdmissionTime:O}";
+    }
 
 }

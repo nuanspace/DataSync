@@ -3,6 +3,7 @@
 @inherits BasePage
 @inject LocalQueryService inj_localQueryService
 @inject TaskManagementService inj_taskManagementService
+@inject PatientContinuousSyncRegistrationService inj_patientContinuousRegistration
 @rendermode InteractiveServer
 
 <PageTitle>@(_isEdit ? $"编辑任务 - {_task.Name}" : "新增任务")</PageTitle>
@@ -207,8 +208,8 @@
                         </div>
                     }
                     <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
-                               StartIcon="@Icons.Material.Filled.UploadFile" OnClick="OpenDynamicApiImportDialog">
-                        导入 DynamicApi
+                               StartIcon="@Icons.Material.Filled.UploadFile" OnClick="OpenApiImportDialog">
+                        导入 API 接口
                     </MudButton>
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.Add" OnClick="AddInterface">
@@ -500,10 +501,351 @@
         </MudPaper>
             </MudTabPanel>
 
-            <MudTabPanel Text="在院增量" Icon="@Icons.Material.Filled.SyncAlt">
-                <ActiveSyncSettings @ref="_activeSyncSettings"
-                                    TaskConfig="_task"
-                                    Interfaces="_interfaces" />
+            <MudTabPanel Text="患者持续同步" Icon="@Icons.Material.Filled.SyncAlt">
+                <MudPaper Class="task-panel" Elevation="0">
+                    <div class="task-panel-header">
+                        <div>
+                            <div class="task-panel-tag">患者增量</div>
+                            <MudText Typo="Typo.h6">患者持续同步</MudText>
+                            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                入院、出院采集均可建档；按接口水位查询，并只推送本地未记录过的新唯一键。
+                            </MudText>
+                        </div>
+                        <MudSwitch @bind-Value="_task.PatientContinuousSyncEnabled"
+                                   Label="启用患者持续同步"
+                                   Color="Color.Success" />
+                    </div>
+
+                    @if (_task.PatientContinuousSyncEnabled)
+                    {
+                        <MudGrid>
+                            <MudItem xs="12" sm="6">
+                                <MudSelect T="string" @bind-Value="_task.AdmissionSourceServerCode"
+                                           Label="入院采集源" Variant="Variant.Outlined">
+                                    @foreach (var source in _ingestionSources)
+                                    {
+                                        <MudSelectItem Value="@source.ServerCode">@source.Name (@source.ServerCode)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_task.AdmissionTimeField"
+                                              Label="入院时间字段" Variant="Variant.Outlined"
+                                              HelperText="首次同步从该业务发生时间开始。" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudSelect T="string" @bind-Value="_task.DischargeSourceServerCode"
+                                           Label="出院采集源" Variant="Variant.Outlined">
+                                    @foreach (var source in _ingestionSources)
+                                    {
+                                        <MudSelectItem Value="@source.ServerCode">@source.Name (@source.ServerCode)</MudSelectItem>
+                                    }
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudTextField @bind-Value="_task.DischargeTimeField"
+                                              Label="出院时间字段" Variant="Variant.Outlined"
+                                              HelperText="采集到该业务发生时间后执行最终窗口并结束。" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudNumericField @bind-Value="_task.PatientContinuousSyncIntervalSeconds"
+                                                 Label="同步间隔（秒）" Min="60" Variant="Variant.Outlined" />
+                            </MudItem>
+                            <MudItem xs="12" sm="6">
+                                <MudNumericField @bind-Value="_task.PatientContinuousSyncLookbackMinutes"
+                                                 Label="水位回看（分钟）" Min="0" Variant="Variant.Outlined"
+                                                 HelperText="默认回看5分钟，用于覆盖时间边界和接口延迟。" />
+                            </MudItem>
+                        </MudGrid>
+
+                        <div class="active-interface-heading mt-4">
+                            <div>
+                                <MudText Typo="Typo.subtitle1">持续同步接口</MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                    首期仅支持独立 API 接口；优先配置稳定业务主键。
+                                </MudText>
+                            </div>
+                        </div>
+                        @foreach (var iface in _interfaces.Where(item =>
+                            item.Enabled && !IsDatabaseInterface(item) && !IsChildInterface(item)))
+                        {
+                            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+                                <MudGrid>
+                                    <MudItem xs="12" sm="3">
+                                        <MudSwitch @bind-Value="iface.PatientContinuousSyncEnabled"
+                                                   Label="@GetInterfaceDisplayName(iface)"
+                                                   Color="Color.Success" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="3">
+                                        <MudSwitch @bind-Value="iface.ContinuousUseTimeRange"
+                                                   Label="请求携带时间窗口"
+                                                   Disabled="@(!iface.PatientContinuousSyncEnabled)"
+                                                   Color="Color.Primary" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="4">
+                                        <MudTextField @bind-Value="iface.ContinuousRecordKeyFields"
+                                                      Label="记录唯一键字段"
+                                                      Placeholder="recordId 或 patientId,reportId"
+                                                      Disabled="@(!iface.PatientContinuousSyncEnabled)"
+                                                      Variant="Variant.Outlined" />
+                                    </MudItem>
+                                    <MudItem xs="12" sm="2">
+                                        <MudSwitch @bind-Value="iface.ContinuousUseRowHash"
+                                                   Label="不可变整行哈希"
+                                                   Disabled="@(!iface.PatientContinuousSyncEnabled || !string.IsNullOrWhiteSpace(iface.ContinuousRecordKeyFields))"
+                                                   Color="Color.Warning" />
+                                    </MudItem>
+                                    @if (iface.PatientContinuousSyncEnabled && !iface.ContinuousUseTimeRange)
+                                    {
+                                        <MudItem xs="12">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                每轮只传患者查询参数，不传开始、结束时间；完整返回结果仍按记录唯一键过滤新增。
+                                            </MudText>
+                                        </MudItem>
+                                    }
+                                </MudGrid>
+                            </MudPaper>
+                        }
+
+                        @if (_isEdit)
+                        {
+                            <MudText Class="mt-4" Typo="Typo.caption" Color="Color.Secondary">
+                                请先保存以上配置，再初始化本地已有的当前在院患者。
+                            </MudText>
+                            <MudButton Class="mt-4" Variant="Variant.Outlined" Color="Color.Primary"
+                                       StartIcon="@Icons.Material.Filled.PlaylistAdd"
+                                       OnClick="PreviewAndBootstrapContinuousPatientsAsync">
+                                初始化当前在院患者
+                            </MudButton>
+                        }
+                    }
+
+                    @if (!_task.PatientContinuousSyncEnabled && _isEdit)
+                    {
+                        <MudExpansionPanels Class="mt-4" Elevation="0">
+                            <MudExpansionPanel Text="旧在院增量（兼容现有任务）">
+                                <ActiveSyncSettings @ref="_activeSyncSettings"
+                                                    TaskConfig="_task"
+                                                    Interfaces="_interfaces" />
+                            </MudExpansionPanel>
+                        </MudExpansionPanels>
+                    }
+                </MudPaper>
+            </MudTabPanel>
+
+            <MudTabPanel Text="运行状态" Icon="@Icons.Material.Filled.MonitorHeart" Disabled="@(!_isEdit)">
+                <div class="continuous-runtime-workspace">
+                    @if (_isEdit)
+                    {
+                        <section class="continuous-runtime">
+                            <div class="continuous-runtime-header">
+                                <div>
+                                    <div class="task-panel-tag">运行监控</div>
+                                    <MudText Typo="Typo.h6">患者持续同步</MudText>
+                                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                                        查看待同步患者、执行节奏和该次住院的全部推送与失败日志。
+                                    </MudText>
+                                </div>
+                                <MudButton Variant="Variant.Outlined"
+                                           StartIcon="@Icons.Material.Filled.Refresh"
+                                           Disabled="_continuousRuntimeLoading"
+                                           OnClick="LoadContinuousRuntimeAsync">
+                                    刷新
+                                </MudButton>
+                            </div>
+
+                            @if (_continuousRuntimeLoading)
+                            {
+                                <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mt-3" />
+                            }
+                            else if (!string.IsNullOrWhiteSpace(_continuousRuntimeError))
+                            {
+                                <MudAlert Severity="Severity.Error" Class="mt-3">@_continuousRuntimeError</MudAlert>
+                            }
+                            else
+                            {
+                                <div class="continuous-runtime-stats">
+                                    <button type="button"
+                                            class="@GetContinuousStatusClass(PatientContinuousSyncStatuses.WaitingData)"
+                                            aria-pressed="@IsContinuousStatusSelected(PatientContinuousSyncStatuses.WaitingData)"
+                                            @onclick="() => SelectContinuousStatusAsync(PatientContinuousSyncStatuses.WaitingData)">
+                                        <span>等待数据</span>
+                                        <strong>@_continuousWaitingDataCount</strong>
+                                    </button>
+                                    <button type="button"
+                                            class="@GetContinuousStatusClass(PatientContinuousSyncStatuses.Active)"
+                                            aria-pressed="@IsContinuousStatusSelected(PatientContinuousSyncStatuses.Active)"
+                                            @onclick="() => SelectContinuousStatusAsync(PatientContinuousSyncStatuses.Active)">
+                                        <span>同步中</span>
+                                        <strong>@_continuousActiveCount</strong>
+                                    </button>
+                                    <button type="button"
+                                            class="@GetContinuousStatusClass(PatientContinuousSyncStatuses.Closing)"
+                                            aria-pressed="@IsContinuousStatusSelected(PatientContinuousSyncStatuses.Closing)"
+                                            @onclick="() => SelectContinuousStatusAsync(PatientContinuousSyncStatuses.Closing)">
+                                        <span>结束中</span>
+                                        <strong>@_continuousClosingCount</strong>
+                                    </button>
+                                    <button type="button"
+                                            class="@GetContinuousStatusClass(PatientContinuousSyncStatuses.Completed)"
+                                            aria-pressed="@IsContinuousStatusSelected(PatientContinuousSyncStatuses.Completed)"
+                                            @onclick="() => SelectContinuousStatusAsync(PatientContinuousSyncStatuses.Completed)">
+                                        <span>已完成</span>
+                                        <strong>@_continuousCompletedCount</strong>
+                                    </button>
+                                </div>
+
+                                <MudGrid>
+                                    <MudItem xs="12" lg="5" Class="continuous-patient-pane">
+                                        <div class="continuous-patient-toolbar">
+                                            <div class="continuous-patient-title">
+                                                <MudText Typo="Typo.subtitle2">@GetContinuousPatientListTitle()（@_continuousSessions.Count）</MudText>
+                                                @if (_continuousStatusFilter != ContinuousPendingFilter)
+                                                {
+                                                    <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ShowPendingContinuousSessionsAsync">
+                                                        返回待同步
+                                                    </MudButton>
+                                                }
+                                            </div>
+                                            <MudTextField @bind-Value="_continuousPatientSearch"
+                                                          Placeholder="搜索患者ID或就诊号"
+                                                          Adornment="Adornment.Start"
+                                                          AdornmentIcon="@Icons.Material.Filled.Search"
+                                                          Immediate="true"
+                                                          Margin="Margin.Dense" />
+                                        </div>
+                                        @if (_continuousSessions.Count == 0)
+                                        {
+                                            <div class="continuous-runtime-empty">@GetContinuousEmptySessionText()</div>
+                                        }
+                                        else
+                                        {
+                                            <MudTable T="PatientContinuousSyncSession"
+                                                      Items="FilteredContinuousSessions"
+                                                      Dense="true"
+                                                      Hover="true">
+                                                <HeaderContent>
+                                                    <MudTh>患者ID</MudTh>
+                                                    <MudTh>就诊号</MudTh>
+                                                    <MudTh>状态</MudTh>
+                                                    <MudTh>最近执行</MudTh>
+                                                    <MudTh></MudTh>
+                                                </HeaderContent>
+                                                <RowTemplate>
+                                                    <MudTd DataLabel="患者ID">@context.PatientId</MudTd>
+                                                    <MudTd DataLabel="就诊号">@context.VisitSn</MudTd>
+                                                    <MudTd DataLabel="状态">@GetContinuousSessionStatusText(context.Status)</MudTd>
+                                                    <MudTd DataLabel="最近执行">@FormatContinuousDateTime(GetContinuousLastStartedAt(context.Id))</MudTd>
+                                                    <MudTd>
+                                                        <MudButton Size="Size.Small"
+                                                                   Variant="@(context.Id == _selectedContinuousSession?.Id ? Variant.Filled : Variant.Text)"
+                                                                   OnClick="() => SelectContinuousSessionAsync(context)">
+                                                            查看日志
+                                                        </MudButton>
+                                                    </MudTd>
+                                                </RowTemplate>
+                                                <PagerContent>
+                                                    <MudTablePager PageSizeOptions="@(new int[] { 10, 25, 50 })" />
+                                                </PagerContent>
+                                            </MudTable>
+                                        }
+                                    </MudItem>
+
+                                    <MudItem xs="12" lg="7" Class="continuous-log-pane">
+                                        @if (_selectedContinuousSession == null)
+                                        {
+                                            <div class="continuous-runtime-empty">请选择患者查看日志。</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="continuous-selected-head">
+                                                <div>
+                                                    <MudText Typo="Typo.subtitle2">
+                                                        @_selectedContinuousSession.PatientId / @_selectedContinuousSession.VisitSn
+                                                    </MudText>
+                                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                                        下次执行：@FormatContinuousDateTime(_selectedContinuousSession.NextRunAt)
+                                                    </MudText>
+                                                </div>
+                                                <MudChip T="string" Size="Size.Small" Color="Color.Primary">
+                                                    @GetContinuousSessionStatusText(_selectedContinuousSession.Status)
+                                                </MudChip>
+                                            </div>
+
+                                            @if (_continuousRunLogs.Count == 0)
+                                            {
+                                                <div class="continuous-runtime-empty">
+                                                    @GetContinuousEmptyLogText()
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <MudTable T="PatientContinuousSyncRunLog"
+                                                          Items="_continuousRunLogs"
+                                                          Dense="true"
+                                                          Hover="true">
+                                                    <HeaderContent>
+                                                        <MudTh>时间</MudTh>
+                                                        <MudTh>级别</MudTh>
+                                                        <MudTh>接口</MudTh>
+                                                        <MudTh>查询/推送/失败</MudTh>
+                                                        <MudTh>时间窗口</MudTh>
+                                                        <MudTh>消息</MudTh>
+                                                    </HeaderContent>
+                                                    <RowTemplate>
+                                                        <MudTd DataLabel="时间">@context.CreatedAt.ToString("MM-dd HH:mm:ss")</MudTd>
+                                                        <MudTd DataLabel="级别">
+                                                            <MudChip T="string" Size="Size.Small" Color="@GetContinuousLogColor(context.Level)">
+                                                                @GetContinuousLogLevelText(context.Level)
+                                                            </MudChip>
+                                                        </MudTd>
+                                                        <MudTd DataLabel="接口">@GetContinuousInterfaceText(context)</MudTd>
+                                                        <MudTd DataLabel="查询/推送/失败">
+                                                            @context.QueryCount / @context.PushedCount / @context.FailedCount
+                                                        </MudTd>
+                                                        <MudTd DataLabel="时间窗口">@GetContinuousWindowText(context)</MudTd>
+                                                        <MudTd DataLabel="消息">
+                                                            <div class="continuous-runtime-message" title="@context.Message">@context.Message</div>
+                                                        </MudTd>
+                                                    </RowTemplate>
+                                                    <PagerContent>
+                                                        <MudTablePager PageSizeOptions="@(new int[] { 10, 25, 50, 100 })" />
+                                                    </PagerContent>
+                                                </MudTable>
+                                            }
+                                        }
+                                    </MudItem>
+                                </MudGrid>
+
+                                <MudExpansionPanels Class="mt-4" Elevation="0">
+                                    <MudExpansionPanel Text="任务批次汇总（最近 100 条）">
+                                        @if (_continuousBatchLogs.Count == 0)
+                                        {
+                                            <div class="continuous-runtime-empty">还没有任务批次汇总。</div>
+                                        }
+                                        else
+                                        {
+                                            <MudTable T="PatientContinuousSyncRunLog" Items="_continuousBatchLogs" Dense="true" Hover="true">
+                                                <HeaderContent>
+                                                    <MudTh>时间</MudTh>
+                                                    <MudTh>级别</MudTh>
+                                                    <MudTh>查询/推送/失败</MudTh>
+                                                    <MudTh>消息</MudTh>
+                                                </HeaderContent>
+                                                <RowTemplate>
+                                                    <MudTd DataLabel="时间">@context.CreatedAt.ToString("MM-dd HH:mm:ss")</MudTd>
+                                                    <MudTd DataLabel="级别">@GetContinuousLogLevelText(context.Level)</MudTd>
+                                                    <MudTd DataLabel="查询/推送/失败">@context.QueryCount / @context.PushedCount / @context.FailedCount</MudTd>
+                                                    <MudTd DataLabel="消息">@context.Message</MudTd>
+                                                </RowTemplate>
+                                            </MudTable>
+                                        }
+                                    </MudExpansionPanel>
+                                </MudExpansionPanels>
+                            }
+                        </section>
+                    }
+                </div>
             </MudTabPanel>
         </MudTabs>
 
@@ -544,8 +886,7 @@
                                            Variant="Variant.Outlined"
                                            Margin="Margin.Dense"
                                            Dense="true">
-                                    <MudSelectItem Value="@(IngestionService.SourceTypeDataLake)">DataLake</MudSelectItem>
-                                    <MudSelectItem Value="@(IngestionService.SourceTypeDynamicApi)">DynamicApi</MudSelectItem>
+                                    <MudSelectItem Value="@(IngestionService.SourceTypeApi)">API 平台</MudSelectItem>
                                     <MudSelectItem Value="@(IngestionService.SourceTypeDatabase)">数据库</MudSelectItem>
                                 </MudSelect>
                             </MudItem>
@@ -555,11 +896,11 @@
                                               Variant="Variant.Outlined"
                                               Margin="Margin.Dense" />
                             </MudItem>
-                            @if (IsDatabaseInterface(_editingConfigInterface) || IsDynamicApiInterface(_editingConfigInterface))
+                            @if (IsDatabaseInterface(_editingConfigInterface))
                             {
                                 <MudItem xs="12">
                                     <MudTextField @bind-Value="_editingConfigInterface.ServerCode"
-                                                  Label="@(IsDynamicApiInterface(_editingConfigInterface) ? "下游接口编码" : "接口编码")"
+                                                  Label="接口编码"
                                                   Variant="Variant.Outlined"
                                                   Margin="Margin.Dense" />
                                 </MudItem>
@@ -567,16 +908,19 @@
                             else
                             {
                                 <MudItem xs="12">
-                                    <MudAutocomplete T="string"
-                                                     Value="_editingConfigInterface.ServerCode"
-                                                     Label="目标接口"
-                                                     Variant="Variant.Outlined"
-                                                     Margin="Margin.Dense"
-                                                     SearchFunc="@SearchDataLakeInterfaces"
-                                                     ToStringFunc="@(code => FormatInterfaceDisplay(code))"
-                                                     ValueChanged="@(v => OnInterfaceServerCodeChanged(_editingConfigInterface, v))"
-                                                     Dense="true"
-                                                     CoerceValue="true" />
+                                    <MudSelect T="int?"
+                                               Value="_editingConfigInterface.ApiInterfaceId"
+                                               ValueChanged="@(v => OnApiInterfaceChanged(_editingConfigInterface, v))"
+                                               Label="API 接口"
+                                               Variant="Variant.Outlined"
+                                               Margin="Margin.Dense"
+                                               Dense="true">
+                                        <MudSelectItem T="int?" Value="@((int?)null)">请选择</MudSelectItem>
+                                        @foreach (var apiInterface in _apiInterfaces)
+                                        {
+                                            <MudSelectItem T="int?" Value="@((int?)apiInterface.Id)">@FormatApiInterface(apiInterface)</MudSelectItem>
+                                        }
+                                    </MudSelect>
                                 </MudItem>
                             }
                             @if (IsDatabaseInterface(_editingConfigInterface))
@@ -612,20 +956,76 @@
                                                   HelperText="@GetSqlTemplateHelperText(_editingConfigInterface)" />
                                 </MudItem>
                             }
-                            else if (IsDynamicApiInterface(_editingConfigInterface))
+                            else
                             {
-                                <MudItem xs="12">
-                                    <MudTextField @bind-Value="_editingConfigInterface.QueryPath"
-                                                  Label="查询路径"
-                                                  Variant="Variant.Outlined"
-                                                  Margin="Margin.Dense"
-                                                  HelperText="填写查询端点前缀后的路径部分" />
-                                </MudItem>
                                 <MudItem xs="12">
                                     <MudSwitch @bind-Value="_editingConfigInterface.UseTodayTimeRange"
                                                Label="传入当天 00:00:00 至 23:59:59"
+                                               Disabled="@_editingConfigInterface.ContinuousPollingEnabled"
                                                Color="Color.Primary" />
                                 </MudItem>
+                                @if (!IsChildInterface(_editingConfigInterface))
+                                {
+                                    <MudItem xs="12">
+                                        <MudSwitch T="bool"
+                                                   Value="_editingConfigInterface.ContinuousPollingEnabled"
+                                                   ValueChanged="@(value => OnContinuousPollingChanged(_editingConfigInterface, value))"
+                                                   Label="住院期间持续轮询"
+                                                   Disabled="@_task.PatientContinuousSyncEnabled"
+                                                   Color="Color.Primary" />
+                                    </MudItem>
+                                    @if (_editingConfigInterface.ContinuousPollingEnabled)
+                                    {
+                                        <MudItem xs="12" sm="4">
+                                            <MudNumericField T="int"
+                                                             @bind-Value="_editingConfigInterface.ContinuousPollingIntervalSeconds"
+                                                             Label="轮询间隔（秒）"
+                                                             Min="1"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense" />
+                                        </MudItem>
+                                        <MudItem xs="12" sm="4">
+                                            <MudSelect T="string"
+                                                       @bind-Value="_editingConfigInterface.QueryStartTimeSourceServerCode"
+                                                       Label="入院时间来源接口"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Dense="true">
+                                                @foreach (var source in _ingestionSources)
+                                                {
+                                                    <MudSelectItem Value="@source.ServerCode">@source.Name (@source.ServerCode)</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                        </MudItem>
+                                        <MudItem xs="12" sm="4">
+                                            <MudTextField @bind-Value="_editingConfigInterface.QueryStartTimeSourceField"
+                                                          Label="入院时间来源字段"
+                                                          Placeholder="ADMISSION_TIME"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense" />
+                                        </MudItem>
+                                        <MudItem xs="12" sm="6">
+                                            <MudSelect T="string"
+                                                       @bind-Value="_editingConfigInterface.QueryEndTimeSourceServerCode"
+                                                       Label="出院时间来源接口"
+                                                       Variant="Variant.Outlined"
+                                                       Margin="Margin.Dense"
+                                                       Dense="true">
+                                                @foreach (var source in _ingestionSources)
+                                                {
+                                                    <MudSelectItem Value="@source.ServerCode">@source.Name (@source.ServerCode)</MudSelectItem>
+                                                }
+                                            </MudSelect>
+                                        </MudItem>
+                                        <MudItem xs="12" sm="6">
+                                            <MudTextField @bind-Value="_editingConfigInterface.QueryEndTimeSourceField"
+                                                          Label="出院时间来源字段"
+                                                          Placeholder="DISCHARGE_TIME"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense" />
+                                        </MudItem>
+                                    }
+                                }
                             }
                         </MudGrid>
                     </div>
@@ -666,15 +1066,7 @@
                             <MudText Typo="Typo.subtitle1">查询映射</MudText>
                         </div>
                         <MudGrid Spacing="2">
-                            @if (IsDynamicApiInterface(_editingConfigInterface))
-                            {
-                                <MudItem xs="12">
-                                    <MudAlert Severity="Severity.Info" Dense="true">
-                                        自动使用任务配置的患者 ID 字段和住院次数字段。
-                                    </MudAlert>
-                                </MudItem>
-                            }
-                            else if (IsChildInterface(_editingConfigInterface))
+                            @if (IsChildInterface(_editingConfigInterface))
                             {
                                 <MudItem xs="12">
                                     <div class="interface-inline-summary config-inline-summary">
@@ -683,7 +1075,7 @@
                                     </div>
                                 </MudItem>
                             }
-                            else
+                            else if (IsDatabaseInterface(_editingConfigInterface))
                             {
                                 <MudItem xs="12" sm="6">
                                     <MudTextField @bind-Value="_editingConfigInterface.QueryField"
@@ -703,6 +1095,38 @@
                                                      CoerceValue="true"
                                                      SearchFunc="@SearchTriggerSourceColumns"
                                                      HelperText="@GetAutoQueryValueLabel(_editingConfigInterface)" />
+                                </MudItem>
+                            }
+                            else
+                            {
+                                <MudItem xs="12">
+                                    @for (var i = 0; i < _editingQueryMappings.Count; i++)
+                                    {
+                                        var index = i;
+                                        <div class="link-mapping-row">
+                                            <MudTextField @bind-Value="_editingQueryMappings[index].TargetField"
+                                                          Label="API 请求字段"
+                                                          Variant="Variant.Outlined"
+                                                          Margin="Margin.Dense" />
+                                            <MudAutocomplete T="string"
+                                                             Value="_editingQueryMappings[index].SourceField"
+                                                             ValueChanged="@(v => _editingQueryMappings[index].SourceField = v)"
+                                                             Label="触发记录字段"
+                                                             Variant="Variant.Outlined"
+                                                             Margin="Margin.Dense"
+                                                             Dense="true"
+                                                             CoerceValue="true"
+                                                             SearchFunc="@SearchTriggerSourceColumns" />
+                                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                                           Color="Color.Error"
+                                                           Disabled="@(_editingQueryMappings.Count <= 1)"
+                                                           OnClick="@(() => RemoveQueryMapping(index))" />
+                                        </div>
+                                    }
+                                    <MudButton Variant="Variant.Outlined" Size="Size.Small"
+                                               StartIcon="@Icons.Material.Filled.Add" OnClick="AddQueryMapping">
+                                        添加查询映射
+                                    </MudButton>
                                 </MudItem>
                             }
                         </MudGrid>
@@ -848,8 +1272,7 @@
                 }
 
                 @if (_editingConfigInterface != null &&
-                    !IsDatabaseInterface(_editingConfigInterface) &&
-                    !IsDynamicApiInterface(_editingConfigInterface))
+                    IsConditionArrayInterface(_editingConfigInterface))
                 {
                     <div class="config-section">
                         <div class="config-section-header">
@@ -868,24 +1291,17 @@
                                     <MudItem xs="12" sm="3">
                                         <MudSelect T="string" @bind-Value="filter.Type" Label="条件类型"
                                                    Variant="Variant.Outlined" Margin="Margin.Dense" Dense="true">
-                                            <MudSelectItem Value="@("eq")">eq（等于）</MudSelectItem>
-                                            <MudSelectItem Value="@("ne")">ne（不等于）</MudSelectItem>
-                                            <MudSelectItem Value="@("in")">in（包含）</MudSelectItem>
-                                            <MudSelectItem Value="@("notin")">notin（不包含）</MudSelectItem>
-                                            <MudSelectItem Value="@("gt")">gt（大于）</MudSelectItem>
-                                            <MudSelectItem Value="@("ge")">ge（大于等于）</MudSelectItem>
-                                            <MudSelectItem Value="@("lt")">lt（小于）</MudSelectItem>
-                                            <MudSelectItem Value="@("le")">le（小于等于）</MudSelectItem>
-                                            <MudSelectItem Value="@("likeright")">likeright（前缀匹配）</MudSelectItem>
-                                            <MudSelectItem Value="@("isnull")">isnull（为空）</MudSelectItem>
-                                            <MudSelectItem Value="@("isnotnull")">isnotnull（不为空）</MudSelectItem>
+                                            @foreach (var operatorConfig in GetEditingOperators())
+                                            {
+                                                <MudSelectItem Value="@operatorConfig.Value">@operatorConfig.Value（@operatorConfig.DisplayName）</MudSelectItem>
+                                            }
                                         </MudSelect>
                                     </MudItem>
                                     <MudItem xs="12" sm="4">
                                         <MudTextField T="string" Value="@(filter.Value?.ToString() ?? "")" Label="值"
                                                       ValueChanged="@((string v) => { filter.Value = v; })"
                                                       Variant="Variant.Outlined" Margin="Margin.Dense"
-                                                      Disabled="@(filter.Type is "isnull" or "isnotnull")" />
+                                                      Disabled="@(!OperatorRequiresValue(filter.Type))" />
                                     </MudItem>
                                     <MudItem xs="12" sm="1" Class="d-flex align-center justify-center">
                                         <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
@@ -907,48 +1323,48 @@
             </DialogActions>
         </MudDialog>
 
-        <MudDialog @bind-Visible="_showDynamicApiImportDialog" Options="_configDialogOptions">
+        <MudDialog @bind-Visible="_showApiImportDialog" Options="_configDialogOptions">
             <TitleContent>
-                <MudText Typo="Typo.h6">导入单个 DynamicApi 接口</MudText>
+                <MudText Typo="Typo.h6">导入单个 API 接口</MudText>
             </TitleContent>
             <DialogContent>
                 <MudText Typo="Typo.body2" Class="mb-3">
                     JSON 必须包含 taskCode 和 interfaceKey。系统只新增或更新匹配的一个接口，其他接口不会改变。
                 </MudText>
-                <MudTextField @bind-Value="_dynamicApiImportJson"
+                <MudTextField @bind-Value="_apiImportJson"
                               Label="接口配置 JSON"
                               Variant="Variant.Outlined"
                               Lines="14"
                               Immediate="true" />
                 <MudButton Variant="Variant.Outlined" Color="Color.Info" Class="mt-3"
-                           StartIcon="@Icons.Material.Filled.Preview" OnClick="PreviewDynamicApiImport">
+                           StartIcon="@Icons.Material.Filled.Preview" OnClick="PreviewApiImport">
                     生成变更预览
                 </MudButton>
-                @if (!string.IsNullOrWhiteSpace(_dynamicApiImportError))
+                @if (!string.IsNullOrWhiteSpace(_apiImportError))
                 {
-                    <MudAlert Severity="Severity.Error" Class="mt-3">@_dynamicApiImportError</MudAlert>
+                    <MudAlert Severity="Severity.Error" Class="mt-3">@_apiImportError</MudAlert>
                 }
-                else if (_dynamicApiImportPreview.Count > 0)
+                else if (_apiImportPreview.Count > 0)
                 {
                     <MudAlert Severity="Severity.Info" Class="mt-3">
                         <ul>
-                            @foreach (var item in _dynamicApiImportPreview)
+                            @foreach (var item in _apiImportPreview)
                             {
                                 <li>@item</li>
                             }
                         </ul>
                     </MudAlert>
                 }
-                else if (_dynamicApiImportCandidate != null)
+                else if (_apiImportCandidate != null)
                 {
                     <MudAlert Severity="Severity.Success" Class="mt-3">接口配置没有变化。</MudAlert>
                 }
             </DialogContent>
             <DialogActions>
-                <MudButton OnClick="CloseDynamicApiImportDialog">取消</MudButton>
+                <MudButton OnClick="CloseApiImportDialog">取消</MudButton>
                 <MudButton Color="Color.Primary"
-                           Disabled="@(_dynamicApiImportCandidate == null || _dynamicApiImportPreview.Count == 0)"
-                           OnClick="ApplyDynamicApiImport">
+                           Disabled="@(_apiImportCandidate == null || _apiImportPreview.Count == 0)"
+                           OnClick="ApplyApiImport">
                     应用到当前任务
                 </MudButton>
             </DialogActions>
@@ -977,6 +1393,20 @@
     private bool _isEdit;
     private bool _loading = true;
     private bool _saving;
+    private bool _continuousRuntimeLoading;
+    private string? _continuousRuntimeError;
+    private int _continuousWaitingDataCount;
+    private int _continuousActiveCount;
+    private int _continuousClosingCount;
+    private int _continuousCompletedCount;
+    private const string ContinuousPendingFilter = "Pending";
+    private string _continuousStatusFilter = ContinuousPendingFilter;
+    private string _continuousPatientSearch = "";
+    private List<PatientContinuousSyncSession> _continuousSessions = [];
+    private Dictionary<long, DateTime?> _continuousLastStartedAt = [];
+    private PatientContinuousSyncSession? _selectedContinuousSession;
+    private List<PatientContinuousSyncRunLog> _continuousRunLogs = [];
+    private List<PatientContinuousSyncRunLog> _continuousBatchLogs = [];
     private ActiveSyncSettings? _activeSyncSettings;
     private bool _originalEnabled;
     private string _originalTriggerServerCode = "";
@@ -993,28 +1423,29 @@
     private MudDropContainer<SyncTaskInterface>? _dropContainer;
 
     // 下拉数据源
-    private List<DataLakeInterface> _dataLakeInterfaces = [];
+    private List<ApiInterface> _apiInterfaces = [];
     private List<IngestionSource> _ingestionSources = [];
     private List<DatabaseResource> _databaseResources = [];
 
     // 统一配置弹窗相关
     private SyncTaskInterface? _editingConfigInterface;
     private List<KeyValuePair<string, string>> _editingParams = [];
-    private List<DataLakeCondition> _editingFilters = [];
+    private List<QueryCondition> _editingFilters = [];
     private List<InterfaceLinkMapping> _editingLinkMappings = [];
+    private List<InterfaceQueryMapping> _editingQueryMappings = [];
     private string _editingOutputFieldsText = "";
     private bool _showConfigDialog;
     private bool _editingNewInterface;
     private readonly DialogOptions _configDialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
 
-    // DynamicApi 单接口增量导入
-    private bool _showDynamicApiImportDialog;
-    private string _dynamicApiImportJson = "";
-    private string? _dynamicApiImportError;
-    private List<string> _dynamicApiImportPreview = [];
-    private SyncTaskInterface? _dynamicApiImportCandidate;
-    private SyncTaskInterface? _dynamicApiImportExisting;
-    private readonly JsonSerializerOptions _dynamicApiImportJsonOptions = new()
+    // API 单接口增量导入
+    private bool _showApiImportDialog;
+    private string _apiImportJson = "";
+    private string? _apiImportError;
+    private List<string> _apiImportPreview = [];
+    private SyncTaskInterface? _apiImportCandidate;
+    private SyncTaskInterface? _apiImportExisting;
+    private readonly JsonSerializerOptions _apiImportJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow
@@ -1047,8 +1478,12 @@
         // 加载下拉数据源
         {
             await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
-            _dataLakeInterfaces = await db.DataLakeInterfaces
-                .OrderBy(d => d.ServerCode).ToListAsync(CancellationToken);
+            _apiInterfaces = await db.ApiInterfaces
+                .AsNoTracking()
+                .Include(i => i.Platform)
+                .OrderBy(i => i.Platform!.Name)
+                .ThenBy(i => i.Name)
+                .ToListAsync(CancellationToken);
             _ingestionSources = await db.IngestionSources
                 .OrderBy(s => s.ServerCode).ToListAsync(CancellationToken);
             _databaseResources = await db.DatabaseResources
@@ -1094,6 +1529,7 @@
 
             // 预加载触发源列（供"取值字段"下拉使用）
             await EnsureColumnsLoadedAsync(_task.TriggerServerCode);
+            await LoadContinuousRuntimeAsync();
         }
         else
         {
@@ -1104,6 +1540,201 @@
 
         _loading = false;
     }
+
+    private async Task LoadContinuousRuntimeAsync()
+    {
+        if (!_isEdit)
+            return;
+
+        _continuousRuntimeLoading = true;
+        _continuousRuntimeError = null;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var statusCounts = await db.PatientContinuousSyncSessions
+                .AsNoTracking()
+                .Where(item => item.TaskId == _task.Id)
+                .GroupBy(item => item.Status)
+                .Select(group => new { Status = group.Key, Count = group.Count() })
+                .ToDictionaryAsync(item => item.Status, item => item.Count, CancellationToken);
+
+            _continuousWaitingDataCount = statusCounts.GetValueOrDefault(PatientContinuousSyncStatuses.WaitingData);
+            _continuousActiveCount = statusCounts.GetValueOrDefault(PatientContinuousSyncStatuses.Active);
+            _continuousClosingCount = statusCounts.GetValueOrDefault(PatientContinuousSyncStatuses.Closing);
+            _continuousCompletedCount = statusCounts.GetValueOrDefault(PatientContinuousSyncStatuses.Completed);
+
+            var selectedStatuses = GetContinuousSelectedStatuses();
+            var sessions = await db.PatientContinuousSyncSessions
+                .AsNoTracking()
+                .Where(item => item.TaskId == _task.Id && selectedStatuses.Contains(item.Status))
+                .Select(item => new
+                {
+                    Session = item,
+                    LastStartedAt = db.PatientContinuousSyncInterfaceStates
+                        .Where(state => state.SessionId == item.Id)
+                        .Max(state => state.LastStartedAt)
+                })
+                .OrderBy(item => item.LastStartedAt.HasValue)
+                .ThenByDescending(item => item.LastStartedAt)
+                .ThenBy(item => item.Session.PatientId)
+                .ToListAsync(CancellationToken);
+            _continuousSessions = sessions.Select(item => item.Session).ToList();
+            _continuousLastStartedAt = sessions.ToDictionary(item => item.Session.Id, item => item.LastStartedAt);
+
+            var selectedSessionId = _selectedContinuousSession?.Id;
+            _selectedContinuousSession = _continuousSessions
+                .FirstOrDefault(item => item.Id == selectedSessionId)
+                ?? _continuousSessions.FirstOrDefault();
+            _continuousRunLogs = _selectedContinuousSession == null
+                ? []
+                : await db.PatientContinuousSyncRunLogs
+                    .AsNoTracking()
+                    .Where(item => item.TaskId == _task.Id && item.SessionId == _selectedContinuousSession.Id)
+                    .OrderByDescending(item => item.CreatedAt)
+                    .ToListAsync(CancellationToken);
+            _continuousBatchLogs = await db.PatientContinuousSyncRunLogs
+                .AsNoTracking()
+                .Where(item => item.TaskId == _task.Id && item.SessionId == null)
+                .OrderByDescending(item => item.CreatedAt)
+                .Take(100)
+                .ToListAsync(CancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _continuousRuntimeError = $"运行状态加载失败：{ex.Message}";
+            _continuousSessions = [];
+            _continuousLastStartedAt = [];
+            _selectedContinuousSession = null;
+            _continuousRunLogs = [];
+            _continuousBatchLogs = [];
+        }
+        finally
+        {
+            _continuousRuntimeLoading = false;
+        }
+    }
+
+    private IEnumerable<PatientContinuousSyncSession> FilteredContinuousSessions
+        => string.IsNullOrWhiteSpace(_continuousPatientSearch)
+            ? _continuousSessions
+            : _continuousSessions.Where(item =>
+                item.PatientId.Contains(_continuousPatientSearch, StringComparison.OrdinalIgnoreCase) ||
+                item.VisitSn.Contains(_continuousPatientSearch, StringComparison.OrdinalIgnoreCase));
+
+    private string[] GetContinuousSelectedStatuses()
+        => _continuousStatusFilter == ContinuousPendingFilter
+            ? [PatientContinuousSyncStatuses.Active, PatientContinuousSyncStatuses.Closing]
+            : [_continuousStatusFilter];
+
+    private bool IsContinuousStatusSelected(string status)
+        => _continuousStatusFilter == status ||
+           (_continuousStatusFilter == ContinuousPendingFilter &&
+            (status == PatientContinuousSyncStatuses.Active || status == PatientContinuousSyncStatuses.Closing));
+
+    private string GetContinuousStatusClass(string status)
+        => IsContinuousStatusSelected(status)
+            ? "continuous-runtime-stat is-selected"
+            : "continuous-runtime-stat";
+
+    private async Task SelectContinuousStatusAsync(string status)
+    {
+        _continuousStatusFilter = status;
+        await LoadContinuousRuntimeAsync();
+    }
+
+    private async Task ShowPendingContinuousSessionsAsync()
+    {
+        _continuousStatusFilter = ContinuousPendingFilter;
+        await LoadContinuousRuntimeAsync();
+    }
+
+    private string GetContinuousPatientListTitle()
+        => _continuousStatusFilter == ContinuousPendingFilter
+            ? "待同步患者"
+            : $"{GetContinuousSessionStatusText(_continuousStatusFilter)}患者";
+
+    private string GetContinuousEmptySessionText()
+        => _continuousStatusFilter == ContinuousPendingFilter
+            ? "当前没有同步中或结束中的患者。"
+            : $"当前没有{GetContinuousSessionStatusText(_continuousStatusFilter)}患者。";
+
+    private string GetContinuousEmptyLogText()
+        => _selectedContinuousSession?.Status == PatientContinuousSyncStatuses.WaitingData
+            ? "该患者仍在等待完整入院数据，尚未进入接口执行。"
+            : "该患者还没有实际推送或失败明细；查询无新增数据时只计入任务批次汇总。";
+
+    private async Task SelectContinuousSessionAsync(PatientContinuousSyncSession session)
+    {
+        _selectedContinuousSession = session;
+        _continuousRuntimeLoading = true;
+        _continuousRuntimeError = null;
+        try
+        {
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            _continuousRunLogs = await db.PatientContinuousSyncRunLogs
+                .AsNoTracking()
+                .Where(item => item.TaskId == _task.Id && item.SessionId == session.Id)
+                .OrderByDescending(item => item.CreatedAt)
+                .ToListAsync(CancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _continuousRuntimeError = $"患者日志加载失败：{ex.Message}";
+            _continuousRunLogs = [];
+        }
+        finally
+        {
+            _continuousRuntimeLoading = false;
+        }
+    }
+
+    private static Color GetContinuousLogColor(string level)
+        => level switch
+        {
+            "Error" => Color.Error,
+            "Warning" => Color.Warning,
+            _ => Color.Info
+        };
+
+    private static string GetContinuousLogLevelText(string level)
+        => level switch
+        {
+            "Error" => "错误",
+            "Warning" => "警告",
+            _ => "信息"
+        };
+
+    private static string GetContinuousInterfaceText(PatientContinuousSyncRunLog log)
+        => string.IsNullOrWhiteSpace(log.InterfaceName)
+            ? string.IsNullOrWhiteSpace(log.ServerCode) ? "-" : log.ServerCode
+            : string.IsNullOrWhiteSpace(log.ServerCode) ? log.InterfaceName : $"{log.InterfaceName}（{log.ServerCode}）";
+
+    private static string GetContinuousWindowText(PatientContinuousSyncRunLog log)
+    {
+        if (!log.InterfaceId.HasValue)
+            return "-";
+        if (!log.WindowFrom.HasValue && !log.WindowTo.HasValue)
+            return "无时间窗口";
+        return $"{log.WindowFrom:MM-dd HH:mm:ss} ~ {log.WindowTo:MM-dd HH:mm:ss}";
+    }
+
+    private static string GetContinuousSessionStatusText(string status)
+        => status switch
+        {
+            PatientContinuousSyncStatuses.Active => "同步中",
+            PatientContinuousSyncStatuses.Closing => "结束中",
+            PatientContinuousSyncStatuses.WaitingData => "等待数据",
+            PatientContinuousSyncStatuses.Completed => "已完成",
+            _ => status
+        };
+
+    private static string FormatContinuousDateTime(DateTime? value)
+        => !value.HasValue || value.Value == DateTime.MaxValue
+            ? "-"
+            : value.Value.ToString("yyyy-MM-dd HH:mm:ss");
+
+    private DateTime? GetContinuousLastStartedAt(long sessionId)
+        => _continuousLastStartedAt.GetValueOrDefault(sessionId);
 
     // --- 接口管理 ---
 
@@ -1118,89 +1749,91 @@
             DatabaseType = GetDefaultInterfaceDatabaseType(),
             RouteOperator = "eq"
         };
+        if (!IsDatabaseInterface(newInterface) && _apiInterfaces.Count > 0)
+            OnApiInterfaceChanged(newInterface, _apiInterfaces[0].Id);
 
         await OpenConfigDialog(newInterface, true);
     }
 
-    private void OpenDynamicApiImportDialog()
+    private void OpenApiImportDialog()
     {
-        _dynamicApiImportJson = "";
-        ResetDynamicApiImportPreview();
-        _showDynamicApiImportDialog = true;
+        _apiImportJson = "";
+        ResetApiImportPreview();
+        _showApiImportDialog = true;
     }
 
-    private void CloseDynamicApiImportDialog()
+    private void CloseApiImportDialog()
     {
-        _showDynamicApiImportDialog = false;
-        ResetDynamicApiImportPreview();
+        _showApiImportDialog = false;
+        ResetApiImportPreview();
     }
 
-    private void PreviewDynamicApiImport()
+    private void PreviewApiImport()
     {
-        ResetDynamicApiImportPreview();
+        ResetApiImportPreview();
 
         try
         {
-            var import = JsonSerializer.Deserialize<DynamicApiInterfaceImport>(
-                _dynamicApiImportJson,
-                _dynamicApiImportJsonOptions) ?? throw new InvalidOperationException("JSON 内容不能为空");
+            var import = JsonSerializer.Deserialize<ApiTaskInterfacePatchImport>(
+                _apiImportJson,
+                _apiImportJsonOptions) ?? throw new InvalidOperationException("JSON 内容不能为空");
 
-            ValidateDynamicApiImportIdentity(import);
+            ValidateApiImportIdentity(import);
             var matches = _interfaces
                 .Where(i => string.Equals(i.InterfaceKey, import.InterfaceKey.Trim(), StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (matches.Count > 1)
                 throw new InvalidOperationException("当前任务存在重复的 interfaceKey，请先修正任务配置");
 
-            _dynamicApiImportExisting = matches.FirstOrDefault();
-            if (_dynamicApiImportExisting != null && !IsDynamicApiInterface(_dynamicApiImportExisting))
-                throw new InvalidOperationException("相同 interfaceKey 已用于非 DynamicApi 接口，不能覆盖");
-            if (_dynamicApiImportExisting != null &&
-                (IsChildInterface(_dynamicApiImportExisting) || HasChildInterfaces(_dynamicApiImportExisting)))
+            _apiImportExisting = matches.FirstOrDefault();
+            if (_apiImportExisting != null && IsDatabaseInterface(_apiImportExisting))
+                throw new InvalidOperationException("相同 interfaceKey 已用于数据库接口，不能覆盖");
+            if (_apiImportExisting != null &&
+                (IsChildInterface(_apiImportExisting) || HasChildInterfaces(_apiImportExisting)))
             {
-                throw new InvalidOperationException("目标接口存在父子组合关系，不能通过 DynamicApi 单接口导入修改");
+                throw new InvalidOperationException("本次单接口导入不处理父子组合关系，请在接口编排中修改");
             }
 
-            var candidate = CreateDynamicApiImportCandidate(_dynamicApiImportExisting, import);
-            ValidateDynamicApiImportCandidate(candidate);
+            var candidate = CreateApiImportCandidate(_apiImportExisting, import);
+            ValidateApiImportCandidate(candidate);
             NormalizeInterfaceConfig(candidate);
 
-            _dynamicApiImportCandidate = candidate;
-            _dynamicApiImportPreview = BuildDynamicApiImportPreview(_dynamicApiImportExisting, candidate);
+            _apiImportCandidate = candidate;
+            _apiImportPreview = BuildApiImportPreview(_apiImportExisting, candidate);
         }
         catch (JsonException ex)
         {
-            _dynamicApiImportError = $"JSON 格式错误：{ex.Message}";
+            _apiImportError = $"JSON 格式错误：{ex.Message}";
         }
         catch (Exception ex)
         {
-            _dynamicApiImportError = ex.Message;
+            _apiImportError = ex.Message;
         }
     }
 
-    private async Task ApplyDynamicApiImport()
+    private async Task ApplyApiImport()
     {
-        if (_dynamicApiImportCandidate == null || _dynamicApiImportPreview.Count == 0)
+        if (_apiImportCandidate == null || _apiImportPreview.Count == 0)
             return;
 
-        if (_dynamicApiImportExisting == null)
+        if (_apiImportExisting == null)
         {
-            _interfaces.Add(_dynamicApiImportCandidate);
-            _pendingNewInterface = _dynamicApiImportCandidate;
+            _interfaces.Add(_apiImportCandidate);
+            _pendingNewInterface = _apiImportCandidate;
         }
         else
         {
-            ApplyInterfaceValues(_dynamicApiImportExisting, _dynamicApiImportCandidate);
+            ApplyInterfaceValues(_apiImportExisting, _apiImportCandidate);
         }
 
         NormalizeInterfaceOrder();
         await RefreshInterfaceWorkspaceAsync();
-        _showDynamicApiImportDialog = false;
+        _showApiImportDialog = false;
         inj_snackbar.Add("接口配置已应用，请检查后点击保存生效", Severity.Success);
-        ResetDynamicApiImportPreview();
+        ResetApiImportPreview();
     }
 
-    private void ValidateDynamicApiImportIdentity(DynamicApiInterfaceImport import)
+    private void ValidateApiImportIdentity(ApiTaskInterfacePatchImport import)
     {
         if (string.IsNullOrWhiteSpace(_task.Code))
             throw new InvalidOperationException("请先填写当前任务编码");
@@ -1210,6 +1843,8 @@
             throw new InvalidOperationException($"JSON 目标任务为 {import.TaskCode}，与当前任务 {_task.Code} 不一致");
         if (string.IsNullOrWhiteSpace(import.InterfaceKey))
             throw new InvalidOperationException("interfaceKey 不能为空");
+        if (string.IsNullOrWhiteSpace(import.PlatformName))
+            throw new InvalidOperationException("platformName 不能为空");
 
         var interfaceKey = import.InterfaceKey.Trim();
         if (interfaceKey.Length > 100 || interfaceKey.Any(c => !char.IsLetterOrDigit(c) && c is not '-' and not '_'))
@@ -1218,16 +1853,16 @@
             throw new InvalidOperationException("sortOrder 必须大于 0");
     }
 
-    private SyncTaskInterface CreateDynamicApiImportCandidate(
+    private SyncTaskInterface CreateApiImportCandidate(
         SyncTaskInterface? existing,
-        DynamicApiInterfaceImport import)
+        ApiTaskInterfacePatchImport import)
     {
         var candidate = new SyncTaskInterface
         {
             Enabled = true,
             SortOrder = GetRecommendedSortOrderForNewInterface(),
             InterfaceKey = import.InterfaceKey.Trim(),
-            SourceType = IngestionService.SourceTypeDynamicApi,
+            SourceType = IngestionService.SourceTypeApi,
             DatabaseType = IngestionService.DatabaseTypeSqlServer,
             RouteOperator = "eq"
         };
@@ -1236,7 +1871,7 @@
             ApplyInterfaceValues(candidate, existing);
 
         candidate.InterfaceKey = import.InterfaceKey.Trim();
-        candidate.SourceType = IngestionService.SourceTypeDynamicApi;
+        candidate.SourceType = IngestionService.SourceTypeApi;
         if (import.ServerCode != null)
             candidate.ServerCode = import.ServerCode.Trim();
         if (import.DisplayName != null)
@@ -1245,6 +1880,31 @@
             candidate.QueryPath = import.QueryPath.Trim();
         if (import.UseTodayTimeRange.HasValue)
             candidate.UseTodayTimeRange = import.UseTodayTimeRange.Value;
+        if (import.ContinuousPollingEnabled.HasValue)
+            candidate.ContinuousPollingEnabled = import.ContinuousPollingEnabled.Value;
+        if (import.ContinuousPollingIntervalSeconds.HasValue)
+            candidate.ContinuousPollingIntervalSeconds = import.ContinuousPollingIntervalSeconds.Value;
+        if (import.PatientContinuousSyncEnabled.HasValue)
+            candidate.PatientContinuousSyncEnabled = import.PatientContinuousSyncEnabled.Value;
+        if (import.ContinuousUseTimeRange.HasValue)
+            candidate.ContinuousUseTimeRange = import.ContinuousUseTimeRange.Value;
+        if (import.ContinuousRecordKeyFields != null)
+        {
+            candidate.ContinuousRecordKeyFields = string.Join(",", import.ContinuousRecordKeyFields
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+        }
+        if (import.ContinuousUseRowHash.HasValue)
+            candidate.ContinuousUseRowHash = import.ContinuousUseRowHash.Value;
+        if (import.QueryStartTimeSourceServerCode != null)
+            candidate.QueryStartTimeSourceServerCode = import.QueryStartTimeSourceServerCode.Trim();
+        if (import.QueryStartTimeSourceField != null)
+            candidate.QueryStartTimeSourceField = import.QueryStartTimeSourceField.Trim();
+        if (import.QueryEndTimeSourceServerCode != null)
+            candidate.QueryEndTimeSourceServerCode = import.QueryEndTimeSourceServerCode.Trim();
+        if (import.QueryEndTimeSourceField != null)
+            candidate.QueryEndTimeSourceField = import.QueryEndTimeSourceField.Trim();
         if (import.AccessWindowEnabled.HasValue)
             candidate.AccessWindowEnabled = import.AccessWindowEnabled.Value;
         if (import.AccessWindowStart != null)
@@ -1275,24 +1935,75 @@
                 candidate.OutputFields = null;
         }
 
+        if (import.QueryMappings != null)
+        {
+            var mappings = import.QueryMappings.Select(item => new InterfaceQueryMapping
+            {
+                TargetField = (item.TargetField ?? "").Trim(),
+                SourceField = (item.SourceField ?? "").Trim()
+            }).ToList();
+            if (mappings.Any(item => string.IsNullOrWhiteSpace(item.TargetField) || string.IsNullOrWhiteSpace(item.SourceField)))
+                throw new InvalidOperationException("queryMappings 的字段名不能为空");
+            if (mappings.GroupBy(item => item.TargetField, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+                throw new InvalidOperationException("queryMappings 存在重复的 targetField");
+            candidate.QueryMappings = mappings.Count == 0 ? null : JsonSerializer.Serialize(mappings);
+        }
+
+        var apiInterfaces = _apiInterfaces.Where(item =>
+            string.Equals(item.Platform?.Name, import.PlatformName.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.Code, candidate.ServerCode, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(item.RelativePath.Trim('/'), (candidate.QueryPath ?? "").Trim('/'), StringComparison.OrdinalIgnoreCase)).ToList();
+        if (apiInterfaces.Count > 1)
+            throw new InvalidOperationException("指定平台下存在多个同编码、同路径的 API 接口");
+        candidate.ApiInterfaceId = apiInterfaces.FirstOrDefault()?.Id;
+
         return candidate;
     }
 
-    private static void ValidateDynamicApiImportCandidate(SyncTaskInterface candidate)
+    private void ValidateApiImportCandidate(SyncTaskInterface candidate)
     {
         if (string.IsNullOrWhiteSpace(candidate.ServerCode))
             throw new InvalidOperationException("serverCode 不能为空；新增接口时必须提供该字段");
         if (string.IsNullOrWhiteSpace(candidate.DisplayName))
             throw new InvalidOperationException("displayName 不能为空；新增接口时必须提供该字段");
-        if (string.IsNullOrWhiteSpace(candidate.QueryPath))
-            throw new InvalidOperationException("queryPath 不能为空；新增接口时必须提供该字段");
-        if (Uri.TryCreate(candidate.QueryPath, UriKind.Absolute, out _))
+        if (!string.IsNullOrWhiteSpace(candidate.QueryPath) && Uri.TryCreate(candidate.QueryPath, UriKind.Absolute, out _))
             throw new InvalidOperationException("queryPath 只能填写查询端点前缀后的相对路径");
+        if (!candidate.ApiInterfaceId.HasValue)
+            throw new InvalidOperationException("请先在 API 平台配置中维护对应接口目录");
+        if (GetQueryMappings(candidate).Count == 0)
+            throw new InvalidOperationException("queryMappings 至少包含一组手动映射");
+        if (candidate.ContinuousPollingEnabled)
+        {
+            if (candidate.ContinuousPollingIntervalSeconds < 1)
+                throw new InvalidOperationException("continuousPollingIntervalSeconds 必须大于 0");
+            if (string.IsNullOrWhiteSpace(candidate.QueryStartTimeSourceServerCode) ||
+                string.IsNullOrWhiteSpace(candidate.QueryStartTimeSourceField) ||
+                string.IsNullOrWhiteSpace(candidate.QueryEndTimeSourceServerCode) ||
+                string.IsNullOrWhiteSpace(candidate.QueryEndTimeSourceField))
+                throw new InvalidOperationException("持续轮询必须配置入院和出院时间来源字段");
+        }
+        if (candidate.PatientContinuousSyncEnabled &&
+            string.IsNullOrWhiteSpace(candidate.ContinuousRecordKeyFields) &&
+            !candidate.ContinuousUseRowHash)
+            throw new InvalidOperationException("患者持续同步必须配置记录唯一键，或明确启用不可变整行哈希");
+        if (candidate.PatientContinuousSyncEnabled)
+        {
+            var queryConfig = GetApiInterface(candidate)!.Platform!.GetQueryConfig();
+            if (!string.Equals(
+                    queryConfig.ParameterMode,
+                    ApiParameterModes.DirectProperties,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("患者持续同步当前仅支持直接参数 API");
+            if (candidate.ContinuousUseTimeRange &&
+                (string.IsNullOrWhiteSpace(queryConfig.StartTimeField) ||
+                 string.IsNullOrWhiteSpace(queryConfig.EndTimeField)))
+                throw new InvalidOperationException("患者持续同步要求 API 平台配置开始、结束时间请求字段");
+        }
 
         InterfaceAccessWindow.Validate(candidate);
     }
 
-    private static List<string> BuildDynamicApiImportPreview(
+    private static List<string> BuildApiImportPreview(
         SyncTaskInterface? existing,
         SyncTaskInterface candidate)
     {
@@ -1303,26 +2014,39 @@
             preview.Add($"接口编码：{candidate.ServerCode}");
             preview.Add($"查询路径：{candidate.QueryPath}");
             preview.Add($"执行顺序：{candidate.SortOrder}；必要：{FormatImportValue(candidate.IsRequired)}；启用：{FormatImportValue(candidate.Enabled)}");
+            if (candidate.PatientContinuousSyncEnabled)
+                preview.Add($"患者持续同步：启用；查询模式：{GetContinuousQueryModeText(candidate)}；记录唯一键：{FormatImportValue(candidate.ContinuousRecordKeyFields)}；不可变整行哈希：{FormatImportValue(candidate.ContinuousUseRowHash)}");
             return preview;
         }
 
-        AddDynamicApiImportChange(preview, "接口编码", existing.ServerCode, candidate.ServerCode);
-        AddDynamicApiImportChange(preview, "显示名称", existing.DisplayName, candidate.DisplayName);
-        AddDynamicApiImportChange(preview, "查询路径", existing.QueryPath, candidate.QueryPath);
-        AddDynamicApiImportChange(preview, "当天时间范围", existing.UseTodayTimeRange, candidate.UseTodayTimeRange);
-        AddDynamicApiImportChange(preview, "限制访问时段", existing.AccessWindowEnabled, candidate.AccessWindowEnabled);
-        AddDynamicApiImportChange(preview, "访问开始时间", existing.AccessWindowStart, candidate.AccessWindowStart);
-        AddDynamicApiImportChange(preview, "访问结束时间", existing.AccessWindowEnd, candidate.AccessWindowEnd);
-        AddDynamicApiImportChange(preview, "必要接口", existing.IsRequired, candidate.IsRequired);
-        AddDynamicApiImportChange(preview, "执行顺序", existing.SortOrder, candidate.SortOrder);
-        AddDynamicApiImportChange(preview, "启用状态", existing.Enabled, candidate.Enabled);
-        AddDynamicApiImportChange(preview, "路由参数", existing.PushParams, candidate.PushParams);
-        AddDynamicApiImportChange(preview, "注入字段", existing.InjectFields, candidate.InjectFields);
-        AddDynamicApiImportChange(preview, "输出字段", existing.OutputFields, candidate.OutputFields);
+        AddApiImportChange(preview, "接口编码", existing.ServerCode, candidate.ServerCode);
+        AddApiImportChange(preview, "显示名称", existing.DisplayName, candidate.DisplayName);
+        AddApiImportChange(preview, "查询路径", existing.QueryPath, candidate.QueryPath);
+        AddApiImportChange(preview, "当天时间范围", existing.UseTodayTimeRange, candidate.UseTodayTimeRange);
+        AddApiImportChange(preview, "持续轮询", existing.ContinuousPollingEnabled, candidate.ContinuousPollingEnabled);
+        AddApiImportChange(preview, "持续轮询间隔", existing.ContinuousPollingIntervalSeconds, candidate.ContinuousPollingIntervalSeconds);
+        AddApiImportChange(preview, "患者持续同步", existing.PatientContinuousSyncEnabled, candidate.PatientContinuousSyncEnabled);
+        AddApiImportChange(preview, "持续同步查询模式", GetContinuousQueryModeText(existing), GetContinuousQueryModeText(candidate));
+        AddApiImportChange(preview, "持续同步记录唯一键", existing.ContinuousRecordKeyFields, candidate.ContinuousRecordKeyFields);
+        AddApiImportChange(preview, "不可变整行哈希", existing.ContinuousUseRowHash, candidate.ContinuousUseRowHash);
+        AddApiImportChange(preview, "入院时间来源接口", existing.QueryStartTimeSourceServerCode, candidate.QueryStartTimeSourceServerCode);
+        AddApiImportChange(preview, "入院时间来源字段", existing.QueryStartTimeSourceField, candidate.QueryStartTimeSourceField);
+        AddApiImportChange(preview, "出院时间来源接口", existing.QueryEndTimeSourceServerCode, candidate.QueryEndTimeSourceServerCode);
+        AddApiImportChange(preview, "出院时间来源字段", existing.QueryEndTimeSourceField, candidate.QueryEndTimeSourceField);
+        AddApiImportChange(preview, "限制访问时段", existing.AccessWindowEnabled, candidate.AccessWindowEnabled);
+        AddApiImportChange(preview, "访问开始时间", existing.AccessWindowStart, candidate.AccessWindowStart);
+        AddApiImportChange(preview, "访问结束时间", existing.AccessWindowEnd, candidate.AccessWindowEnd);
+        AddApiImportChange(preview, "必要接口", existing.IsRequired, candidate.IsRequired);
+        AddApiImportChange(preview, "执行顺序", existing.SortOrder, candidate.SortOrder);
+        AddApiImportChange(preview, "启用状态", existing.Enabled, candidate.Enabled);
+        AddApiImportChange(preview, "路由参数", existing.PushParams, candidate.PushParams);
+        AddApiImportChange(preview, "注入字段", existing.InjectFields, candidate.InjectFields);
+        AddApiImportChange(preview, "输出字段", existing.OutputFields, candidate.OutputFields);
+        AddApiImportChange(preview, "查询字段映射", existing.QueryMappings, candidate.QueryMappings);
         return preview;
     }
 
-    private static void AddDynamicApiImportChange<T>(List<string> preview, string name, T before, T after)
+    private static void AddApiImportChange<T>(List<string> preview, string name, T before, T after)
     {
         if (EqualityComparer<T>.Default.Equals(before, after))
             return;
@@ -1338,12 +2062,15 @@
         _ => value.ToString() ?? "空"
     };
 
-    private void ResetDynamicApiImportPreview()
+    private static string GetContinuousQueryModeText(SyncTaskInterface iface)
+        => iface.ContinuousUseTimeRange ? "时间窗口增量" : "无时间窗口轮询";
+
+    private void ResetApiImportPreview()
     {
-        _dynamicApiImportError = null;
-        _dynamicApiImportPreview = [];
-        _dynamicApiImportCandidate = null;
-        _dynamicApiImportExisting = null;
+        _apiImportError = null;
+        _apiImportPreview = [];
+        _apiImportCandidate = null;
+        _apiImportExisting = null;
     }
 
     private void RemoveInterface(SyncTaskInterface item)
@@ -1376,12 +2103,31 @@
         await RefreshInterfaceWorkspaceAsync();
     }
 
-    private void OnInterfaceServerCodeChanged(SyncTaskInterface item, string serverCode)
+    private void OnApiInterfaceChanged(SyncTaskInterface item, int? apiInterfaceId)
     {
-        item.ServerCode = serverCode;
-        var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == serverCode);
-        if (!IsDatabaseInterface(item) && !IsDynamicApiInterface(item))
-            item.DisplayName = dl?.Name ?? "";
+        item.ApiInterfaceId = apiInterfaceId;
+        var apiInterface = _apiInterfaces.FirstOrDefault(i => i.Id == apiInterfaceId);
+        if (apiInterface == null)
+            return;
+        item.SourceType = IngestionService.SourceTypeApi;
+        item.ServerCode = apiInterface.Code;
+        item.DisplayName = apiInterface.Name;
+        item.QueryPath = apiInterface.RelativePath;
+        if (!IsConditionArrayInterface(item))
+            item.FilterConditions = null;
+    }
+
+    private static string FormatApiInterface(ApiInterface apiInterface) =>
+        $"{apiInterface.Platform?.Name} / {apiInterface.Name}（{apiInterface.Code}）";
+
+    private static void OnContinuousPollingChanged(SyncTaskInterface item, bool enabled)
+    {
+        item.ContinuousPollingEnabled = enabled;
+        if (enabled)
+        {
+            item.UseTodayTimeRange = false;
+            item.ContinuousPollingIntervalSeconds = Math.Max(1, item.ContinuousPollingIntervalSeconds);
+        }
     }
 
     private async Task OnInterfaceSourceTypeChanged(SyncTaskInterface item, string sourceType)
@@ -1391,51 +2137,31 @@
             return;
 
         item.SourceType = normalized;
-        if (!IsDynamicApiInterface(item))
-        {
-            item.QueryPath = null;
-            item.UseTodayTimeRange = false;
-        }
-
         if (IsDatabaseInterface(item))
         {
             item.DisplayName = string.IsNullOrWhiteSpace(item.DisplayName) ? item.ServerCode : item.DisplayName;
             item.DatabaseType = GetDefaultInterfaceDatabaseType();
-        }
-        else if (IsDynamicApiInterface(item))
-        {
-            ClearInterfaceDatabaseConnection(item);
-            item.QuerySql = null;
-            item.QueryField = "";
-            item.QueryValueField = null;
-            item.FilterConditions = null;
-            ClearParentBinding(item);
+            item.ApiInterfaceId = null;
+            item.QueryMappings = null;
+            item.QueryPath = null;
+            item.UseTodayTimeRange = false;
+            item.ContinuousPollingEnabled = false;
+            item.QueryStartTimeSourceServerCode = null;
+            item.QueryStartTimeSourceField = null;
+            item.QueryEndTimeSourceServerCode = null;
+            item.QueryEndTimeSourceField = null;
         }
         else
         {
             ClearInterfaceDatabaseConnection(item);
             item.QuerySql = null;
-            OnInterfaceServerCodeChanged(item, item.ServerCode);
+            item.QueryField = "";
+            item.QueryValueField = null;
+            if (!item.ApiInterfaceId.HasValue && _apiInterfaces.Count > 0)
+                OnApiInterfaceChanged(item, _apiInterfaces[0].Id);
         }
 
         await RefreshInterfaceWorkspaceAsync();
-    }
-
-    private Task<IEnumerable<string>> SearchDataLakeInterfaces(string value, CancellationToken token = default)
-    {
-        var results = string.IsNullOrEmpty(value)
-            ? _dataLakeInterfaces
-            : _dataLakeInterfaces.Where(d =>
-                d.ServerCode.Contains(value, StringComparison.OrdinalIgnoreCase) ||
-                d.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(results.Select(d => d.ServerCode));
-    }
-
-    private string FormatInterfaceDisplay(string code)
-    {
-        if (string.IsNullOrEmpty(code)) return "";
-        var dl = _dataLakeInterfaces.FirstOrDefault(d => d.ServerCode == code);
-        return dl is not null ? $"{dl.Name} ({dl.ServerCode})" : code;
     }
 
     private async Task OnInterfaceEnabledChanged(SyncTaskInterface item, bool enabled)
@@ -1537,7 +2263,7 @@
 
             var originalSourceType = iface.SourceType;
             if (string.IsNullOrWhiteSpace(iface.SourceType))
-                iface.SourceType = IngestionService.SourceTypeDataLake;
+                iface.SourceType = IngestionService.SourceTypeApi;
             iface.SourceType = IngestionService.NormalizeSourceType(iface.SourceType);
             iface.DatabaseType = IngestionService.NormalizeDatabaseType(iface.DatabaseType, originalSourceType);
         }
@@ -1648,27 +2374,50 @@
             iface.AccessWindowStart = null;
             iface.AccessWindowEnd = null;
         }
-        if (IsDynamicApiInterface(iface))
+        if (!IsDatabaseInterface(iface))
         {
+            iface.ContinuousRecordKeyFields = string.Join(",", iface.ContinuousRecordKeyArray
+                .Distinct(StringComparer.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(iface.ContinuousRecordKeyFields))
+                iface.ContinuousUseRowHash = false;
+            iface.QueryStartTimeSourceServerCode = iface.QueryStartTimeSourceServerCode?.Trim();
+            iface.QueryStartTimeSourceField = iface.QueryStartTimeSourceField?.Trim();
+            iface.QueryEndTimeSourceServerCode = iface.QueryEndTimeSourceServerCode?.Trim();
+            iface.QueryEndTimeSourceField = iface.QueryEndTimeSourceField?.Trim();
+            if (iface.ContinuousPollingEnabled)
+            {
+                iface.UseTodayTimeRange = false;
+                iface.ContinuousPollingIntervalSeconds = Math.Max(1, iface.ContinuousPollingIntervalSeconds);
+            }
             ClearInterfaceDatabaseConnection(iface);
             iface.QuerySql = null;
-            iface.QueryField = "";
+            iface.QueryField = IsChildInterface(iface) ? iface.QueryField : "";
             iface.QueryValueField = null;
-            iface.FilterConditions = null;
-            iface.QueryPath = iface.QueryPath?.Trim();
-            ClearParentBinding(iface);
-        }
-        else if (!IsDatabaseInterface(iface))
-        {
-            ClearInterfaceDatabaseConnection(iface);
-            iface.QuerySql = null;
-            iface.QueryPath = null;
-            iface.UseTodayTimeRange = false;
+            var apiInterface = _apiInterfaces.FirstOrDefault(i => i.Id == iface.ApiInterfaceId);
+            if (apiInterface != null)
+            {
+                iface.ServerCode = apiInterface.Code;
+                iface.DisplayName = apiInterface.Name;
+                iface.QueryPath = apiInterface.RelativePath;
+            }
+            if (!IsConditionArrayInterface(iface))
+                iface.FilterConditions = null;
         }
         else
         {
+            iface.ApiInterfaceId = null;
+            iface.QueryMappings = null;
             iface.QueryPath = null;
             iface.UseTodayTimeRange = false;
+            iface.ContinuousPollingEnabled = false;
+            iface.PatientContinuousSyncEnabled = false;
+            iface.ContinuousUseTimeRange = true;
+            iface.ContinuousRecordKeyFields = "";
+            iface.ContinuousUseRowHash = false;
+            iface.QueryStartTimeSourceServerCode = null;
+            iface.QueryStartTimeSourceField = null;
+            iface.QueryEndTimeSourceServerCode = null;
+            iface.QueryEndTimeSourceField = null;
             iface.ConnectionStringName = null;
             iface.FilterConditions = null;
             var resource = GetEffectiveDatabaseResource(iface);
@@ -1684,6 +2433,15 @@
 
         if (IsChildInterface(iface))
         {
+            iface.ContinuousPollingEnabled = false;
+            iface.PatientContinuousSyncEnabled = false;
+            iface.ContinuousUseTimeRange = true;
+            iface.ContinuousRecordKeyFields = "";
+            iface.ContinuousUseRowHash = false;
+            iface.QueryStartTimeSourceServerCode = null;
+            iface.QueryStartTimeSourceField = null;
+            iface.QueryEndTimeSourceServerCode = null;
+            iface.QueryEndTimeSourceField = null;
             iface.OutputFields = null;
             iface.PushParams = null;
             if (NeedsRouteConfig(iface))
@@ -1732,15 +2490,37 @@
     private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
         IngestionService.IsDatabaseSourceType(iface.SourceType);
 
-    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
-        IngestionService.IsDynamicApiSourceType(iface.SourceType);
+    private ApiInterface? GetApiInterface(SyncTaskInterface iface) =>
+        iface.ApiInterfaceId.HasValue
+            ? _apiInterfaces.FirstOrDefault(item => item.Id == iface.ApiInterfaceId.Value)
+            : null;
+
+    private bool IsConditionArrayInterface(SyncTaskInterface iface) =>
+        !IsDatabaseInterface(iface) &&
+        string.Equals(
+            GetApiInterface(iface)?.Platform?.GetQueryConfig().ParameterMode,
+            ApiParameterModes.ConditionArray,
+            StringComparison.OrdinalIgnoreCase);
+
+    private List<ApiOperatorConfig> GetEditingOperators() =>
+        _editingConfigInterface == null
+            ? []
+            : GetApiInterface(_editingConfigInterface)?.Platform?.GetQueryConfig().ConditionArray?.Operators ?? [];
+
+    private bool OperatorRequiresValue(string? operation)
+    {
+        if (string.IsNullOrWhiteSpace(operation))
+            return true;
+        return GetEditingOperators().FirstOrDefault(item =>
+            string.Equals(item.Value, operation, StringComparison.OrdinalIgnoreCase))?.RequiresValue ?? true;
+    }
 
     private string GetInterfaceSourceTypeText(SyncTaskInterface iface)
     {
         if (IsDatabaseInterface(iface))
             return GetEffectiveDatabaseTypeText(iface);
 
-        return IsDynamicApiInterface(iface) ? "DynamicApi" : "DataLake";
+        return _apiInterfaces.FirstOrDefault(i => i.Id == iface.ApiInterfaceId)?.Platform?.Name ?? "API 平台";
     }
 
     private bool IsSqlServerDatabase(SyncTaskInterface iface) =>
@@ -1861,9 +2641,9 @@
                 continue;
             }
 
-            if (IsDynamicApiInterface(iface)
-                ? string.IsNullOrWhiteSpace(iface.QueryPath)
-                : string.IsNullOrWhiteSpace(iface.QueryField))
+            if (IsDatabaseInterface(iface)
+                ? string.IsNullOrWhiteSpace(iface.QueryField)
+                : !IsChildInterface(iface) && GetQueryMappings(iface).Count == 0)
                 missingQueryCount++;
 
             if (GetMissingPushParamCount(iface) > 0)
@@ -1996,12 +2776,6 @@
 
     private string GetQueryMappingPreview(SyncTaskInterface iface)
     {
-        if (IsDynamicApiInterface(iface))
-            return $"patientId ← {_task.PatientIdField}，visitId ← {_task.VisitSnField}";
-
-        if (string.IsNullOrWhiteSpace(iface.QueryField))
-            return "未配置";
-
         if (IsChildInterface(iface))
         {
             var parentName = GetParentInterface(iface) is { } parent
@@ -2012,6 +2786,17 @@
                 ? "未配置"
                 : string.Join("，", mappings.Select(mapping => $"{mapping.ChildField} ← {parentName}.{mapping.ParentField}"));
         }
+
+        if (!IsDatabaseInterface(iface))
+        {
+            var queryMappings = GetQueryMappings(iface);
+            return queryMappings.Count == 0
+                ? "未配置"
+                : string.Join("，", queryMappings.Select(mapping => $"{mapping.TargetField} ← {mapping.SourceField}"));
+        }
+
+        if (string.IsNullOrWhiteSpace(iface.QueryField))
+            return "未配置";
 
         if (!string.IsNullOrWhiteSpace(iface.QueryValueField))
             return $"{iface.QueryField} ← {iface.QueryValueField}";
@@ -2048,10 +2833,10 @@
         if (string.IsNullOrWhiteSpace(iface.ServerCode))
             return "待选接口";
 
-        if (IsDynamicApiInterface(iface))
-            return string.IsNullOrWhiteSpace(iface.QueryPath) ? "待定查询路径" : "可执行";
-
-        if (string.IsNullOrWhiteSpace(iface.QueryField))
+        if (!IsChildInterface(iface) &&
+            (IsDatabaseInterface(iface)
+                ? string.IsNullOrWhiteSpace(iface.QueryField)
+                : GetQueryMappings(iface).Count == 0))
             return "待定查询";
 
         if (IsChildInterface(iface) &&
@@ -2086,15 +2871,18 @@
 
     private string GetInterfaceQueryFieldSummary(SyncTaskInterface iface)
     {
-        if (IsDynamicApiInterface(iface))
-            return "patientId、visitId";
-
         if (IsChildInterface(iface))
         {
             var mappings = GetLinkMappings(iface);
             return mappings.Count == 0
                 ? "待配置"
                 : string.Join("、", mappings.Select(mapping => mapping.ChildField));
+        }
+
+        if (!IsDatabaseInterface(iface))
+        {
+            var mappings = GetQueryMappings(iface);
+            return mappings.Count == 0 ? "待配置" : string.Join("、", mappings.Select(mapping => mapping.TargetField));
         }
 
         return string.IsNullOrWhiteSpace(iface.QueryField)
@@ -2104,15 +2892,18 @@
 
     private string GetInterfaceValueSourceSummary(SyncTaskInterface iface)
     {
-        if (IsDynamicApiInterface(iface))
-            return $"{_task.PatientIdField}、{_task.VisitSnField}";
-
         if (IsChildInterface(iface))
         {
             var mappings = GetLinkMappings(iface);
             return mappings.Count == 0
                 ? "父接口字段待配置"
                 : string.Join("、", mappings.Select(mapping => $"父.{mapping.ParentField}"));
+        }
+
+        if (!IsDatabaseInterface(iface))
+        {
+            var mappings = GetQueryMappings(iface);
+            return mappings.Count == 0 ? "触发记录字段待配置" : string.Join("、", mappings.Select(mapping => mapping.SourceField));
         }
 
         return string.IsNullOrWhiteSpace(iface.QueryValueField)
@@ -2143,16 +2934,53 @@
             return issues;
         }
 
-        if (IsDynamicApiInterface(iface))
+        if (!IsDatabaseInterface(iface))
         {
-            if (string.IsNullOrWhiteSpace(iface.QueryPath))
-                issues.Add("先填写动态接口查询路径");
-            if (string.IsNullOrWhiteSpace(_task.PatientIdField))
-                issues.Add("先配置任务患者 ID 字段");
-            if (string.IsNullOrWhiteSpace(_task.VisitSnField))
-                issues.Add("先配置任务住院次数字段");
-            if (IsChildInterface(iface) || HasChildInterfaces(iface))
-                issues.Add("动态接口仅支持独立接口");
+            if (!iface.ApiInterfaceId.HasValue || _apiInterfaces.All(i => i.Id != iface.ApiInterfaceId.Value))
+                issues.Add("先选择有效的 API 接口");
+            if (!IsChildInterface(iface))
+            {
+                var queryMappings = GetQueryMappings(iface);
+                if (queryMappings.Count == 0)
+                    issues.Add("先添加手动查询映射");
+                else if (queryMappings.GroupBy(mapping => mapping.TargetField, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+                    issues.Add("API 请求字段不能重复");
+
+                if (iface.ContinuousPollingEnabled)
+                {
+                    if (iface.ContinuousPollingIntervalSeconds < 1)
+                        issues.Add("持续轮询间隔必须大于 0");
+                    if (string.IsNullOrWhiteSpace(_task.VisitSnField))
+                        issues.Add("任务必须配置统一就诊号字段");
+                    if (string.IsNullOrWhiteSpace(iface.QueryStartTimeSourceServerCode) ||
+                        _ingestionSources.All(source => !string.Equals(
+                            source.ServerCode, iface.QueryStartTimeSourceServerCode, StringComparison.OrdinalIgnoreCase)))
+                        issues.Add("先选择有效的入院时间来源接口");
+                    if (string.IsNullOrWhiteSpace(iface.QueryStartTimeSourceField))
+                        issues.Add("先填写入院时间来源字段");
+                    if (string.IsNullOrWhiteSpace(iface.QueryEndTimeSourceServerCode) ||
+                        _ingestionSources.All(source => !string.Equals(
+                            source.ServerCode, iface.QueryEndTimeSourceServerCode, StringComparison.OrdinalIgnoreCase)))
+                        issues.Add("先选择有效的出院时间来源接口");
+                    if (string.IsNullOrWhiteSpace(iface.QueryEndTimeSourceField))
+                        issues.Add("先填写出院时间来源字段");
+                }
+
+                if (iface.PatientContinuousSyncEnabled &&
+                    string.IsNullOrWhiteSpace(iface.ContinuousRecordKeyFields) &&
+                    !iface.ContinuousUseRowHash)
+                    issues.Add("配置记录唯一键或启用不可变整行哈希");
+                if (iface.PatientContinuousSyncEnabled && IsConditionArrayInterface(iface))
+                    issues.Add("患者持续同步当前仅支持直接参数 API");
+                var continuousQueryConfig = iface.PatientContinuousSyncEnabled
+                    ? GetApiInterface(iface)?.Platform?.GetQueryConfig()
+                    : null;
+                if (iface.PatientContinuousSyncEnabled && iface.ContinuousUseTimeRange &&
+                    continuousQueryConfig != null &&
+                    (string.IsNullOrWhiteSpace(continuousQueryConfig.StartTimeField) ||
+                     string.IsNullOrWhiteSpace(continuousQueryConfig.EndTimeField)))
+                    issues.Add("API 平台必须配置开始、结束时间请求字段");
+            }
         }
         else if (!IsChildInterface(iface) && string.IsNullOrWhiteSpace(iface.QueryField))
             issues.Add("先填写目标接口查询字段");
@@ -2356,6 +3184,15 @@
             .ToList();
         if (_editingLinkMappings.Count == 0)
             _editingLinkMappings.Add(new InterfaceLinkMapping());
+        _editingQueryMappings = GetQueryMappings(iface)
+            .Select(mapping => new InterfaceQueryMapping
+            {
+                TargetField = mapping.TargetField,
+                SourceField = mapping.SourceField
+            })
+            .ToList();
+        if (_editingQueryMappings.Count == 0)
+            _editingQueryMappings.Add(new InterfaceQueryMapping());
         // 初始化路由参数
         Dictionary<string, string>? existingParams = null;
         if (!IsChildInterface(iface) && !string.IsNullOrEmpty(iface.PushParams))
@@ -2377,9 +3214,9 @@
         {
             try
             {
-                var existing = JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions);
+                var existing = JsonSerializer.Deserialize<List<QueryCondition>>(iface.FilterConditions);
                 if (existing != null)
-                    _editingFilters = existing.Select(c => new DataLakeCondition
+                    _editingFilters = existing.Select(c => new QueryCondition
                     {
                         Column = c.Column, Type = c.Type, Value = c.Value
                     }).ToList();
@@ -2391,6 +3228,46 @@
     }
 
     private void AddLinkMapping() => _editingLinkMappings.Add(new InterfaceLinkMapping());
+
+    private void AddQueryMapping() => _editingQueryMappings.Add(new InterfaceQueryMapping());
+
+    private void RemoveQueryMapping(int index)
+    {
+        if (_editingQueryMappings.Count <= 1 || index < 0 || index >= _editingQueryMappings.Count)
+            return;
+        _editingQueryMappings.RemoveAt(index);
+    }
+
+    private static List<InterfaceQueryMapping> GetQueryMappings(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.QueryMappings))
+            return [];
+        try
+        {
+            return (JsonSerializer.Deserialize<List<InterfaceQueryMapping>>(iface.QueryMappings) ?? [])
+                .Where(mapping => !string.IsNullOrWhiteSpace(mapping.TargetField) && !string.IsNullOrWhiteSpace(mapping.SourceField))
+                .Select(mapping => new InterfaceQueryMapping
+                {
+                    TargetField = mapping.TargetField.Trim(),
+                    SourceField = mapping.SourceField.Trim()
+                })
+                .ToList();
+        }
+        catch (JsonException) { return []; }
+    }
+
+    private static void SetQueryMappings(SyncTaskInterface iface, IEnumerable<InterfaceQueryMapping> mappings)
+    {
+        var valid = mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.TargetField) && !string.IsNullOrWhiteSpace(mapping.SourceField))
+            .Select(mapping => new InterfaceQueryMapping
+            {
+                TargetField = mapping.TargetField.Trim(),
+                SourceField = mapping.SourceField.Trim()
+            })
+            .ToList();
+        iface.QueryMappings = valid.Count == 0 ? null : JsonSerializer.Serialize(valid);
+    }
 
     private void RemoveLinkMapping(int index)
     {
@@ -2414,19 +3291,10 @@
                         return validMappings;
                 }
             }
-            catch (JsonException) { /* 兼容旧字段 */ }
+            catch (JsonException) { return []; }
         }
 
-        return string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.QueryField)
-            ? []
-            :
-            [
-                new InterfaceLinkMapping
-                {
-                    ParentField = iface.ParentResultField,
-                    ChildField = iface.QueryField
-                }
-            ];
+        return [];
     }
 
     private static List<InterfaceLinkMapping> NormalizeLinkMappings(IEnumerable<InterfaceLinkMapping> mappings) =>
@@ -2597,15 +3465,15 @@
         return preview;
     }
 
-    private static int GetFilterConditionCount(SyncTaskInterface iface)
+    private int GetFilterConditionCount(SyncTaskInterface iface)
     {
-        if (IsDatabaseInterface(iface) || IsDynamicApiInterface(iface))
+        if (!IsConditionArrayInterface(iface))
             return 0;
 
         if (string.IsNullOrWhiteSpace(iface.FilterConditions)) return 0;
         try
         {
-            return JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions)?.Count ?? 0;
+            return JsonSerializer.Deserialize<List<QueryCondition>>(iface.FilterConditions)?.Count ?? 0;
         }
         catch (JsonException)
         {
@@ -2664,6 +3532,26 @@
         }
         else
         {
+            if (!IsDatabaseInterface(_editingConfigInterface))
+            {
+                var hasIncompleteMapping = _editingQueryMappings.Any(mapping =>
+                    string.IsNullOrWhiteSpace(mapping.TargetField) != string.IsNullOrWhiteSpace(mapping.SourceField));
+                if (hasIncompleteMapping)
+                {
+                    inj_snackbar.Add("查询映射必须同时填写 API 请求字段和触发记录字段", Severity.Warning);
+                    return;
+                }
+                var validMappings = _editingQueryMappings
+                    .Where(mapping => !string.IsNullOrWhiteSpace(mapping.TargetField) && !string.IsNullOrWhiteSpace(mapping.SourceField))
+                    .ToList();
+                if (validMappings.GroupBy(mapping => mapping.TargetField, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+                {
+                    inj_snackbar.Add("API 请求字段不能重复", Severity.Warning);
+                    return;
+                }
+                SetQueryMappings(_editingConfigInterface, validMappings);
+            }
+
             // 保存路由参数
             var validParams = _editingParams
                 .Where(kv => !string.IsNullOrWhiteSpace(kv.Value))
@@ -2682,11 +3570,23 @@
         }
 
         // 保存过滤条件
-        var validFilters = _editingFilters
-            .Where(c => !string.IsNullOrWhiteSpace(c.Column) && !string.IsNullOrWhiteSpace(c.Type))
-            .ToList();
-        foreach (var c in validFilters.Where(c => c.Type is "isnull" or "isnotnull"))
-            c.Value = "";
+        var validFilters = IsConditionArrayInterface(_editingConfigInterface)
+            ? _editingFilters.Where(c => !string.IsNullOrWhiteSpace(c.Column) && !string.IsNullOrWhiteSpace(c.Type)).ToList()
+            : [];
+        var allowedOperators = GetEditingOperators().Select(item => item.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (validFilters.Any(condition => !allowedOperators.Contains(condition.Type)))
+        {
+            inj_snackbar.Add("过滤条件包含当前平台未配置的操作符", Severity.Warning);
+            return;
+        }
+        if (validFilters.Any(condition =>
+                OperatorRequiresValue(condition.Type) && string.IsNullOrWhiteSpace(condition.Value?.ToString())))
+        {
+            inj_snackbar.Add("请填写过滤条件值", Severity.Warning);
+            return;
+        }
+        foreach (var condition in validFilters.Where(condition => !OperatorRequiresValue(condition.Type)))
+            condition.Value = "";
         _editingConfigInterface.FilterConditions = validFilters.Count > 0
             ? JsonSerializer.Serialize(validFilters)
             : null;
@@ -2758,9 +3658,43 @@
 
     // --- 保存 ---
 
+    private async Task PreviewAndBootstrapContinuousPatientsAsync()
+    {
+        try
+        {
+            var count = await inj_patientContinuousRegistration.CountBootstrapCandidatesAsync(
+                _task.Id,
+                CancellationToken);
+            if (count == 0)
+            {
+                inj_snackbar.Add("没有符合任务过滤条件且需要初始化的当前在院患者", Severity.Info);
+                return;
+            }
+
+            var confirmed = await inj_dialogService.ShowMessageBox(
+                "初始化当前在院患者",
+                $"将根据任务过滤条件和本地入出院采集记录创建 {count} 个患者持续同步档案。此操作不会调用医院接口或立即推送数据，是否继续？",
+                yesText: "确认初始化",
+                cancelText: "取消");
+            if (confirmed != true)
+                return;
+
+            var created = await inj_patientContinuousRegistration.BootstrapAsync(_task.Id, CancellationToken);
+            inj_snackbar.Add($"已初始化 {created} 个符合任务过滤条件的患者持续同步档案", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            inj_snackbar.Add($"初始化失败：{ex.Message}", Severity.Error);
+        }
+    }
+
     private async Task Save()
     {
         SyncAdditionalTriggerServerCodes();
+        _task.AdmissionSourceServerCode = _task.AdmissionSourceServerCode?.Trim();
+        _task.AdmissionTimeField = _task.AdmissionTimeField?.Trim();
+        _task.DischargeSourceServerCode = _task.DischargeSourceServerCode?.Trim();
+        _task.DischargeTimeField = _task.DischargeTimeField?.Trim();
         EnsureInterfaceKeys();
         foreach (var iface in _interfaces)
             NormalizeInterfaceConfig(iface);
@@ -2798,6 +3732,36 @@
         {
             inj_snackbar.Add("任务已启用时，至少保留 1 个启用接口", Severity.Warning);
             return;
+        }
+
+        if (_task.PatientContinuousSyncEnabled)
+        {
+            if (string.IsNullOrWhiteSpace(_task.VisitSnField) ||
+                string.IsNullOrWhiteSpace(_task.AdmissionSourceServerCode) ||
+                string.IsNullOrWhiteSpace(_task.AdmissionTimeField) ||
+                string.IsNullOrWhiteSpace(_task.DischargeSourceServerCode) ||
+                string.IsNullOrWhiteSpace(_task.DischargeTimeField) ||
+                _task.PatientContinuousSyncIntervalSeconds < 60 ||
+                _task.PatientContinuousSyncLookbackMinutes < 0)
+            {
+                inj_snackbar.Add("请完整配置患者持续同步的入院、出院来源、时间字段和有效执行周期", Severity.Warning);
+                return;
+            }
+
+            if (_ingestionSources.All(source => !string.Equals(
+                    source.ServerCode, _task.AdmissionSourceServerCode, StringComparison.OrdinalIgnoreCase)) ||
+                _ingestionSources.All(source => !string.Equals(
+                    source.ServerCode, _task.DischargeSourceServerCode, StringComparison.OrdinalIgnoreCase)))
+            {
+                inj_snackbar.Add("患者持续同步配置的入院或出院采集源不存在", Severity.Warning);
+                return;
+            }
+
+            if (_interfaces.All(iface => !iface.Enabled || !iface.PatientContinuousSyncEnabled))
+            {
+                inj_snackbar.Add("启用患者持续同步后，至少选择一个持续同步 API 接口", Severity.Warning);
+                return;
+            }
         }
 
         if (_task.EnableTriggerRecordPush)
@@ -2905,6 +3869,13 @@
                 entity.PatientIdField = _task.PatientIdField;
                 entity.VisitSnField = _task.VisitSnField;
                 entity.PollingIntervalSeconds = _task.PollingIntervalSeconds;
+                entity.PatientContinuousSyncEnabled = _task.PatientContinuousSyncEnabled;
+                entity.PatientContinuousSyncIntervalSeconds = _task.PatientContinuousSyncIntervalSeconds;
+                entity.PatientContinuousSyncLookbackMinutes = _task.PatientContinuousSyncLookbackMinutes;
+                entity.AdmissionSourceServerCode = _task.AdmissionSourceServerCode;
+                entity.AdmissionTimeField = _task.AdmissionTimeField;
+                entity.DischargeSourceServerCode = _task.DischargeSourceServerCode;
+                entity.DischargeTimeField = _task.DischargeTimeField;
                 entity.PatientConcurrency = _task.PatientConcurrency;
                 entity.ApiConcurrency = _task.ApiConcurrency;
                 entity.Enabled = _task.Enabled;
@@ -2936,6 +3907,15 @@
                         createdInterfaces.Add((iface, created));
                     }
                 }
+
+                if (_task.PatientContinuousSyncEnabled)
+                {
+                    var activeTasks = await db.ActiveSyncTasks
+                        .Where(item => item.SyncTaskId == entity.Id && item.Enabled)
+                        .ToListAsync(CancellationToken);
+                    foreach (var activeTask in activeTasks)
+                        activeTask.Enabled = false;
+                }
             }
             else
             {
@@ -2948,7 +3928,7 @@
             foreach (var (pageItem, entityItem) in createdInterfaces)
                 pageItem.Id = entityItem.Id;
 
-            if (_activeSyncSettings != null)
+            if (_activeSyncSettings != null && !_task.PatientContinuousSyncEnabled)
             {
                 await _activeSyncSettings.SaveAsync(
                     _task.Id,
@@ -2985,6 +3965,7 @@
         target.ServerCode = source.ServerCode;
         target.DisplayName = source.DisplayName;
         target.SourceType = source.SourceType;
+        target.ApiInterfaceId = source.ApiInterfaceId;
         target.DatabaseResourceId = source.DatabaseResourceId;
         target.DatabaseType = source.DatabaseType;
         target.ConnectionStringName = source.ConnectionStringName;
@@ -2996,11 +3977,22 @@
         target.QuerySql = source.QuerySql;
         target.QueryPath = source.QueryPath;
         target.UseTodayTimeRange = source.UseTodayTimeRange;
+        target.ContinuousPollingEnabled = source.ContinuousPollingEnabled;
+        target.ContinuousPollingIntervalSeconds = source.ContinuousPollingIntervalSeconds;
+        target.PatientContinuousSyncEnabled = source.PatientContinuousSyncEnabled;
+        target.ContinuousUseTimeRange = source.ContinuousUseTimeRange;
+        target.ContinuousRecordKeyFields = source.ContinuousRecordKeyFields;
+        target.ContinuousUseRowHash = source.ContinuousUseRowHash;
+        target.QueryStartTimeSourceServerCode = source.QueryStartTimeSourceServerCode;
+        target.QueryStartTimeSourceField = source.QueryStartTimeSourceField;
+        target.QueryEndTimeSourceServerCode = source.QueryEndTimeSourceServerCode;
+        target.QueryEndTimeSourceField = source.QueryEndTimeSourceField;
         target.AccessWindowEnabled = source.AccessWindowEnabled;
         target.AccessWindowStart = source.AccessWindowStart;
         target.AccessWindowEnd = source.AccessWindowEnd;
         target.QueryField = source.QueryField;
         target.QueryValueField = source.QueryValueField;
+        target.QueryMappings = source.QueryMappings;
         target.IsRequired = source.IsRequired;
         target.SortOrder = source.SortOrder;
         target.Enabled = source.Enabled;

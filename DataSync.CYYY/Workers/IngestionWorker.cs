@@ -35,12 +35,12 @@ public class IngestionWorker : BackgroundService
             {
                 try
                 {
-                    if (await CanStartWithoutWaitingDataLakeAsync(stoppingToken))
+                    if (await CanStartWithoutWaitingApiAsync(stoppingToken))
                         break;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "检查数据湖配置时出错");
+                    _logger.LogWarning(ex, "检查 API 平台配置时出错");
                 }
                 _logger.LogWarning("采集平台配置未就绪，IngestionWorker 等待中...");
                 await Task.Delay(TimeSpan.FromSeconds(ConfigReloadIntervalSeconds), stoppingToken);
@@ -179,7 +179,7 @@ public class IngestionWorker : BackgroundService
         _logger.LogInformation("采集源 [{ServerCode}] 轮询循环已停止", serverCode);
     }
 
-    private async Task<bool> CanStartWithoutWaitingDataLakeAsync(CancellationToken ct)
+    private async Task<bool> CanStartWithoutWaitingApiAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var ingestionService = scope.ServiceProvider.GetRequiredService<IngestionService>();
@@ -187,19 +187,20 @@ public class IngestionWorker : BackgroundService
         if (sources.Count == 0)
             return true;
 
-        if (sources.Any(source =>
-                !IngestionService.IsDatabaseSource(source) &&
-                !IngestionService.IsDynamicApiSource(source)))
-        {
-            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
-            if (!await dlClient.HasConfigAsync(ct))
-                return false;
-        }
+        var apiInterfaceIds = sources
+            .Where(IngestionService.IsApiSource)
+            .Select(source => source.ApiInterfaceId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToList();
+        if (sources.Any(source => IngestionService.IsApiSource(source) && !source.ApiInterfaceId.HasValue))
+            return false;
 
-        if (sources.Any(IngestionService.IsDynamicApiSource))
+        var apiClient = scope.ServiceProvider.GetRequiredService<ApiPlatformClient>();
+        foreach (var apiInterfaceId in apiInterfaceIds)
         {
-            var dynamicApiClient = scope.ServiceProvider.GetRequiredService<DynamicApiClient>();
-            if (!await dynamicApiClient.HasConfigAsync(ct))
+            if (!await apiClient.HasConfigAsync(apiInterfaceId, ct))
                 return false;
         }
 

@@ -78,6 +78,115 @@ public class LocalQueryService
     }
 
     /// <summary>
+    /// 按统一关联字段从本地采集表读取最新的非空字段值。
+    /// </summary>
+    public async Task<string?> QueryLatestFieldValueAsync(
+        string serverCode,
+        string valueField,
+        string matchField,
+        string matchValue,
+        CancellationToken ct)
+    {
+        var tableName = IngestionService.GetLocalTableName(serverCode);
+        var columns = await GetTableColumnsAsync(tableName, ct);
+        var actualValueField = columns.FirstOrDefault(column =>
+            string.Equals(column, valueField, StringComparison.OrdinalIgnoreCase));
+        var actualMatchField = columns.FirstOrDefault(column =>
+            string.Equals(column, matchField, StringComparison.OrdinalIgnoreCase));
+        if (actualValueField == null)
+            throw new InvalidOperationException($"本地采集表 [{tableName}] 不存在字段 [{valueField}]");
+        if (actualMatchField == null)
+            throw new InvalidOperationException($"本地采集表 [{tableName}] 不存在统一就诊号字段 [{matchField}]");
+
+        var sql = $"""
+            SELECT "{actualValueField}"::text
+            FROM {tableName}
+            WHERE "{actualMatchField}"::text = @matchValue
+              AND NULLIF(BTRIM("{actualValueField}"::text), '') IS NOT NULL
+            ORDER BY ingested_at DESC
+            LIMIT 1
+            """;
+
+        await using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("@matchValue", matchValue);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result == null || result is DBNull ? null : result.ToString();
+    }
+
+    /// <summary>
+    /// 按统一关联字段读取本地采集表的最新完整记录。
+    /// </summary>
+    public async Task<Dictionary<string, object>?> QueryLatestRecordAsync(
+        string serverCode,
+        IReadOnlyDictionary<string, string> matches,
+        CancellationToken ct)
+    {
+        if (matches.Count == 0)
+            throw new InvalidOperationException("本地记录查询条件不能为空");
+
+        var tableName = IngestionService.GetLocalTableName(serverCode);
+        var columns = await GetTableColumnsAsync(tableName, ct);
+        var actualMatches = matches.Select((match, index) => new
+        {
+            Field = columns.FirstOrDefault(column =>
+                string.Equals(column, match.Key, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"本地采集表 [{tableName}] 不存在匹配字段 [{match.Key}]"),
+            match.Value,
+            Index = index
+        }).ToList();
+        var where = string.Join(" AND ", actualMatches.Select(item =>
+            $"\"{item.Field}\"::text = @matchValue{item.Index}"));
+
+        var sql = $"""
+            SELECT *
+            FROM {tableName}
+            WHERE {where}
+            ORDER BY ingested_at DESC
+            LIMIT 1
+            """;
+
+        await using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync(ct);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        foreach (var item in actualMatches)
+            cmd.Parameters.AddWithValue($"@matchValue{item.Index}", item.Value);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        return ReadRecord(reader);
+    }
+
+    /// <summary>
+    /// 读取本地采集表全部记录，仅用于用户确认后的存量在院档案初始化。
+    /// </summary>
+    public async Task<List<Dictionary<string, object>>> QueryAllRecordsAsync(
+        string serverCode,
+        CancellationToken ct)
+    {
+        var tableName = IngestionService.GetLocalTableName(serverCode);
+        var records = new List<Dictionary<string, object>>();
+        await using var conn = new NpgsqlConnection(_connStr);
+        await conn.OpenAsync(ct);
+        await using var cmd = new NpgsqlCommand($"SELECT * FROM {tableName} ORDER BY ingested_at DESC", conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+            records.Add(ReadRecord(reader));
+
+        return records;
+    }
+
+    private static Dictionary<string, object> ReadRecord(NpgsqlDataReader reader)
+    {
+        var record = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < reader.FieldCount; i++)
+            record[reader.GetName(i)] = reader.IsDBNull(i) ? "" : reader.GetValue(i);
+        return record;
+    }
+
+    /// <summary>
     /// 解析 TriggerConditions JSON，兼容新旧格式
     /// </summary>
     public TriggerConditionConfig ParseTriggerConditions(string? json, string? fallbackServerCode = null)

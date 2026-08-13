@@ -297,9 +297,9 @@
                                     <MudGrid Spacing="2">
                                         <MudItem xs="12" md="3">
                                             <MudSelect T="string" @bind-Value="_editingSource.InpatientNoParameter" Label="Active 查询值" Variant="Variant.Outlined">
-                                                <MudSelectItem Value="@("InpatientNo")">住院号</MudSelectItem>
+                                                <MudSelectItem Value="@("InpatientNo")">就诊号/住院号</MudSelectItem>
                                                 <MudSelectItem Value="@("Mrn")">病案号</MudSelectItem>
-                                                <MudSelectItem Value="@("VisitNo")">就诊号</MudSelectItem>
+                                                <MudSelectItem Value="@("VisitNo")">住院次数</MudSelectItem>
                                             </MudSelect>
                                         </MudItem>
                                         <MudItem xs="12" md="5">
@@ -370,7 +370,6 @@
                                                 <MudTh>结果</MudTh>
                                                 <MudTh>下次查询</MudTh>
                                                 <MudTh>错误</MudTh>
-                                                <MudTh>重试</MudTh>
                                             </HeaderContent>
                                             <RowTemplate>
                                                 <MudTd DataLabel="住院号">@context.InpatientNo</MudTd>
@@ -386,19 +385,6 @@
                                                     else
                                                     {
                                                         <span class="runtime-error" title="@context.LastError">@context.LastError</span>
-                                                    }
-                                                </MudTd>
-                                                <MudTd DataLabel="重试">
-                                                    @if (context.HasPendingCase && context.RetryCount >= 3)
-                                                    {
-                                                        <MudButton Variant="Variant.Text" Size="Size.Small"
-                                                                   OnClick="@(() => RetryCaseAsync(context.Id))">
-                                                            手动重试
-                                                        </MudButton>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span>@context.RetryCount</span>
                                                     }
                                                 </MudTd>
                                             </RowTemplate>
@@ -625,9 +611,7 @@
             LastResultCount = state.LastResultCount,
             NextQueryTime = state.NextQueryTime,
             EmptyCount = state.EmptyCount,
-            LastError = state.LastError,
-            RetryCount = state.RetryCount,
-            HasPendingCase = !string.IsNullOrWhiteSpace(state.PendingCaseJson)
+            LastError = state.LastError
         }).ToList();
 
         _runLogs = await db.ActiveSyncRunLogs
@@ -648,13 +632,6 @@
             return;
 
         await LoadRuntimeData(_editingTask.Id);
-    }
-
-    private async Task RetryCaseAsync(long stateId)
-    {
-        await inj_activeSyncService.RetryCaseAsync(stateId, CancellationToken);
-        inj_snackbar.Add("已重新加入在院增量队列", Severity.Success);
-        await RefreshRuntimeData();
     }
 
     private async Task SaveTask()
@@ -697,6 +674,12 @@
 
     private async Task ToggleTask(ActiveSyncTask task, bool enabled)
     {
+        if (enabled && GetSyncTask(task.SyncTaskId)?.PatientContinuousSyncEnabled == true)
+        {
+            inj_snackbar.Add("关联同步任务已启用患者持续同步，不能同时启用旧在院增量", Severity.Warning);
+            return;
+        }
+
         await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
         var entity = await db.ActiveSyncTasks.FindAsync([task.Id], CancellationToken);
         if (entity == null)
@@ -896,6 +879,12 @@
         if (string.IsNullOrWhiteSpace(syncTask.PushTarget))
         {
             inj_snackbar.Add("关联同步任务未配置推送目标", Severity.Warning);
+            return false;
+        }
+
+        if (_editingTask.Enabled && syncTask.PatientContinuousSyncEnabled)
+        {
+            inj_snackbar.Add("关联同步任务已启用患者持续同步，不能同时启用旧在院增量", Severity.Warning);
             return false;
         }
 
@@ -1158,7 +1147,5 @@
         public DateTime? NextQueryTime { get; set; }
         public int EmptyCount { get; set; }
         public string? LastError { get; set; }
-        public int RetryCount { get; set; }
-        public bool HasPendingCase { get; set; }
     }
 }

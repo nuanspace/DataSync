@@ -108,6 +108,7 @@
 
     // 内部状态
     private bool _showSourcePathTree;
+    private int _activeSourcePathIndex;
     private DialogOptions _dialogOptions => new() { MaxWidth = DialogMaxWidth, FullWidth = true };
     private bool UseArrayBrackets => EditItem?.MappingTarget == MappingTarget.SubCard;
     private string DisplaySourcePath => EditItem == null
@@ -289,9 +290,13 @@
                 @if (JsonTreeLayout == JsonTreeLayout.Collapse)
                 {
                     <div class="d-flex align-center gap-2">
-                        <MudTextField T="string" Value="@DisplaySourcePath" ValueChanged="OnSourcePathChanged" Label="源路径（JSON Path）"
-                                      HelperText="如: PatientInfo.Name、$main.PatientInfo.Name、$.Body.PatientInfo.Name；只用默认值时可留空"
-                                      Variant="Variant.Outlined" Margin="Margin.Dense" Style="flex:1;" />
+                        <MultiSourcePathEditor Value="@DisplaySourcePath"
+                                               ValueChanged="OnSourcePathChanged"
+                                               Label="源路径（JSON Path）"
+                                               HelperText="如: PatientInfo.Name、$main.PatientInfo.Name、$.Body.PatientInfo.Name；只用默认值时可留空"
+                                               AllowMultiple="@(EditItem?.MappingTarget is MappingTarget.Question or MappingTarget.SubCard)"
+                                               ActiveIndex="@(_pathPickTarget == PathPickTarget.MainSourcePath ? _activeSourcePathIndex : -1)"
+                                               OnActivated="ActivateSourcePath" />
                         @if (!string.IsNullOrWhiteSpace(JsonText))
                         {
                             <MudTooltip Text="从 JSON 树选取">
@@ -314,11 +319,12 @@
                 else
                 {
                     @* SidePanel 模式下源路径（聚焦即激活，点击左侧树自动填入） *@
-                    <PathPickTextField Value="@DisplaySourcePath" ValueChanged="OnSourcePathChanged" Label="源路径"
-                                       HelperText="点击左侧 JSON 树自动填入；只用默认值时可留空"
-                                       IsActive="@(_pathPickTarget == PathPickTarget.MainSourcePath)"
-                                       OnActivated="@(() => SetPathPickTarget(PathPickTarget.MainSourcePath))"
-                                       Style="flex:1;" />
+                    <MultiSourcePathEditor Value="@DisplaySourcePath"
+                                           ValueChanged="OnSourcePathChanged"
+                                           HelperText="点击左侧 JSON 树自动填入；只用默认值时可留空"
+                                           AllowMultiple="@(EditItem?.MappingTarget is MappingTarget.Question or MappingTarget.SubCard)"
+                                           ActiveIndex="@(_pathPickTarget == PathPickTarget.MainSourcePath ? _activeSourcePathIndex : -1)"
+                                           OnActivated="ActivateSourcePath" />
                 }
             </MudItem>
 
@@ -485,8 +491,21 @@
     {
         if (EditItem != null)
         {
-            EditItem.SourcePath = await NormalizePickedPathAsync(path, EditItem.SourcePath);
+            var paths = MultiSourcePathHelper.Split(EditItem.SourcePath);
+            while (paths.Count <= _activeSourcePathIndex)
+            {
+                paths.Add("");
+            }
+
+            paths[_activeSourcePathIndex] = await NormalizePickedPathAsync(path, paths[_activeSourcePathIndex]);
+            EditItem.SourcePath = MultiSourcePathHelper.JoinPaths(paths);
         }
+    }
+
+    private void ActivateSourcePath(int index)
+    {
+        _activeSourcePathIndex = index;
+        SetPathPickTarget(PathPickTarget.MainSourcePath);
     }
 
     private async Task<string> NormalizePickedPathAsync(string path, string? currentPath)
@@ -768,6 +787,12 @@
 
     private string BuildStandaloneDisplaySourcePath(string? sourcePath)
     {
+        var paths = MultiSourcePathHelper.Split(sourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(sourcePath))
+        {
+            return MultiSourcePathHelper.JoinPaths(paths.Select(BuildStandaloneDisplaySourcePath));
+        }
+
         var normalizedSource = sourcePath?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(normalizedSource))
         {
@@ -781,6 +806,12 @@
 
     private string BuildSubCardDisplaySourcePath(string? sourcePath, string? arrayPath)
     {
+        var paths = MultiSourcePathHelper.Split(sourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(sourcePath))
+        {
+            return MultiSourcePathHelper.JoinPaths(paths.Select(path => BuildSubCardDisplaySourcePath(path, arrayPath)));
+        }
+
         var normalizedSource = sourcePath?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(normalizedSource))
         {
@@ -837,6 +868,22 @@
 
     private async Task HandleSave()
     {
+        if (EditItem?.SourcePath?.Length > 500)
+        {
+            inj_snackbar.Add("源路径总长度不能超过 500 个字符。", Severity.Warning);
+            return;
+        }
+
+        if (EditItem?.MappingTarget == MappingTarget.SubCard
+            && MultiSourcePathHelper.Split(EditItem.SourcePath)
+                .Select(MultiSourcePathHelper.GetSubCardScope)
+                .Distinct()
+                .Count() > 1)
+        {
+            inj_snackbar.Add("多条源路径必须位于同一主记录或同一子卡行内。", Severity.Warning);
+            return;
+        }
+
         await OnSave.InvokeAsync();
     }
 

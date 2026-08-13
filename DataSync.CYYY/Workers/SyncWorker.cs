@@ -47,20 +47,20 @@ public class SyncWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // 等待数据湖配置就绪
+        // 等待启用任务所需的 API 平台配置就绪
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    if (await CanStartWithoutWaitingDataLakeAsync(stoppingToken))
+                    if (await CanStartWithoutWaitingApiAsync(stoppingToken))
                         break;
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "检查数据湖配置时出错");
+                    _logger.LogWarning(ex, "检查 API 平台配置时出错");
                 }
-                _logger.LogWarning("数据湖未配置，SyncWorker 等待中...");
+                _logger.LogWarning("API 平台配置未就绪，SyncWorker 等待中...");
                 await Task.Delay(TimeSpan.FromSeconds(ConfigReloadIntervalSeconds), stoppingToken);
             }
         }
@@ -261,6 +261,7 @@ public class SyncWorker : BackgroundService
                             }
 
                             var completedKeys = pendingItem.CompletedInterfaceKeySet;
+                            var continuousStates = pendingItem.ContinuousInterfaceStateMap;
                             var remainingInterfaces = GetRemainingTopLevelInterfaces(freshTask, completedKeys);
                             if (remainingInterfaces.Count == 0)
                             {
@@ -268,18 +269,28 @@ public class SyncWorker : BackgroundService
                                 await pendingSyncService.MarkSuccessAsync(pendingItem.Id, ct);
                                 continue;
                             }
-
                             var now = DateTime.Now;
+                            var continuousTimeRanges = await ResolveContinuousTimeRangesAsync(
+                                freshTask,
+                                remainingInterfaces,
+                                triggerRecord,
+                                localQueryService,
+                                now,
+                                ct);
+
                             var dueInterfaces = remainingInterfaces
+                                .Where(iface => IsInterfaceDue(iface, continuousTimeRanges, continuousStates, now))
                                 .Where(iface => IsExecutionUnitOpen(freshTask, iface, now))
                                 .ToList();
                             if (dueInterfaces.Count == 0)
                             {
                                 waitingCount++;
-                                await pendingSyncService.MarkDeferredAsync(
-                                    pendingItem.Id,
-                                    GetNextExecutionTime(freshTask, remainingInterfaces, now),
-                                    ct);
+                                var nextRunTime = GetNextExecutionTime(
+                                    freshTask, remainingInterfaces, continuousTimeRanges, continuousStates, now);
+                                if (remainingInterfaces.Any(iface => iface.ContinuousPollingEnabled))
+                                    await pendingSyncService.MarkPollingWaitingAsync(pendingItem.Id, nextRunTime, ct);
+                                else
+                                    await pendingSyncService.MarkDeferredAsync(pendingItem.Id, nextRunTime, ct);
                                 continue;
                             }
 
@@ -292,12 +303,60 @@ public class SyncWorker : BackgroundService
                                 sourceRecordKey: pendingItem.SourceRecordKey,
                                 selectedInterfaceIds: dueInterfaces.Select(iface => iface.Id).ToList());
 
-                            if (result.CompletedInterfaceKeys.Count > 0)
+                            var rootsByKey = remainingInterfaces.ToDictionary(
+                                InterfaceAccessWindow.GetProgressKey,
+                                StringComparer.OrdinalIgnoreCase);
+                            var completedThisRun = result.CompletedInterfaceKeys
+                                .Where(key => !rootsByKey.TryGetValue(key, out var iface) ||
+                                    !iface.ContinuousPollingEnabled ||
+                                    continuousTimeRanges[key].Discharged)
+                                .ToList();
+                            var continuousStatesChanged = false;
+
+                            foreach (var key in completedThisRun)
                             {
-                                completedKeys.UnionWith(result.CompletedInterfaceKeys);
+                                if (rootsByKey.TryGetValue(key, out var iface) &&
+                                    iface.ContinuousPollingEnabled &&
+                                    continuousStates.Remove(key))
+                                {
+                                    continuousStatesChanged = true;
+                                }
+                            }
+
+                            foreach (var key in result.SuccessfulInterfaceKeys)
+                            {
+                                if (!rootsByKey.TryGetValue(key, out var iface) || !iface.ContinuousPollingEnabled)
+                                    continue;
+
+                                var timeRange = continuousTimeRanges[key];
+                                if (timeRange.Discharged)
+                                {
+                                    continuousStatesChanged |= continuousStates.Remove(key);
+                                }
+                                else
+                                {
+                                    continuousStates[key] = new ContinuousInterfacePollingState
+                                    {
+                                        LastSuccessAt = now,
+                                        NextRunAt = now.AddSeconds(Math.Max(1, iface.ContinuousPollingIntervalSeconds))
+                                    };
+                                    continuousStatesChanged = true;
+                                }
+                            }
+
+                            if (completedThisRun.Count > 0)
+                            {
+                                completedKeys.UnionWith(completedThisRun);
                                 await pendingSyncService.SaveCompletedInterfacesAsync(
                                     pendingItem.Id,
-                                    result.CompletedInterfaceKeys,
+                                    completedThisRun,
+                                    ct);
+                            }
+                            if (continuousStatesChanged)
+                            {
+                                await pendingSyncService.SaveContinuousInterfaceStatesAsync(
+                                    pendingItem.Id,
+                                    continuousStates,
                                     ct);
                             }
 
@@ -322,11 +381,30 @@ public class SyncWorker : BackgroundService
                             else
                             {
                                 waitingCount++;
-                                await pendingSyncService.MarkDeferredAsync(
-                                    pendingItem.Id,
-                                    GetNextExecutionTime(freshTask, remainingInterfaces, DateTime.Now),
-                                    ct);
+                                var nextRunTime = GetNextExecutionTime(
+                                    freshTask,
+                                    remainingInterfaces,
+                                    continuousTimeRanges,
+                                    continuousStates,
+                                    DateTime.Now);
+                                if (remainingInterfaces.Any(iface => iface.ContinuousPollingEnabled))
+                                    await pendingSyncService.MarkPollingWaitingAsync(pendingItem.Id, nextRunTime, ct);
+                                else
+                                    await pendingSyncService.MarkDeferredAsync(pendingItem.Id, nextRunTime, ct);
                             }
+                        }
+                        catch (ContinuousPollingDataNotReadyException ex)
+                        {
+                            waitingCount++;
+                            await pendingSyncService.MarkPollingWaitingAsync(
+                                pendingItem.Id,
+                                DateTime.Now.AddSeconds(Math.Max(1, freshTask.PollingIntervalSeconds)),
+                                ct);
+                            _logger.LogInformation(
+                                "任务 [{TaskCode}] 等待持续轮询时间数据，记录键 {SourceRecordKey}：{Message}",
+                                taskCode,
+                                pendingItem.SourceRecordKey,
+                                ex.Message);
                         }
                         catch (Exception ex)
                         {
@@ -369,7 +447,16 @@ public class SyncWorker : BackgroundService
 
             try
             {
-                var interval = freshTask?.PollingIntervalSeconds ?? 30;
+                var interval = freshTask == null
+                    ? 30
+                    : Math.Min(
+                        freshTask.PollingIntervalSeconds,
+                        freshTask.Interfaces
+                            .Where(iface => !freshTask.PatientContinuousSyncEnabled &&
+                                iface.Enabled && iface.ContinuousPollingEnabled)
+                            .Select(iface => Math.Max(1, iface.ContinuousPollingIntervalSeconds))
+                            .DefaultIfEmpty(freshTask.PollingIntervalSeconds)
+                            .Min());
                 var waitTime = TimeSpan.FromSeconds(interval) - (DateTime.Now - startedAt);
                 if (waitTime < TimeSpan.Zero)
                     waitTime = TimeSpan.Zero;
@@ -385,7 +472,7 @@ public class SyncWorker : BackgroundService
         _logger.LogInformation("任务 [{TaskCode}] 轮询循环已停止", taskCode);
     }
 
-    private async Task<bool> CanStartWithoutWaitingDataLakeAsync(CancellationToken ct)
+    private async Task<bool> CanStartWithoutWaitingApiAsync(CancellationToken ct)
     {
         using var scope = _scopeFactory.CreateScope();
         var logService = scope.ServiceProvider.GetRequiredService<SyncLogService>();
@@ -393,37 +480,29 @@ public class SyncWorker : BackgroundService
         if (tasks.Count == 0)
             return true;
 
-        if (tasks.Any(t => t.Interfaces.Any(i => i.Enabled && IsDataLakeInterface(i))))
-        {
-            var dlClient = scope.ServiceProvider.GetRequiredService<DataLakeClient>();
-            if (!await dlClient.HasConfigAsync(ct))
-                return false;
-        }
+        var apiInterfaces = tasks
+            .SelectMany(t => t.Interfaces)
+            .Where(i => i.Enabled && !IngestionService.IsDatabaseSourceType(i.SourceType))
+            .ToList();
+        if (apiInterfaces.Any(i => !i.ApiInterfaceId.HasValue))
+            return false;
 
-        if (tasks.Any(t => t.Interfaces.Any(i => i.Enabled && IsDynamicApiInterface(i))))
+        var apiClient = scope.ServiceProvider.GetRequiredService<ApiPlatformClient>();
+        foreach (var apiInterfaceId in apiInterfaces.Select(i => i.ApiInterfaceId!.Value).Distinct())
         {
-            var dynamicApiClient = scope.ServiceProvider.GetRequiredService<DynamicApiClient>();
-            if (!await dynamicApiClient.HasConfigAsync(ct))
+            if (!await apiClient.HasConfigAsync(apiInterfaceId, ct))
                 return false;
         }
 
         return true;
     }
 
-    private static bool IsDataLakeInterface(SyncTaskInterface iface) =>
-        string.Equals(
-            IngestionService.NormalizeSourceType(iface.SourceType),
-            IngestionService.SourceTypeDataLake,
-            StringComparison.Ordinal);
-
-    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
-        IngestionService.IsDynamicApiSourceType(iface.SourceType);
-
     private static List<SyncTaskInterface> GetRemainingTopLevelInterfaces(
         SyncTask task,
         HashSet<string> completedKeys)
         => task.Interfaces
             .Where(iface => iface.Enabled && string.IsNullOrWhiteSpace(iface.ParentInterfaceKey))
+            .Where(iface => !task.PatientContinuousSyncEnabled || !iface.PatientContinuousSyncEnabled)
             .Where(iface => !completedKeys.Contains(InterfaceAccessWindow.GetProgressKey(iface)))
             .OrderBy(iface => iface.SortOrder)
             .ToList();
@@ -431,16 +510,81 @@ public class SyncWorker : BackgroundService
     private static bool IsExecutionUnitOpen(SyncTask task, SyncTaskInterface root, DateTime now)
         => GetExecutionUnit(task, root).All(iface => InterfaceAccessWindow.IsOpen(iface, now));
 
+    private static async Task<Dictionary<string, ContinuousPollingTimeRange>> ResolveContinuousTimeRangesAsync(
+        SyncTask task,
+        IEnumerable<SyncTaskInterface> interfaces,
+        IReadOnlyDictionary<string, object> triggerRecord,
+        LocalQueryService localQueryService,
+        DateTime now,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<string, ContinuousPollingTimeRange>(StringComparer.OrdinalIgnoreCase);
+        foreach (var iface in interfaces.Where(item => item.ContinuousPollingEnabled))
+        {
+            result[InterfaceAccessWindow.GetProgressKey(iface)] =
+                await ContinuousInterfacePolling.ResolveTimeRangeAsync(
+                    iface,
+                    task,
+                    triggerRecord,
+                    localQueryService,
+                    now,
+                    ct);
+        }
+
+        return result;
+    }
+
+    private static bool IsInterfaceDue(
+        SyncTaskInterface iface,
+        IReadOnlyDictionary<string, ContinuousPollingTimeRange> timeRanges,
+        IReadOnlyDictionary<string, ContinuousInterfacePollingState> states,
+        DateTime now)
+    {
+        if (!iface.ContinuousPollingEnabled)
+            return true;
+
+        var key = InterfaceAccessWindow.GetProgressKey(iface);
+        var timeRange = timeRanges[key];
+        if (timeRange.Discharged)
+            return true;
+
+        return !states.TryGetValue(key, out var state) || state.NextRunAt <= now;
+    }
+
     private static DateTime GetNextExecutionTime(
         SyncTask task,
         IEnumerable<SyncTaskInterface> roots,
+        IReadOnlyDictionary<string, ContinuousPollingTimeRange> timeRanges,
+        IReadOnlyDictionary<string, ContinuousInterfacePollingState> states,
         DateTime now)
         => roots
-            .SelectMany(root => GetExecutionUnit(task, root))
-            .Where(iface => !InterfaceAccessWindow.IsOpen(iface, now))
-            .Select(iface => InterfaceAccessWindow.GetNextOpen(iface, now))
-            .DefaultIfEmpty(now)
+            .Select(root => GetNextExecutionTime(task, root, timeRanges, states, now))
             .Min();
+
+    private static DateTime GetNextExecutionTime(
+        SyncTask task,
+        SyncTaskInterface root,
+        IReadOnlyDictionary<string, ContinuousPollingTimeRange> timeRanges,
+        IReadOnlyDictionary<string, ContinuousInterfacePollingState> states,
+        DateTime now)
+    {
+        var readyAt = now;
+        if (root.ContinuousPollingEnabled)
+        {
+            var key = InterfaceAccessWindow.GetProgressKey(root);
+            var timeRange = timeRanges[key];
+            if (!timeRange.Discharged && states.TryGetValue(key, out var state) && state.NextRunAt > readyAt)
+                readyAt = state.NextRunAt;
+        }
+
+        foreach (var iface in GetExecutionUnit(task, root))
+        {
+            if (!InterfaceAccessWindow.IsOpen(iface, readyAt))
+                readyAt = InterfaceAccessWindow.GetNextOpen(iface, readyAt);
+        }
+
+        return readyAt;
+    }
 
     private static List<SyncTaskInterface> GetExecutionUnit(SyncTask task, SyncTaskInterface root)
     {

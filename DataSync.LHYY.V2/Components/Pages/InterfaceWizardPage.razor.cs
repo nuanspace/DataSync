@@ -126,6 +126,7 @@ public partial class InterfaceWizardPage
     private string? _pathPickTargetKey;
     private PathPickTargetKind _pathPickTargetKind = PathPickTargetKind.SourcePath;
     private int _pathPickRuleIndex = -1;
+    private int _pathPickSourceIndex;
     private Guid? _pathPickArrayCardId;
     private string? _selectedJsonTreePath;
     private int _selectedJsonTreeVersion;
@@ -326,6 +327,13 @@ public partial class InterfaceWizardPage
 
     private string GetDisplaySourcePath(MappingTarget mappingTarget, Guid? cardId, string? sourcePath, string? arrayPath)
     {
+        var sourcePaths = MultiSourcePathHelper.Split(sourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(sourcePath))
+        {
+            return MultiSourcePathHelper.JoinPaths(
+                sourcePaths.Select(path => GetDisplaySourcePath(mappingTarget, cardId, path, arrayPath)));
+        }
+
         var normalizedSource = sourcePath?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(normalizedSource))
         {
@@ -705,6 +713,13 @@ public partial class InterfaceWizardPage
 
     private string NormalizeEditableSourcePath(MappingTarget mappingTarget, Guid? cardId, string? arrayPath, string? value)
     {
+        var sourcePaths = MultiSourcePathHelper.Split(value);
+        if (MultiSourcePathHelper.HasPathSeparator(value))
+        {
+            return MultiSourcePathHelper.JoinPaths(
+                sourcePaths.Select(path => NormalizeEditableSourcePath(mappingTarget, cardId, arrayPath, path)));
+        }
+
         var normalized = value?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(normalized))
         {
@@ -1196,6 +1211,7 @@ public partial class InterfaceWizardPage
         _pathPickTargetKey = null;
         _pathPickTargetKind = PathPickTargetKind.SourcePath;
         _pathPickRuleIndex = -1;
+        _pathPickSourceIndex = 0;
         _pathPickArrayCardId = null;
         _selectedJsonTreePath = null;
         _selectedJsonTreeVersion = 0;
@@ -1859,6 +1875,7 @@ public partial class InterfaceWizardPage
         _pathPickTargetKey = null;
         _pathPickTargetKind = PathPickTargetKind.SourcePath;
         _pathPickRuleIndex = -1;
+        _pathPickSourceIndex = 0;
         _pathPickArrayCardId = null;
         _advanceAfterCurrentPick = false;
         SetJsonTreeSelection(null);
@@ -1870,12 +1887,14 @@ public partial class InterfaceWizardPage
         bool advanceAfterPick,
         string? treeSelectionPath,
         int filterRuleIndex = -1,
+        int sourcePathIndex = 0,
         Guid? arrayCardId = null)
     {
         _pathPickMode = PathPickMode.ActiveRow;
         _pathPickTargetKind = targetKind;
         _pathPickTargetKey = targetKey;
         _pathPickRuleIndex = filterRuleIndex;
+        _pathPickSourceIndex = sourcePathIndex;
         _pathPickArrayCardId = arrayCardId;
         _advanceAfterCurrentPick = advanceAfterPick;
         SetJsonTreeSelection(treeSelectionPath);
@@ -2493,7 +2512,7 @@ public partial class InterfaceWizardPage
         ArmPathPick(SelectedStandaloneField, advanceAfterPick);
     }
 
-    private void ActivateQuestionFieldSourcePath(TargetFieldDescriptor field)
+    private void ActivateQuestionFieldSourcePath(TargetFieldDescriptor field, int sourcePathIndex = 0)
     {
         _activeMappingKey = GetMappingKey(field);
         var row = FindMappingRow(field);
@@ -2505,7 +2524,8 @@ public partial class InterfaceWizardPage
                 field.MappingTarget,
                 field.CardId,
                 row?.ArrayPath ?? (field.CardId.HasValue ? GetSubCardArrayPath(field.CardId.Value) : null),
-                row?.SourcePath),
+                GetSourcePath(row?.SourcePath, sourcePathIndex)),
+            sourcePathIndex: sourcePathIndex,
             arrayCardId: field.MappingTarget == MappingTarget.SubCard ? field.CardId : null);
     }
 
@@ -2805,16 +2825,23 @@ public partial class InterfaceWizardPage
             return;
         }
 
-        var normalizedSourcePath = await NormalizePickedPathForRowAsync(row, path, row.SourcePath);
+        var sourcePaths = MultiSourcePathHelper.Split(row.SourcePath);
+        while (sourcePaths.Count <= _pathPickSourceIndex)
+        {
+            sourcePaths.Add("");
+        }
+
+        var normalizedSourcePath = await NormalizePickedPathForRowAsync(row, path, sourcePaths[_pathPickSourceIndex]);
         if (normalizedSourcePath == null)
         {
             return;
         }
 
-        row.SourcePath = normalizedSourcePath;
+        sourcePaths[_pathPickSourceIndex] = normalizedSourcePath;
+        row.SourcePath = MultiSourcePathHelper.JoinPaths(sourcePaths);
         ValidateMappingRowPath(row);
         _activeMappingKey = GetMappingKey(row);
-        SetJsonTreeSelection(BuildJsonTreeSelectionPath(row.MappingTarget, row.CardId, row.ArrayPath, row.SourcePath));
+        SetJsonTreeSelection(BuildJsonTreeSelectionPath(row.MappingTarget, row.CardId, row.ArrayPath, normalizedSourcePath));
         var shouldAdvance = _advanceAfterCurrentPick && _autoAdvanceAfterPathPick;
 
         if (shouldAdvance)
@@ -4508,6 +4535,19 @@ public partial class InterfaceWizardPage
             : GetDisplaySourcePath(field.MappingTarget, field.CardId, row.SourcePath, GetQuestionFieldArrayPath(field));
     }
 
+    private static string GetSourcePath(string? sourcePath, int index)
+    {
+        var paths = MultiSourcePathHelper.Split(sourcePath);
+        return index >= 0 && index < paths.Count ? paths[index] : "";
+    }
+
+    private string GetSourcePathSummary(WizardMappingRow row)
+    {
+        var paths = MultiSourcePathHelper.Split(row.SourcePath);
+        return paths.Count <= 1
+            ? GetPathScopeText(row.MappingTarget, row.CardId, row.ArrayPath, paths.FirstOrDefault())
+            : $"多源路径 {paths.Count} 条";
+    }
     private string? GetQuestionFieldDictCode(TargetFieldDescriptor field) => GetQuestionFieldRow(field)?.DictCode;
 
     private string GetQuestionFieldDictMatchMode(TargetFieldDescriptor field) =>
@@ -4602,6 +4642,9 @@ public partial class InterfaceWizardPage
             ? _pathPickRuleIndex
             : -1;
 
+    private int GetActiveSourcePathIndex(TargetFieldDescriptor field) =>
+        IsPathPickActive(field) ? _pathPickSourceIndex : -1;
+
     private int GetSubCardFilterActivePickIndex(Guid cardId) =>
         _pathPickMode == PathPickMode.ActiveRow
         && _pathPickTargetKind == PathPickTargetKind.SubCardFilterRule
@@ -4669,9 +4712,12 @@ public partial class InterfaceWizardPage
             return ExpandSubCardArrayPathToRoot(cardId, arrayPath);
         }
 
-        if (TryInferSubCardArrayPathFromSourcePath(sourcePath, out var parsedArrayPath))
+        foreach (var path in MultiSourcePathHelper.Split(sourcePath))
         {
-            return parsedArrayPath;
+            if (TryInferSubCardArrayPathFromSourcePath(path, out var parsedArrayPath))
+            {
+                return parsedArrayPath;
+            }
         }
 
         if (cardId.HasValue
@@ -4708,10 +4754,10 @@ public partial class InterfaceWizardPage
 
     private bool UsesRelativeSubCardPath(MappingTarget mappingTarget, Guid? cardId, string? arrayPath, string? sourcePath) =>
         mappingTarget == MappingTarget.SubCard
-        && !string.IsNullOrWhiteSpace(sourcePath)
-        && !IsAbsoluteJsonPath(sourcePath)
-        && !IsMainRecordScopedPath(sourcePath)
-        && !IsRootSubCardPath(sourcePath, GetEffectiveArrayPath(cardId, arrayPath, sourcePath));
+        && MultiSourcePathHelper.Split(sourcePath).Any(path =>
+            !IsAbsoluteJsonPath(path)
+            && !IsMainRecordScopedPath(path)
+            && !IsRootSubCardPath(path, GetEffectiveArrayPath(cardId, arrayPath, path)));
 
     private bool UsesRelativeSubCardPath(WizardMappingRow row) =>
         UsesRelativeSubCardPath(row.MappingTarget, row.CardId, row.ArrayPath, row.SourcePath);
@@ -4910,10 +4956,14 @@ public partial class InterfaceWizardPage
             return null;
         }
 
-        var token = ResolvePreviewToken(mappingTarget, cardId, arrayPath, sourcePath);
-        if (token != null)
+        var sourcePaths = mappingTarget is MappingTarget.Question or MappingTarget.SubCard
+            ? MultiSourcePathHelper.Split(sourcePath)
+            : [sourcePath.Trim()];
+        var value = MultiSourcePathHelper.JoinValues(sourcePaths.Select(path =>
+            ResolvePreviewToken(mappingTarget, cardId, arrayPath, path)?.ToString()));
+        if (value != null)
         {
-            return token.ToString();
+            return value;
         }
 
         if (mappingTarget == MappingTarget.SubCard
@@ -5241,7 +5291,8 @@ public partial class InterfaceWizardPage
             return;
         }
 
-        row.IsPathValid = ResolvePreviewToken(row.MappingTarget, row.CardId, row.ArrayPath, row.SourcePath) != null;
+        row.IsPathValid = MultiSourcePathHelper.Split(row.SourcePath)
+            .All(path => ResolvePreviewToken(row.MappingTarget, row.CardId, row.ArrayPath, path) != null);
     }
 
     private void OnActiveRowSourcePathChanged(string? value)
@@ -5725,16 +5776,18 @@ public partial class InterfaceWizardPage
 
     private bool NeedsSubCardPathSaveNormalization(string? sourcePath, string? arrayPath)
     {
-        var normalizedSourcePath = sourcePath?.Trim() ?? "";
-        if (string.IsNullOrWhiteSpace(normalizedSourcePath) || !SubCardPathHelper.HasArrayWildcard(normalizedSourcePath))
+        return MultiSourcePathHelper.Split(sourcePath).Any(path =>
         {
-            return false;
-        }
+            if (!SubCardPathHelper.HasArrayWildcard(path))
+            {
+                return false;
+            }
 
-        var normalizedArrayPath = NormalizeSubCardArrayPathValue(arrayPath);
-        return (!string.IsNullOrWhiteSpace(normalizedArrayPath)
-                && SubCardPathHelper.TryBuildRelativePath(normalizedSourcePath, normalizedArrayPath, out _))
-            || TryInferSubCardArrayPathFromSourcePath(normalizedSourcePath, out _);
+            var normalizedArrayPath = NormalizeSubCardArrayPathValue(arrayPath);
+            return (!string.IsNullOrWhiteSpace(normalizedArrayPath)
+                    && SubCardPathHelper.TryBuildRelativePath(path, normalizedArrayPath, out _))
+                || TryInferSubCardArrayPathFromSourcePath(path, out _);
+        });
     }
 
     private int CountPendingSubCardSaveNormalization() =>
@@ -5770,6 +5823,42 @@ public partial class InterfaceWizardPage
         out string? normalizedArrayPath,
         out string? error)
     {
+        var sourcePaths = MultiSourcePathHelper.Split(sourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(sourcePath))
+        {
+            var normalizedPaths = new List<string>();
+            normalizedArrayPath = NormalizeSubCardArrayPathValue(arrayPath);
+            error = null;
+            foreach (var path in sourcePaths)
+            {
+                if (!TryNormalizeSubCardPathForSave(
+                        path,
+                        normalizedArrayPath,
+                        pathLabel,
+                        out var normalizedPath,
+                        out var pathArrayPath,
+                        out error))
+                {
+                    normalizedSourcePath = "";
+                    return false;
+                }
+
+                normalizedArrayPath = pathArrayPath;
+                normalizedPaths.Add(normalizedPath);
+            }
+
+            var scopes = normalizedPaths.Select(MultiSourcePathHelper.GetSubCardScope).Distinct().ToList();
+            if (scopes.Count > 1)
+            {
+                normalizedSourcePath = "";
+                error = $"{pathLabel} 的多条路径必须位于同一主记录或同一子卡行内。";
+                return false;
+            }
+
+            normalizedSourcePath = MultiSourcePathHelper.JoinPaths(normalizedPaths);
+            return true;
+        }
+
         normalizedSourcePath = sourcePath?.Trim() ?? "";
         normalizedArrayPath = NormalizeSubCardArrayPathValue(arrayPath);
         error = null;
@@ -6021,6 +6110,13 @@ public partial class InterfaceWizardPage
         if (incompleteRows.Count > 0)
         {
             inj_snackbar.Add($"仍有 {incompleteRows.Count} 条映射既没有源路径也没有默认值，请先补全。", Severity.Warning);
+            return false;
+        }
+
+        var sourcePathTooLong = _mappingRows.FirstOrDefault(row => row.SourcePath?.Length > 500);
+        if (sourcePathTooLong != null)
+        {
+            inj_snackbar.Add($"字段【{sourcePathTooLong.TargetFieldDisplayName}】的源路径总长度不能超过 500 个字符。", Severity.Warning);
             return false;
         }
 

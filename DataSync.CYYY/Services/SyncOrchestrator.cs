@@ -17,8 +17,7 @@ public class SyncOrchestrator
     private const string StagePushFailed = "推送失败";
     private const string StageFailed = "失败";
 
-    private readonly DataLakeClient _dataLakeClient;
-    private readonly DynamicApiClient _dynamicApiClient;
+    private readonly ApiPlatformClient _apiPlatformClient;
     private readonly DatabaseQueryService _databaseQueryService;
     private readonly PushServiceFactory _pushServiceFactory;
     private readonly ApiPushService _apiPushService;
@@ -29,8 +28,7 @@ public class SyncOrchestrator
     private readonly ILogger<SyncOrchestrator> _logger;
 
     public SyncOrchestrator(
-        DataLakeClient dataLakeClient,
-        DynamicApiClient dynamicApiClient,
+        ApiPlatformClient apiPlatformClient,
         DatabaseQueryService databaseQueryService,
         PushServiceFactory pushServiceFactory,
         ApiPushService apiPushService,
@@ -40,8 +38,7 @@ public class SyncOrchestrator
         IDbContextFactory<SyncDbContext> dbFactory,
         ILogger<SyncOrchestrator> logger)
     {
-        _dataLakeClient = dataLakeClient;
-        _dynamicApiClient = dynamicApiClient;
+        _apiPlatformClient = apiPlatformClient;
         _databaseQueryService = databaseQueryService;
         _pushServiceFactory = pushServiceFactory;
         _apiPushService = apiPushService;
@@ -131,6 +128,41 @@ public class SyncOrchestrator
         return QueryInterfaceFromTriggerAsync(iface, task, triggerRecord, hisPatId, visitSn, ct);
     }
 
+    /// <summary>
+    /// 按患者持续同步配置查询关联 API，不执行推送。
+    /// </summary>
+    public Task<List<Dictionary<string, object>>> QueryInterfaceForPatientContinuousAsync(
+        SyncTaskInterface iface,
+        SyncTask task,
+        Dictionary<string, object> triggerRecord,
+        DateTime? from,
+        DateTime? to,
+        CancellationToken ct)
+    {
+        var hisPatId = GetStringValue(triggerRecord, task.PatientIdField);
+        var visitSn = string.IsNullOrWhiteSpace(task.VisitSnField)
+            ? null
+            : GetStringValue(triggerRecord, task.VisitSnField);
+        return QueryInterfaceFromTriggerAsync(
+            iface, task, triggerRecord, hisPatId, visitSn, ct, from, to, true);
+    }
+
+    public void InjectPatientContinuousFields(
+        List<Dictionary<string, object>> records,
+        Dictionary<string, object> triggerRecord,
+        SyncTaskInterface iface)
+        => InjectTriggerFields(records, triggerRecord, iface.InjectFields);
+
+    public Task PushPatientContinuousDataAsync(
+        SyncTask task,
+        SyncTaskInterface iface,
+        List<Dictionary<string, object>> records,
+        CancellationToken ct)
+    {
+        var pushService = _pushServiceFactory.GetPushService(task.PushType);
+        return PushInterfaceDataAsync(task.PushTarget, iface, pushService, records, ct);
+    }
+
     public async Task PushTriggerRecordAsync(
         SyncTask task,
         Dictionary<string, object> triggerRecord,
@@ -206,14 +238,19 @@ public class SyncOrchestrator
         if (hasPatientIds && hasVisitSns && hisPatIds.Count != visitSns.Count)
             throw new InvalidOperationException("患者ID和就诊号数量必须一致");
 
-        var patientVisits = hasPatientIds && hasVisitSns
+        var isPairedQuery = hasPatientIds && hasVisitSns;
+        var patientVisits = isPairedQuery
             ? hisPatIds.Zip(visitSns, (patientId, visitId) => (PatientId: patientId, VisitId: visitId))
                 .DistinctBy(item => $"{item.PatientId}\u001f{item.VisitId}", StringComparer.OrdinalIgnoreCase)
                 .ToList()
-            : [];
+            : hasPatientIds
+                ? hisPatIds.Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(patientId => (PatientId: patientId, VisitId: "")).ToList()
+                : visitSns.Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Select(visitId => (PatientId: "", VisitId: visitId)).ToList();
         hisPatIds = hisPatIds.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         visitSns = visitSns.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var modeName = patientVisits.Count > 0
+        var modeName = isPairedQuery
             ? "患者ID+就诊号"
             : hasPatientIds ? "患者ID" : "就诊号";
         var result = new SyncResult();
@@ -255,18 +292,15 @@ public class SyncOrchestrator
                 continue;
             }
 
-            if (IngestionService.IsDynamicApiSource(source) && patientVisits.Count == 0)
-                throw new InvalidOperationException($"DynamicApi 目标 [{task.Name}] 必须同时提供患者ID和就诊号");
-
-            var conditions = new List<DataLakeCondition>();
+            var conditions = new List<QueryCondition>();
             if (hasPatientIds)
             {
-                conditions.Add(new DataLakeCondition
+                conditions.Add(new QueryCondition
                 { Column = task.PatientIdField, Type = "in", Value = string.Join(",", hisPatIds) });
             }
             if (hasVisitSns)
             {
-                conditions.Add(new DataLakeCondition
+                conditions.Add(new QueryCondition
                 { Column = task.VisitSnField!, Type = "in", Value = string.Join(",", visitSns) });
             }
 
@@ -274,10 +308,10 @@ public class SyncOrchestrator
                 source,
                 conditions,
                 ct,
-                patientVisits.Count > 0 ? patientVisits : null);
+                patientVisits);
 
             List<Dictionary<string, object>> records;
-            if (patientVisits.Count > 0)
+            if (isPairedQuery)
             {
                 records = [];
                 foreach (var (patientId, visitId) in patientVisits)
@@ -384,8 +418,8 @@ public class SyncOrchestrator
                 continue;
             }
 
-            // 1. 采集到本地：用时间范围构建数据湖查询条件
-            var conditions = new List<DataLakeCondition>
+            // 1. 采集到本地：用时间范围构建查询条件
+            var conditions = new List<QueryCondition>
             {
                 new() { Column = source.TimeField, Type = "ge", Value = from.ToString("yyyy-MM-dd HH:mm:ss") },
                 new() { Column = source.TimeField, Type = "le", Value = to.ToString("yyyy-MM-dd HH:mm:ss") }
@@ -556,6 +590,7 @@ public class SyncOrchestrator
                     if (execution.Status == InterfaceExecutionStatus.Success)
                     {
                         hadSuccessfulInterface = true;
+                        AddSuccessfulInterface(result, iface);
                         AddCompletedInterface(result, iface);
                     }
                     else if (execution.Status == InterfaceExecutionStatus.Skipped)
@@ -718,6 +753,19 @@ public class SyncOrchestrator
             return new InterfaceExecutionResult
             {
                 Status = InterfaceExecutionStatus.Success,
+                Detail = detail
+            };
+        }
+        catch (InterfaceSkippedException ex)
+        {
+            await AddInterfaceLogAsync(task, iface, hisPatId, visitSn, patName, true, triggerType, ex.Message, sourceRecordKey, ct);
+            detail.Success = true;
+            detail.Skipped = true;
+            detail.Stage = StageNoData;
+            detail.ErrorMessage = ex.Message;
+            return new InterfaceExecutionResult
+            {
+                Status = InterfaceExecutionStatus.Skipped,
                 Detail = detail
             };
         }
@@ -902,6 +950,19 @@ public class SyncOrchestrator
                 Detail = detail
             };
         }
+        catch (InterfaceSkippedException ex)
+        {
+            await AddInterfaceLogAsync(task, rootInterface, hisPatId, visitSn, patName, true, triggerType, ex.Message, sourceRecordKey, ct);
+            detail.Success = true;
+            detail.Skipped = true;
+            detail.Stage = StageNoData;
+            detail.ErrorMessage = ex.Message;
+            return new InterfaceExecutionResult
+            {
+                Status = InterfaceExecutionStatus.Skipped,
+                Detail = detail
+            };
+        }
         catch (Exception ex)
         {
             await AddInterfaceLogAsync(task, rootInterface, hisPatId, visitSn, patName, false, triggerType, ex.Message, sourceRecordKey, ct);
@@ -950,6 +1011,12 @@ public class SyncOrchestrator
             result.CompletedInterfaceKeys.Add(InterfaceAccessWindow.GetProgressKey(iface));
     }
 
+    private static void AddSuccessfulInterface(SyncResult result, SyncTaskInterface iface)
+    {
+        lock (result.SuccessfulInterfaceKeys)
+            result.SuccessfulInterfaceKeys.Add(InterfaceAccessWindow.GetProgressKey(iface));
+    }
+
     private static IReadOnlyCollection<int>? GetSelectedInterfaceIds(
         Dictionary<string, List<int>>? selectedInterfaceIdsByTask,
         string taskCode)
@@ -975,10 +1042,7 @@ public class SyncOrchestrator
         if (string.IsNullOrWhiteSpace(errorMessage))
             return StageFailed;
 
-        if (errorMessage.StartsWith("[数据湖查询]", StringComparison.Ordinal))
-            return StageFetchFailed;
-
-        if (errorMessage.StartsWith("[动态接口查询]", StringComparison.Ordinal))
+        if (errorMessage.StartsWith("[API查询]", StringComparison.Ordinal))
             return StageFetchFailed;
 
         if (errorMessage.StartsWith("[数据库查询]", StringComparison.Ordinal) ||
@@ -996,22 +1060,105 @@ public class SyncOrchestrator
         Dictionary<string, object> triggerRecord,
         string hisPatId,
         string? visitSn,
-        CancellationToken ct)
+        CancellationToken ct,
+        DateTime? explicitFrom = null,
+        DateTime? explicitTo = null,
+        bool patientContinuousQuery = false)
     {
-        if (IsDynamicApiInterface(iface))
+        if (!IsDatabaseInterface(iface))
         {
             try
             {
-                return await _dynamicApiClient.QueryAllPagesAsync(
-                    iface.QueryPath ?? "",
-                    hisPatId,
-                    visitSn ?? "",
-                    iface.UseTodayTimeRange,
+                var mappings = GetQueryMappings(iface);
+                if (mappings.Count == 0)
+                {
+                    _logger.LogWarning("接口 {ServerCode} 未配置手动查询映射，本次跳过", iface.ServerCode);
+                    throw new InterfaceSkippedException($"接口 {iface.ServerCode} 未配置手动查询映射");
+                }
+
+                var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var mapping in mappings)
+                {
+                    var value = GetStringValue(triggerRecord, mapping.SourceField);
+                    if (string.IsNullOrWhiteSpace(value))
+                    {
+                        _logger.LogWarning(
+                            "接口 {ServerCode} 的触发记录字段 {SourceField} 无值，本次跳过",
+                            iface.ServerCode,
+                            mapping.SourceField);
+                        throw new InterfaceSkippedException(
+                            $"接口 {iface.ServerCode} 的触发记录字段 {mapping.SourceField} 无值");
+                    }
+                    values[mapping.TargetField] = value;
+                }
+
+                var apiInterface = await GetApiInterfaceAsync(iface, ct);
+                if (patientContinuousQuery)
+                {
+                    var queryConfig = apiInterface.Platform!.GetQueryConfig();
+                    if (!string.Equals(
+                            queryConfig.ParameterMode,
+                            ApiParameterModes.DirectProperties,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new InvalidOperationException(
+                            $"接口 [{iface.ServerCode}] 的患者持续同步要求平台使用直接参数");
+                    }
+                    if (iface.ContinuousUseTimeRange &&
+                        (!explicitFrom.HasValue || !explicitTo.HasValue ||
+                         string.IsNullOrWhiteSpace(queryConfig.StartTimeField) ||
+                         string.IsNullOrWhiteSpace(queryConfig.EndTimeField)))
+                    {
+                        throw new InvalidOperationException(
+                            $"接口 [{iface.ServerCode}] 启用时间窗口时必须配置并传入开始、结束时间");
+                    }
+                }
+                DateTime? from = null;
+                DateTime? to = null;
+                if (patientContinuousQuery)
+                {
+                    from = iface.ContinuousUseTimeRange ? explicitFrom : null;
+                    to = iface.ContinuousUseTimeRange ? explicitTo : null;
+                }
+                else if (explicitFrom.HasValue || explicitTo.HasValue)
+                {
+                    from = explicitFrom;
+                    to = explicitTo;
+                }
+                else if (iface.ContinuousPollingEnabled)
+                {
+                    var timeRange = await ContinuousInterfacePolling.ResolveTimeRangeAsync(
+                        iface,
+                        task,
+                        triggerRecord,
+                        _localQueryService,
+                        DateTime.Now,
+                        ct);
+                    from = timeRange.From;
+                    to = timeRange.To;
+                }
+                else if (iface.UseTodayTimeRange)
+                {
+                    from = DateTime.Today;
+                    to = DateTime.Today.AddDays(1).AddSeconds(-1);
+                }
+
+                return await _apiPlatformClient.QueryAllPagesAsync(
+                    apiInterface,
+                    values,
+                    GetApiFilters(iface),
+                    from,
+                    to,
+                    null,
                     ct);
+            }
+            catch (InterfaceSkippedException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                throw new InvalidOperationException($"[动态接口查询] {ex.Message}", ex);
+                throw new InvalidOperationException($"[API查询] {ex.Message}", ex);
             }
         }
 
@@ -1036,9 +1183,6 @@ public class SyncOrchestrator
     {
         try
         {
-            if (IsDynamicApiInterface(iface))
-                throw new InvalidOperationException("动态接口只支持按患者触发记录查询");
-
             var validValues = queryValues
                 .Where(v => !string.IsNullOrWhiteSpace(v))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1048,25 +1192,21 @@ public class SyncOrchestrator
                 return [];
 
             var allData = new List<Dictionary<string, object>>();
-            var databaseConnection = IsDatabaseInterface(iface)
-                ? await ResolveDatabaseConnectionAsync(iface, task, ct)
-                : null;
+            var databaseConnection = await ResolveDatabaseConnectionAsync(iface, task, ct);
             foreach (var chunk in validValues.Chunk(200))
             {
-                var chunkData = IsDatabaseInterface(iface)
-                    ? await _databaseQueryService.QueryByValuesAsync(
-                        databaseConnection!.DatabaseType,
-                        databaseConnection.ConnectionStringName,
-                        databaseConnection.Host,
-                        databaseConnection.Database,
-                        databaseConnection.Username,
-                        databaseConnection.Password,
-                        databaseConnection.TrustCertificate,
-                        iface.QuerySql ?? "",
-                        iface.QueryField,
-                        chunk,
-                        ct)
-                    : await _dataLakeClient.QueryAllPagesAsync(iface.ServerCode, BuildQueryConditions(iface, chunk), ct);
+                var chunkData = await _databaseQueryService.QueryByValuesAsync(
+                    databaseConnection.DatabaseType,
+                    databaseConnection.ConnectionStringName,
+                    databaseConnection.Host,
+                    databaseConnection.Database,
+                    databaseConnection.Username,
+                    databaseConnection.Password,
+                    databaseConnection.TrustCertificate,
+                    iface.QuerySql ?? "",
+                    iface.QueryField,
+                    chunk,
+                    ct);
                 allData.AddRange(chunkData);
             }
 
@@ -1087,9 +1227,6 @@ public class SyncOrchestrator
     {
         try
         {
-            if (IsDynamicApiInterface(iface))
-                throw new InvalidOperationException("动态接口不支持父子关联查询");
-
             var validSets = queryValueSets
                 .Where(set => set.Values.Count > 0 && set.Values.All(value => !string.IsNullOrWhiteSpace(value.Value)))
                 .DistinctBy(set => BuildLinkValuesKey(set.Values))
@@ -1098,14 +1235,11 @@ public class SyncOrchestrator
             if (validSets.Count == 0)
                 return [];
 
-            var databaseConnection = IsDatabaseInterface(iface)
-                ? await ResolveDatabaseConnectionAsync(iface, task, ct)
-                : null;
-
             if (IsDatabaseInterface(iface))
             {
+                var databaseConnection = await ResolveDatabaseConnectionAsync(iface, task, ct);
                 return await _databaseQueryService.QueryByFieldValueSetsAsync(
-                    databaseConnection!.DatabaseType,
+                    databaseConnection.DatabaseType,
                     databaseConnection.ConnectionStringName,
                     databaseConnection.Host,
                     databaseConnection.Database,
@@ -1120,14 +1254,35 @@ public class SyncOrchestrator
                     ct);
             }
 
+            var apiInterface = await GetApiInterfaceAsync(iface, ct);
+            var queryConfig = apiInterface.Platform!.GetQueryConfig();
             var allData = new List<Dictionary<string, object>>();
+            if (string.Equals(queryConfig.ParameterMode, ApiParameterModes.DirectProperties, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var valueSet in validSets)
+                {
+                    var values = valueSet.Values.ToDictionary(
+                        value => value.ChildField,
+                        value => (object?)value.Value,
+                        StringComparer.OrdinalIgnoreCase);
+                    allData.AddRange(await _apiPlatformClient.QueryAllPagesAsync(
+                        apiInterface, values, GetApiFilters(iface), null, null, null, ct));
+                }
+                return allData;
+            }
+
             foreach (var chunk in validSets.Chunk(200))
             {
                 var chunkList = chunk.ToList();
-                var chunkData = await _dataLakeClient.QueryAllPagesAsync(
-                    iface.ServerCode,
-                    BuildLinkQueryConditions(iface, chunkList),
-                    ct);
+                var values = chunkList
+                    .SelectMany(set => set.Values)
+                    .GroupBy(value => value.ChildField, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => (object?)group.Select(value => value.Value).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                        StringComparer.OrdinalIgnoreCase);
+                var chunkData = await _apiPlatformClient.QueryAllPagesAsync(
+                    apiInterface, values, GetApiFilters(iface), null, null, null, ct);
                 allData.AddRange(FilterByLinkValueSets(chunkData, chunkList));
             }
 
@@ -1143,15 +1298,72 @@ public class SyncOrchestrator
     private static bool IsDatabaseInterface(SyncTaskInterface iface) =>
         IngestionService.IsDatabaseSourceType(iface.SourceType);
 
-    private static bool IsDynamicApiInterface(SyncTaskInterface iface) =>
-        IngestionService.IsDynamicApiSourceType(iface.SourceType);
-
     private static string GetQueryErrorPrefix(SyncTaskInterface iface)
     {
         if (IsDatabaseInterface(iface))
             return "[数据库查询]";
 
-        return IsDynamicApiInterface(iface) ? "[动态接口查询]" : "[数据湖查询]";
+        return "[API查询]";
+    }
+
+    private async Task<ApiInterface> GetApiInterfaceAsync(SyncTaskInterface iface, CancellationToken ct)
+    {
+        if (!iface.ApiInterfaceId.HasValue)
+            throw new InvalidOperationException($"接口 [{iface.ServerCode}] 未关联 API 接口目录");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.ApiInterfaces
+            .AsNoTracking()
+            .Include(i => i.Platform)
+            .FirstOrDefaultAsync(i => i.Id == iface.ApiInterfaceId.Value, ct)
+            ?? throw new InvalidOperationException($"接口 [{iface.ServerCode}] 关联的 API 接口不存在");
+    }
+
+    private static List<InterfaceQueryMapping> GetQueryMappings(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.QueryMappings))
+            return [];
+
+        try
+        {
+            return (JsonSerializer.Deserialize<List<InterfaceQueryMapping>>(iface.QueryMappings) ?? [])
+                .Where(mapping =>
+                    !string.IsNullOrWhiteSpace(mapping.TargetField) &&
+                    !string.IsNullOrWhiteSpace(mapping.SourceField))
+                .Select(mapping => new InterfaceQueryMapping
+                {
+                    TargetField = mapping.TargetField.Trim(),
+                    SourceField = mapping.SourceField.Trim()
+                })
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static List<ApiFilterCondition> GetApiFilters(SyncTaskInterface iface)
+    {
+        if (string.IsNullOrWhiteSpace(iface.FilterConditions))
+            return [];
+
+        try
+        {
+            return (JsonSerializer.Deserialize<List<QueryCondition>>(iface.FilterConditions) ?? [])
+                .Where(condition => !string.IsNullOrWhiteSpace(condition.Column) && !string.IsNullOrWhiteSpace(condition.Type))
+                .Select(condition => new ApiFilterCondition
+                {
+                    Field = condition.Column.Trim(),
+                    Operator = condition.Type.Trim(),
+                    Value = condition.Value
+                })
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
     }
 
     private async Task<DatabaseConnectionConfig> ResolveDatabaseConnectionAsync(
@@ -1233,97 +1445,6 @@ public class SyncOrchestrator
             resource.Password,
             resource.TrustCertificate);
 
-    private List<DataLakeCondition> BuildQueryConditions(
-        SyncTaskInterface iface,
-        IReadOnlyCollection<string> queryValues)
-    {
-        var conditions = new List<DataLakeCondition>();
-        if (queryValues.Count == 1)
-        {
-            conditions.Add(new DataLakeCondition
-            {
-                Column = iface.QueryField,
-                Type = "eq",
-                Value = queryValues.First()
-            });
-        }
-        else
-        {
-            conditions.Add(new DataLakeCondition
-            {
-                Column = iface.QueryField,
-                Type = "in",
-                Value = string.Join(",", queryValues)
-            });
-        }
-
-        if (!string.IsNullOrEmpty(iface.FilterConditions))
-        {
-            try
-            {
-                var filters = JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions);
-                if (filters != null)
-                    conditions.AddRange(filters);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "接口 {ServerCode} 过滤条件 JSON 解析失败：{FilterConditions}",
-                    iface.ServerCode, iface.FilterConditions);
-            }
-        }
-
-        return conditions;
-    }
-
-    private List<DataLakeCondition> BuildLinkQueryConditions(
-        SyncTaskInterface iface,
-        IReadOnlyCollection<InterfaceLinkValueSet> queryValueSets)
-    {
-        var conditions = new List<DataLakeCondition>();
-        var fields = queryValueSets
-            .SelectMany(set => set.Values.Select(value => value.ChildField))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        foreach (var field in fields)
-        {
-            var values = queryValueSets
-                .SelectMany(set => set.Values
-                    .Where(value => string.Equals(value.ChildField, field, StringComparison.OrdinalIgnoreCase))
-                    .Select(value => value.Value))
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            if (values.Count == 0)
-                continue;
-
-            conditions.Add(new DataLakeCondition
-            {
-                Column = field,
-                Type = values.Count == 1 ? "eq" : "in",
-                Value = values.Count == 1 ? values[0] : string.Join(",", values)
-            });
-        }
-
-        if (!string.IsNullOrEmpty(iface.FilterConditions))
-        {
-            try
-            {
-                var filters = JsonSerializer.Deserialize<List<DataLakeCondition>>(iface.FilterConditions);
-                if (filters != null)
-                    conditions.AddRange(filters);
-            }
-            catch (JsonException ex)
-            {
-                _logger.LogWarning(ex, "接口 {ServerCode} 过滤条件 JSON 解析失败：{FilterConditions}",
-                    iface.ServerCode, iface.FilterConditions);
-            }
-        }
-
-        return conditions;
-    }
-
     private static List<Dictionary<string, object>> FilterByLinkValueSets(
         List<Dictionary<string, object>> data,
         IReadOnlyCollection<InterfaceLinkValueSet> queryValueSets)
@@ -1378,16 +1499,7 @@ public class SyncOrchestrator
             }
         }
 
-        return string.IsNullOrWhiteSpace(iface.ParentResultField) || string.IsNullOrWhiteSpace(iface.QueryField)
-            ? []
-            :
-            [
-                new InterfaceLinkMapping
-                {
-                    ParentField = iface.ParentResultField,
-                    ChildField = iface.QueryField
-                }
-            ];
+        return [];
     }
 
     private async Task PushInterfaceDataAsync(
@@ -1810,6 +1922,10 @@ public class SyncOrchestrator
     {
         public InterfaceExecutionStatus Status { get; init; }
         public InterfaceSyncDetail Detail { get; init; } = new();
+    }
+
+    private sealed class InterfaceSkippedException(string message) : Exception(message)
+    {
     }
 
     private sealed record DatabaseConnectionConfig(

@@ -143,12 +143,6 @@ public class ConfigService
     public async Task<string?> GetDefaultLicenseCodeAsync(string? integrationProjectCode = null)
         => await GetEffectiveConfigValueAsync("DefaultLicenseCode", integrationProjectCode);
 
-    public async Task<string?> GetDefaultHospitalIdAsync(string? integrationProjectCode = null)
-        => await GetEffectiveConfigValueAsync("DefaultHospitalId", integrationProjectCode);
-
-    public async Task<string?> GetDefaultProjectIdAsync(string? integrationProjectCode = null)
-        => await GetEffectiveConfigValueAsync("DefaultProjectId", integrationProjectCode);
-
     public async Task<string?> GetProjectConfigValueAsync(string key, string? integrationProjectCode = null)
     {
         var configs = await GetAllProjectConfigsAsync(integrationProjectCode);

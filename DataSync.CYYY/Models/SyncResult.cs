@@ -10,6 +10,7 @@ public class SyncResult
     public int SkipCount;
     public List<SyncFailDetail> FailDetails { get; set; } = [];
     public HashSet<string> CompletedInterfaceKeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> SuccessfulInterfaceKeys { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public class SyncFailDetail

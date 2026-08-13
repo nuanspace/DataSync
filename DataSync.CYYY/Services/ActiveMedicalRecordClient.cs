@@ -71,21 +71,17 @@ public class ActiveMedicalRecordClient
         if (items.ValueKind != JsonValueKind.Array)
         {
             _logger.LogWarning("Active 病历接口返回格式不正确，地址 {Url}", url);
-            return new ActiveMedicalRecordBatch();
+            throw new InvalidOperationException("Active 病历接口返回的 JSON 中未找到病例数组（items/records）");
         }
 
         var result = new List<ActiveMedicalRecordInfo>();
         foreach (var item in items.EnumerateArray())
         {
-            var inpatientNo = ReadString(item, "inpatientNo", "inpatient_no", "INP_NO");
-            if (string.IsNullOrWhiteSpace(inpatientNo))
-                continue;
-
             result.Add(new ActiveMedicalRecordInfo
             {
                 Cursor = ReadLong(item, "cursor", "id"),
                 Mrn = ReadString(item, "mrn", "medicalRecordNumber", "medical_record_number"),
-                InpatientNo = inpatientNo,
+                InpatientNo = ReadString(item, "inpatientNo", "inpatient_no", "INP_NO"),
                 VisitNo = ReadNullableString(item, "visitNo", "visit_no"),
                 AdmissionTime = ReadNullableDateTime(item, "admissionTime", "admission_time"),
                 PatientId = ReadNullableGuid(item, "patientId", "patient_id"),

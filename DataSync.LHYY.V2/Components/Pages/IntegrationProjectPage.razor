@@ -112,14 +112,6 @@
                                 <MudText Typo="Typo.caption" Class="project-config-label">LicenseCode</MudText>
                                 <MudText Typo="Typo.body2" Class="project-config-value">@GetLicenseCodeText(item.ProjectCode)</MudText>
                             </div>
-                            <div class="project-config-item">
-                                <MudText Typo="Typo.caption" Class="project-config-label">HospitalId</MudText>
-                                <MudText Typo="Typo.body2" Class="project-config-value">@GetHospitalIdText(item.ProjectCode)</MudText>
-                            </div>
-                            <div class="project-config-item">
-                                <MudText Typo="Typo.caption" Class="project-config-label">ProjectId</MudText>
-                                <MudText Typo="Typo.body2" Class="project-config-value">@GetProjectIdText(item.ProjectCode)</MudText>
-                            </div>
                         </div>
 
                         <MudDivider Class="project-card-divider" />
@@ -210,14 +202,8 @@
             <MudDivider Class="my-3" />
 
             <MudGrid>
-                <MudItem xs="12" sm="4">
+                <MudItem xs="12">
                     <MudTextField @bind-Value="_editDefaultLicenseCode" Label="项目默认 LicenseCode" />
-                </MudItem>
-                <MudItem xs="12" sm="4">
-                    <MudTextField @bind-Value="_editDefaultHospitalId" Label="项目默认 HospitalId" />
-                </MudItem>
-                <MudItem xs="12" sm="4">
-                    <MudTextField @bind-Value="_editDefaultProjectId" Label="项目默认 ProjectId" />
                 </MudItem>
             </MudGrid>
         }
@@ -247,8 +233,6 @@
     private string? _documentProjectCode;
     private string? _documentProjectName;
     private string? _editDefaultLicenseCode;
-    private string? _editDefaultHospitalId;
-    private string? _editDefaultProjectId;
     private readonly DialogOptions _dialogOptions = new() { MaxWidth = MaxWidth.Medium, FullWidth = true };
     private EsbIntegrationProject? CurrentDefaultProject => _items.FirstOrDefault(item => IsCurrentProject(item));
     private int EnabledProjectCount => _items.Count(item => item.IsEnabled);
@@ -260,8 +244,6 @@
     private sealed class ProjectConfigSnapshot
     {
         public string? DefaultLicenseCode { get; set; }
-        public string? DefaultHospitalId { get; set; }
-        public string? DefaultProjectId { get; set; }
     }
 
     protected override async Task OnPageInitializedAsync()
@@ -288,9 +270,7 @@
             {
                 _projectConfigs[group.Key] = new ProjectConfigSnapshot
                 {
-                    DefaultLicenseCode = GetProjectConfigValue(group, "DefaultLicenseCode"),
-                    DefaultHospitalId = GetProjectConfigValue(group, "DefaultHospitalId"),
-                    DefaultProjectId = GetProjectConfigValue(group, "DefaultProjectId")
+                    DefaultLicenseCode = GetProjectConfigValue(group, "DefaultLicenseCode")
                 };
             }
         }
@@ -312,8 +292,6 @@
             SortOrder = _items.Count == 0 ? 1 : _items.Max(x => x.SortOrder) + 1
         };
         _editDefaultLicenseCode = null;
-        _editDefaultHospitalId = null;
-        _editDefaultProjectId = null;
         _isNew = true;
         _dialogVisible = true;
     }
@@ -332,8 +310,6 @@
             UpdatedAt = item.UpdatedAt
         };
         _editDefaultLicenseCode = GetLicenseCodeValue(item.ProjectCode);
-        _editDefaultHospitalId = GetHospitalIdValue(item.ProjectCode);
-        _editDefaultProjectId = GetProjectIdValue(item.ProjectCode);
         _isNew = false;
         _dialogVisible = true;
     }
@@ -380,8 +356,6 @@
             }
 
             await UpsertProjectConfigAsync(db, projectCode, "DefaultLicenseCode", _editDefaultLicenseCode, "string", "项目默认 Bio.Core LicenseCode");
-            await UpsertProjectConfigAsync(db, projectCode, "DefaultHospitalId", _editDefaultHospitalId, "guid", "项目默认医院 ID");
-            await UpsertProjectConfigAsync(db, projectCode, "DefaultProjectId", _editDefaultProjectId, "guid", "项目默认项目 ID");
 
             await db.SaveChangesAsync();
             IntegrationProjectService.ClearCache();
@@ -484,18 +458,8 @@
 
     private string GetLicenseCodeText(string projectCode) => FormatProjectConfigValue(GetLicenseCodeValue(projectCode));
 
-    private string GetHospitalIdText(string projectCode) => FormatProjectConfigValue(GetHospitalIdValue(projectCode));
-
-    private string GetProjectIdText(string projectCode) => FormatProjectConfigValue(GetProjectIdValue(projectCode));
-
     private string? GetLicenseCodeValue(string projectCode)
         => _projectConfigs.TryGetValue(projectCode, out var snapshot) ? snapshot.DefaultLicenseCode : null;
-
-    private string? GetHospitalIdValue(string projectCode)
-        => _projectConfigs.TryGetValue(projectCode, out var snapshot) ? snapshot.DefaultHospitalId : null;
-
-    private string? GetProjectIdValue(string projectCode)
-        => _projectConfigs.TryGetValue(projectCode, out var snapshot) ? snapshot.DefaultProjectId : null;
 
     private static string FormatProjectConfigValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? "跟随全局" : value;

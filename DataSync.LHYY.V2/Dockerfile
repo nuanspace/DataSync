@@ -18,8 +18,11 @@ RUN dotnet publish "DataSync.LHYY.V2.csproj" -c Release -o /app/publish /p:UseAp
 FROM base AS final
 WORKDIR /app
 USER root
+ENV TZ=Asia/Shanghai
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl openssh-client tesseract-ocr tesseract-ocr-chi-sim poppler-utils \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates curl openssh-client tzdata tesseract-ocr tesseract-ocr-chi-sim poppler-utils \
+    && ln -snf "/usr/share/zoneinfo/$TZ" /etc/localtime \
+    && echo "$TZ" > /etc/timezone \
     && install -d /usr/share/postgresql-common/pgdg \
     && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \

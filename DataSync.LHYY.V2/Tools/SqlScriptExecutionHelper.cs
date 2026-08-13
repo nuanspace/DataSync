@@ -29,6 +29,13 @@ internal static class SqlScriptExecutionHelper
             return;
         }
 
+        if (ContainsExplicitTransactionControl(sql))
+        {
+            await using var command = new NpgsqlCommand(sql, connection) { CommandTimeout = 0 };
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            return;
+        }
+
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         try
         {
@@ -44,6 +51,59 @@ internal static class SqlScriptExecutionHelper
             await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
+    }
+
+    private static bool ContainsExplicitTransactionControl(string sql) =>
+        SplitStatements(sql).Any(IsTransactionControlStatement);
+
+    private static bool IsTransactionControlStatement(string statement)
+    {
+        var value = TrimLeadingComments(statement);
+        return value.Equals("BEGIN", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("BEGIN ", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("START TRANSACTION", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("START TRANSACTION ", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("COMMIT", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("COMMIT ", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("ROLLBACK", StringComparison.OrdinalIgnoreCase)
+            || value.StartsWith("ROLLBACK ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TrimLeadingComments(string statement)
+    {
+        var index = 0;
+        while (index < statement.Length)
+        {
+            while (index < statement.Length && char.IsWhiteSpace(statement[index]))
+                index++;
+
+            if (index + 1 >= statement.Length)
+                break;
+
+            if (statement[index] == '-' && statement[index + 1] == '-')
+            {
+                var lineEnd = statement.IndexOf('\n', index + 2);
+                if (lineEnd < 0)
+                    return "";
+
+                index = lineEnd + 1;
+                continue;
+            }
+
+            if (statement[index] == '/' && statement[index + 1] == '*')
+            {
+                var commentEnd = statement.IndexOf("*/", index + 2, StringComparison.Ordinal);
+                if (commentEnd < 0)
+                    return "";
+
+                index = commentEnd + 2;
+                continue;
+            }
+
+            break;
+        }
+
+        return statement[index..].Trim();
     }
 
     private static List<string> SplitStatements(string sql)

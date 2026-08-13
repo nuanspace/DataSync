@@ -178,6 +178,7 @@ public class GenericMessageProcessor
 
         var eventResolve = await ResolveEventAsync(
             config,
+            integrationProjectCode,
             result,
             dbPatient,
             mrn,
@@ -569,16 +570,16 @@ public class GenericMessageProcessor
                 return (null, Guid.Empty, Guid.Empty, $"未找到 FormSet: LicenseCode={licenseCode}, EventType={config.EventTypeName}");
         }
 
-        var hospitalIdValue = await _configService.GetDefaultHospitalIdAsync(config.IntegrationProjectCode);
-        var projectIdValue = await _configService.GetDefaultProjectIdAsync(config.IntegrationProjectCode);
-        if (Guid.TryParse(hospitalIdValue, out var defaultHospitalId) && Guid.TryParse(projectIdValue, out var defaultProjectId))
+        var (defaultHospitalId, defaultProjectId) = await _bioCore.GetProjectContextByLicenseAsync(licenseCode);
+        if (defaultHospitalId != Guid.Empty && defaultProjectId != Guid.Empty)
             return (null, defaultHospitalId, defaultProjectId, null);
 
-        return (null, Guid.Empty, Guid.Empty, "未找到 HospitalId/ProjectId，请检查项目或全局配置");
+        return (null, Guid.Empty, Guid.Empty, $"未找到 LicenseCode 对应的 HospitalId/ProjectId: LicenseCode={licenseCode}");
     }
 
     private async Task<(patient_event? Event, ProcessResult? Result)> ResolveEventAsync(
         EsbInterfaceConfig config,
+        string? integrationProjectCode,
         ProcessResult result,
         patient dbPatient,
         string mrn,
@@ -615,7 +616,7 @@ public class GenericMessageProcessor
         }
 
         var identity = knownIdentity ?? await result.LogStepAsync("按住院标识定位住院时间",
-            () => _eventIdentityService.FindByVisitIdentityAsync(config.IntegrationProjectCode, mrn, inpatientNo, visitNo));
+            () => _eventIdentityService.FindByVisitIdentityAsync(integrationProjectCode, mrn, inpatientNo, visitNo));
 
         if (identity?.EventStartTime != null)
         {

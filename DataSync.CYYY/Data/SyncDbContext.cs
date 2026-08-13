@@ -17,12 +17,18 @@ public class SyncDbContext : DbContext
     public DbSet<DataLakeInterface> DataLakeInterfaces => Set<DataLakeInterface>();
     public DbSet<DataLakeConfig> DataLakeConfigs => Set<DataLakeConfig>();
     public DbSet<DynamicApiConfig> DynamicApiConfigs => Set<DynamicApiConfig>();
+    public DbSet<ApiPlatformConfig> ApiPlatformConfigs => Set<ApiPlatformConfig>();
+    public DbSet<ApiInterface> ApiInterfaces => Set<ApiInterface>();
     public DbSet<DatabaseResource> DatabaseResources => Set<DatabaseResource>();
     public DbSet<ActiveSyncTask> ActiveSyncTasks => Set<ActiveSyncTask>();
     public DbSet<ActiveSyncSource> ActiveSyncSources => Set<ActiveSyncSource>();
     public DbSet<ActiveSyncCaseSourceState> ActiveSyncCaseSourceStates => Set<ActiveSyncCaseSourceState>();
     public DbSet<ActiveSyncRecordReceipt> ActiveSyncRecordReceipts => Set<ActiveSyncRecordReceipt>();
     public DbSet<ActiveSyncRunLog> ActiveSyncRunLogs => Set<ActiveSyncRunLog>();
+    public DbSet<PatientContinuousSyncSession> PatientContinuousSyncSessions => Set<PatientContinuousSyncSession>();
+    public DbSet<PatientContinuousSyncInterfaceState> PatientContinuousSyncInterfaceStates => Set<PatientContinuousSyncInterfaceState>();
+    public DbSet<PatientContinuousSyncReceipt> PatientContinuousSyncReceipts => Set<PatientContinuousSyncReceipt>();
+    public DbSet<PatientContinuousSyncRunLog> PatientContinuousSyncRunLogs => Set<PatientContinuousSyncRunLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -44,6 +50,10 @@ public class SyncDbContext : DbContext
             e.HasOne(s => s.DatabaseResource)
              .WithMany()
              .HasForeignKey(s => s.DatabaseResourceId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(s => s.ApiInterface)
+             .WithMany()
+             .HasForeignKey(s => s.ApiInterfaceId)
              .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -68,6 +78,20 @@ public class SyncDbContext : DbContext
         modelBuilder.Entity<DynamicApiConfig>(e =>
         {
             e.ToTable("dynamic_api_configs");
+        });
+
+        modelBuilder.Entity<ApiPlatformConfig>(e =>
+        {
+            e.HasIndex(p => p.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<ApiInterface>(e =>
+        {
+            e.HasIndex(i => new { i.ApiPlatformId, i.Code, i.RelativePath }).IsUnique();
+            e.HasOne(i => i.Platform)
+             .WithMany()
+             .HasForeignKey(i => i.ApiPlatformId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         // SyncLog 索引
@@ -101,6 +125,10 @@ public class SyncDbContext : DbContext
             e.HasOne(i => i.DatabaseResource)
              .WithMany()
              .HasForeignKey(i => i.DatabaseResourceId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(i => i.ApiInterface)
+             .WithMany()
+             .HasForeignKey(i => i.ApiInterfaceId)
              .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -142,6 +170,30 @@ public class SyncDbContext : DbContext
         });
 
         modelBuilder.Entity<ActiveSyncRunLog>(e =>
+        {
+            e.HasIndex(l => new { l.TaskId, l.CreatedAt });
+            e.HasIndex(l => l.CreatedAt);
+        });
+
+        modelBuilder.Entity<PatientContinuousSyncSession>(e =>
+        {
+            e.HasIndex(s => new { s.TaskId, s.PatientId, s.VisitSn }).IsUnique();
+            e.HasIndex(s => new { s.TaskId, s.Status, s.NextRunAt });
+        });
+
+        modelBuilder.Entity<PatientContinuousSyncInterfaceState>(e =>
+        {
+            e.HasIndex(s => new { s.SessionId, s.InterfaceId }).IsUnique();
+            e.HasIndex(s => new { s.Status, s.NextRunAt });
+        });
+
+        modelBuilder.Entity<PatientContinuousSyncReceipt>(e =>
+        {
+            e.HasIndex(r => new { r.SessionId, r.InterfaceId, r.RecordKey }).IsUnique();
+            e.HasIndex(r => r.PushedAt);
+        });
+
+        modelBuilder.Entity<PatientContinuousSyncRunLog>(e =>
         {
             e.HasIndex(l => new { l.TaskId, l.CreatedAt });
             e.HasIndex(l => l.CreatedAt);

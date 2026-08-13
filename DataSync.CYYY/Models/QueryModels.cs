@@ -27,10 +27,9 @@ public class DataLakeQueryRequest
 }
 
 /// <summary>
-/// 数据湖查询条件项
-/// type: eq/ne/lt/le/gt/ge/likeright/in/notin/isnull/isnotnull
+/// 通用查询条件项，操作符值由所属 API 平台配置。
 /// </summary>
-public class DataLakeCondition
+public class QueryCondition
 {
     [JsonPropertyName("column")]
     public string Column { get; set; } = "";
@@ -40,6 +39,13 @@ public class DataLakeCondition
 
     [JsonPropertyName("value")]
     public object Value { get; set; } = "";
+}
+
+/// <summary>
+/// 旧数据湖客户端兼容类型。
+/// </summary>
+public sealed class DataLakeCondition : QueryCondition
+{
 }
 
 // 数据湖查询响应：直接返回 JSON 数组，无外层包装

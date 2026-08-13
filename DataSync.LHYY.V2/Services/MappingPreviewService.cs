@@ -173,8 +173,11 @@ public class MappingPreviewService
         };
 
         var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
+        var sourcePaths = mapping.MappingTarget is MappingTarget.Question or MappingTarget.SubCard
+            ? MultiSourcePathHelper.Split(mapping.SourcePath)
+            : new List<string> { mapping.SourcePath };
         var hasArrayItemRules = mapping.MappingTarget == MappingTarget.Question
-                                && SubCardPathHelper.HasArrayWildcard(mapping.SourcePath)
+                                && sourcePaths.Any(SubCardPathHelper.HasArrayWildcard)
                                 && filterRules?.Any(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter) == true;
         var mappingRules = hasArrayItemRules
             ? filterRules?.Where(rule => rule.FilterScope != FilterScope.RowFilter).ToList()
@@ -191,24 +194,33 @@ public class MappingPreviewService
         {
             if (hasArrayItemRules)
             {
-                var filtered = _filterRuleService.FilterMappingArrayValues(
-                    body,
-                    mainContext,
-                    mapping.SourcePath,
-                    filterRules,
-                    mainContext);
-                result.TotalArrayItemCount = filtered.TotalCount;
-                result.MatchedArrayItemCount = filtered.MatchedCount;
-                result.FilterSummary = $"数组项 {filtered.MatchedCount}/{filtered.TotalCount}";
-                if (filtered.MatchedCount == 0)
+                var values = new List<string?>();
+                foreach (var sourcePath in sourcePaths)
+                {
+                    if (!SubCardPathHelper.HasArrayWildcard(sourcePath))
+                    {
+                        values.Add(MessageJsonHelper.ResolveFirstScopedToken(body, mainContext, sourcePath, mainContext)?.ToString());
+                        continue;
+                    }
+
+                    var filtered = _filterRuleService.FilterMappingArrayValues(
+                        body,
+                        mainContext,
+                        sourcePath,
+                        filterRules,
+                        mainContext);
+                    result.TotalArrayItemCount += filtered.TotalCount;
+                    result.MatchedArrayItemCount += filtered.MatchedCount;
+                    values.AddRange(filtered.Values);
+                }
+
+                result.FilterSummary = $"数组项 {result.MatchedArrayItemCount}/{result.TotalArrayItemCount}";
+                result.RawValue = MultiSourcePathHelper.JoinValues(values);
+                if (result.RawValue == null)
                 {
                     result.IsFiltered = true;
                     return result;
                 }
-
-                result.RawValue = filtered.Values.Count == 0
-                    ? null
-                    : string.Join("；", filtered.Values);
             }
             else
             {
@@ -248,22 +260,26 @@ public class MappingPreviewService
         string? mainRecordArrayPath,
         string? effectiveArrayPath)
     {
-        if (mapping.MappingTarget == MappingTarget.Question
-            && mapping.SourcePath?.Contains("[]", StringComparison.Ordinal) == true)
-        {
-            var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
-            var values = MessageJsonHelper.ResolveScopedTokens(body, mainContext, mapping.SourcePath, mainContext)
-                .Select(t => t.ToString())
-                .Where(v => !string.IsNullOrWhiteSpace(v))
-                .ToList();
+        var sourcePaths = mapping.MappingTarget is MappingTarget.Question or MappingTarget.SubCard
+            ? MultiSourcePathHelper.Split(mapping.SourcePath)
+            : [mapping.SourcePath];
+        var values = new List<string?>();
 
-            return values.Count == 0 ? null : string.Join(",", values);
+        foreach (var sourcePath in sourcePaths)
+        {
+            if (mapping.MappingTarget == MappingTarget.Question
+                && sourcePath.Contains("[]", StringComparison.Ordinal))
+            {
+                var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
+                values.AddRange(MessageJsonHelper.ResolveScopedTokens(body, mainContext, sourcePath, mainContext)
+                    .Select(token => token.ToString()));
+                continue;
+            }
+
+            values.Add(ResolvePreviewToken(body, mapping, sourcePath, mainRecordArrayPath, effectiveArrayPath)?.ToString());
         }
 
-        var token = ResolvePreviewToken(body, mapping, mainRecordArrayPath, effectiveArrayPath);
-        return token == null || token.Type is JTokenType.Null or JTokenType.Undefined
-            ? null
-            : token.ToString();
+        return MultiSourcePathHelper.JoinValues(values);
     }
 
     private static string? GetPreviewSourcePath(
@@ -272,6 +288,24 @@ public class MappingPreviewService
         string? mainRecordArrayPath,
         string? effectiveArrayPath)
     {
+        var paths = mapping.MappingTarget is MappingTarget.Question or MappingTarget.SubCard
+            ? MultiSourcePathHelper.Split(mapping.SourcePath)
+            : new List<string> { mapping.SourcePath };
+        if (MultiSourcePathHelper.HasPathSeparator(mapping.SourcePath))
+        {
+            return MultiSourcePathHelper.JoinPaths(paths.Select(path =>
+            {
+                var single = new EsbFieldMapping
+                {
+                    MappingTarget = mapping.MappingTarget,
+                    SourcePath = path,
+                    ArrayPath = mapping.ArrayPath,
+                    CardId = mapping.CardId,
+                };
+                return GetPreviewSourcePath(body, single, mainRecordArrayPath, effectiveArrayPath);
+            }));
+        }
+
         if (mapping.MappingTarget != MappingTarget.SubCard)
         {
             return MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(mapping.SourcePath, mainRecordArrayPath, out var mainRelativePath)
@@ -309,10 +343,11 @@ public class MappingPreviewService
     private static JToken? ResolvePreviewToken(
         JToken body,
         EsbFieldMapping mapping,
+        string sourcePath,
         string? mainRecordArrayPath,
         string? effectiveArrayPath)
     {
-        if (string.IsNullOrWhiteSpace(mapping.SourcePath))
+        if (string.IsNullOrWhiteSpace(sourcePath))
         {
             return null;
         }
@@ -320,13 +355,13 @@ public class MappingPreviewService
         var mainContext = MessageJsonHelper.ResolveMainRecordContext(body, mainRecordArrayPath);
         if (mapping.MappingTarget != MappingTarget.SubCard)
         {
-            return MessageJsonHelper.ResolveFirstScopedToken(body, mainContext, mapping.SourcePath, mainContext);
+            return MessageJsonHelper.ResolveFirstScopedToken(body, mainContext, sourcePath, mainContext);
         }
 
-        var normalizedSourcePath = MessageJsonHelper.TryNormalizeMainRecordSourcePath(mapping.SourcePath, mainRecordArrayPath, out var subCardMainScopedPath)
+        var normalizedSourcePath = MessageJsonHelper.TryNormalizeMainRecordSourcePath(sourcePath, mainRecordArrayPath, out var subCardMainScopedPath)
                                   && !SubCardPathHelper.HasArrayWildcard(MessageJsonHelper.TrimMainRecordScopePrefix(subCardMainScopedPath))
             ? subCardMainScopedPath
-            : mapping.SourcePath;
+            : sourcePath;
 
         if (SubCardPathHelper.IsParentRecordScopedPath(normalizedSourcePath))
         {

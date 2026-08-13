@@ -62,10 +62,9 @@ public class PatientUpdateHandler : IMessageHandler
 
         if (hospitalId == Guid.Empty)
         {
-            var hid = await _configService.GetDefaultHospitalIdAsync(config.IntegrationProjectCode);
-            var pid = await _configService.GetDefaultProjectIdAsync(config.IntegrationProjectCode);
-            if (!Guid.TryParse(hid, out hospitalId) || !Guid.TryParse(pid, out projectId))
-                return ProcessResult.Fail("未找到 HospitalId/ProjectId，请检查 LicenseCode 或项目配置");
+            (hospitalId, projectId) = await _bioCore.GetProjectContextByLicenseAsync(licenseCode);
+            if (hospitalId == Guid.Empty || projectId == Guid.Empty)
+                return ProcessResult.Fail($"未找到 LicenseCode 对应的 HospitalId/ProjectId: LicenseCode={licenseCode}");
         }
 
         // 提取 Patient 字段

@@ -3,22 +3,25 @@ using System.Text.Json.Serialization;
 namespace DataSync.CYYY.Models;
 
 /// <summary>
-/// 一个 DynamicApi 采集源、一个同步任务及其全部关联接口的导入配置。
+/// 一个 API 采集源、一个同步任务及其全部关联接口的导入配置。
 /// </summary>
 public sealed class FullSyncTaskImport
 {
     [JsonPropertyName("source")]
-    public DynamicApiIngestionImport? Source { get; set; }
+    public ApiIngestionImport? Source { get; set; }
 
     [JsonPropertyName("task")]
     public SyncTaskImport? Task { get; set; }
 
     [JsonPropertyName("interfaces")]
-    public List<DynamicApiTaskInterfaceImport>? Interfaces { get; set; }
+    public List<ApiTaskInterfaceImport>? Interfaces { get; set; }
 }
 
-public sealed class DynamicApiIngestionImport
+public sealed class ApiIngestionImport
 {
+    [JsonPropertyName("platformName")]
+    public string PlatformName { get; set; } = "";
+
     [JsonPropertyName("name")]
     public string Name { get; set; } = "";
 
@@ -48,6 +51,9 @@ public sealed class DynamicApiIngestionImport
 
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
+
+    [JsonPropertyName("queryMappings")]
+    public List<InterfaceQueryMapping>? QueryMappings { get; set; }
 }
 
 public sealed class SyncTaskImport
@@ -73,6 +79,27 @@ public sealed class SyncTaskImport
     [JsonPropertyName("pollingIntervalSeconds")]
     public int PollingIntervalSeconds { get; set; } = 300;
 
+    [JsonPropertyName("patientContinuousSyncEnabled")]
+    public bool PatientContinuousSyncEnabled { get; set; }
+
+    [JsonPropertyName("patientContinuousSyncIntervalSeconds")]
+    public int PatientContinuousSyncIntervalSeconds { get; set; } = 1800;
+
+    [JsonPropertyName("patientContinuousSyncLookbackMinutes")]
+    public int PatientContinuousSyncLookbackMinutes { get; set; } = 5;
+
+    [JsonPropertyName("admissionSourceServerCode")]
+    public string? AdmissionSourceServerCode { get; set; }
+
+    [JsonPropertyName("admissionTimeField")]
+    public string? AdmissionTimeField { get; set; }
+
+    [JsonPropertyName("dischargeSourceServerCode")]
+    public string? DischargeSourceServerCode { get; set; }
+
+    [JsonPropertyName("dischargeTimeField")]
+    public string? DischargeTimeField { get; set; }
+
     [JsonPropertyName("patientConcurrency")]
     public int PatientConcurrency { get; set; } = 5;
 
@@ -92,8 +119,11 @@ public sealed class SyncTaskImport
     public Dictionary<string, string>? TriggerPushParams { get; set; }
 }
 
-public sealed class DynamicApiTaskInterfaceImport
+public sealed class ApiTaskInterfaceImport
 {
+    [JsonPropertyName("platformName")]
+    public string PlatformName { get; set; } = "";
+
     [JsonPropertyName("interfaceKey")]
     public string InterfaceKey { get; set; } = "";
 
@@ -108,6 +138,36 @@ public sealed class DynamicApiTaskInterfaceImport
 
     [JsonPropertyName("useTodayTimeRange")]
     public bool UseTodayTimeRange { get; set; }
+
+    [JsonPropertyName("continuousPollingEnabled")]
+    public bool ContinuousPollingEnabled { get; set; }
+
+    [JsonPropertyName("continuousPollingIntervalSeconds")]
+    public int ContinuousPollingIntervalSeconds { get; set; } = 300;
+
+    [JsonPropertyName("patientContinuousSyncEnabled")]
+    public bool PatientContinuousSyncEnabled { get; set; }
+
+    [JsonPropertyName("continuousUseTimeRange")]
+    public bool ContinuousUseTimeRange { get; set; } = true;
+
+    [JsonPropertyName("continuousRecordKeyFields")]
+    public List<string>? ContinuousRecordKeyFields { get; set; }
+
+    [JsonPropertyName("continuousUseRowHash")]
+    public bool ContinuousUseRowHash { get; set; }
+
+    [JsonPropertyName("queryStartTimeSourceServerCode")]
+    public string? QueryStartTimeSourceServerCode { get; set; }
+
+    [JsonPropertyName("queryStartTimeSourceField")]
+    public string? QueryStartTimeSourceField { get; set; }
+
+    [JsonPropertyName("queryEndTimeSourceServerCode")]
+    public string? QueryEndTimeSourceServerCode { get; set; }
+
+    [JsonPropertyName("queryEndTimeSourceField")]
+    public string? QueryEndTimeSourceField { get; set; }
 
     [JsonPropertyName("accessWindowEnabled")]
     public bool AccessWindowEnabled { get; set; }
@@ -135,4 +195,16 @@ public sealed class DynamicApiTaskInterfaceImport
 
     [JsonPropertyName("outputFields")]
     public string? OutputFields { get; set; }
+
+    [JsonPropertyName("queryMappings")]
+    public List<InterfaceQueryMapping>? QueryMappings { get; set; }
+
+    [JsonPropertyName("parentInterfaceKey")]
+    public string? ParentInterfaceKey { get; set; }
+
+    [JsonPropertyName("linkMappings")]
+    public List<InterfaceLinkMapping>? LinkMappings { get; set; }
+
+    [JsonPropertyName("mountField")]
+    public string? MountField { get; set; }
 }

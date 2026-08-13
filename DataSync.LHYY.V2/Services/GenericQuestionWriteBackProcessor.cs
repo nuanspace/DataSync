@@ -44,6 +44,7 @@ public class GenericQuestionWriteBackProcessor
     public async Task<ProcessResult> ProcessAsync(EsbMessage message, EsbInterfaceConfig config)
     {
         var result = new ProcessResult();
+        var integrationProjectCode = message.IntegrationProjectCode ?? config.IntegrationProjectCode;
 
         if (!MessageJsonHelper.TryParseToken(message.RawJson, out var root, out var error))
             return ProcessResult.Fail(error ?? "Raw JSON 解析失败");
@@ -74,7 +75,7 @@ public class GenericQuestionWriteBackProcessor
         }
 
         var licenseCode = string.IsNullOrWhiteSpace(config.LicenseCode)
-            ? await _configService.GetDefaultLicenseCodeAsync(config.IntegrationProjectCode)
+            ? await _configService.GetDefaultLicenseCodeAsync(integrationProjectCode)
             : config.LicenseCode;
         if (string.IsNullOrWhiteSpace(licenseCode))
             return ProcessResult.Fail("未配置 LicenseCode");
@@ -91,7 +92,7 @@ public class GenericQuestionWriteBackProcessor
         {
             var lookup = await result.LogStepAsync("按病案号+住院次数组合标识定位患者事件",
                 () => _eventIdentityService.FindByCombinedVisitIdentityAsync(
-                    config.IntegrationProjectCode,
+                    integrationProjectCode,
                     combinedVisitIdentity,
                     config.CombinedVisitIdentityFormat,
                     mrn,
@@ -122,7 +123,7 @@ public class GenericQuestionWriteBackProcessor
         {
             visitIdentity ??= await result.LogStepAsync("按就诊标识定位患者事件",
                 () => _eventIdentityService.FindByVisitIdentityAsync(
-                    config.IntegrationProjectCode,
+                    integrationProjectCode,
                     null,
                     inpatientNo,
                     visitNo,
@@ -159,7 +160,7 @@ public class GenericQuestionWriteBackProcessor
             return skippedResult;
         }
 
-        var dbEvent = await ResolveEventAsync(config, result, dbPatient, mrn!, inpatientNo, visitNo, eventStartTime, projectId, visitIdentity);
+        var dbEvent = await ResolveEventAsync(config, integrationProjectCode, result, dbPatient, mrn!, inpatientNo, visitNo, eventStartTime, projectId, visitIdentity);
         if (dbEvent.Result != null)
         {
             dbEvent.Result.Steps = result.Steps;
@@ -170,7 +171,7 @@ public class GenericQuestionWriteBackProcessor
             return ProcessResult.Fail("未能定位事件");
 
         await _eventIdentityService.UpsertAsync(
-            message.IntegrationProjectCode,
+            integrationProjectCode,
             message.TranCode,
             dbPatient.id,
             dbEvent.Event.id,
@@ -558,6 +559,7 @@ public class GenericQuestionWriteBackProcessor
 
     private async Task<(patient_event? Event, ProcessResult? Result)> ResolveEventAsync(
         EsbInterfaceConfig config,
+        string? integrationProjectCode,
         ProcessResult result,
         patient dbPatient,
         string mrn,
@@ -596,7 +598,7 @@ public class GenericQuestionWriteBackProcessor
 
         var identity = knownIdentity ?? await result.LogStepAsync("按住院标识定位住院时间",
             () => _eventIdentityService.FindByVisitIdentityAsync(
-                config.IntegrationProjectCode,
+                integrationProjectCode,
                 mrn,
                 inpatientNo,
                 visitNo,

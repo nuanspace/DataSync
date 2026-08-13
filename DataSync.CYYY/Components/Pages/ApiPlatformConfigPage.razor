@@ -1,0 +1,463 @@
+﻿@page "/api-platforms"
+@page "/datalake"
+@page "/dynamic-api"
+@inherits BasePage
+@rendermode InteractiveServer
+
+<PageTitle>API 平台配置</PageTitle>
+
+<div class="api-platform-page">
+    <header class="api-platform-page-header">
+        <div>
+            <MudText Typo="Typo.h5" Class="api-platform-title">API 平台配置</MudText>
+            <div class="api-platform-subtitle">统一管理认证、请求、响应与接口目录</div>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Class="mt-4" />
+    }
+    else
+    {
+        <div class="api-platform-layout">
+            <aside class="api-platform-sidebar">
+                <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Primary"
+                           StartIcon="@Icons.Material.Filled.Add" OnClick="NewPlatform">
+                    新增平台
+                </MudButton>
+                <div class="api-platform-list" role="list">
+                    @foreach (var platform in _platforms)
+                    {
+                        <button type="button"
+                                class="api-platform-list-item @(platform.Id == _editing.Id ? "api-platform-selected" : null)"
+                                @onclick="@(() => SelectPlatform(platform.Id))">
+                            <span class="api-platform-list-name">@platform.Name</span>
+                            <span class="api-platform-list-status">
+                                <i class="api-status-dot @(platform.Enabled ? "is-enabled" : null)"></i>
+                                @(platform.Enabled ? "已启用" : "已停用")
+                            </span>
+                        </button>
+                    }
+                </div>
+            </aside>
+
+            <section class="api-platform-workspace">
+                <div class="api-platform-workspace-header">
+                    <div>
+                        <div class="api-platform-eyebrow">@(_editing.Id == 0 ? "新建平台" : "当前平台")</div>
+                        <MudText Typo="Typo.h6" Class="api-platform-workspace-title">
+                            @(string.IsNullOrWhiteSpace(_editing.Name) ? "未命名平台" : _editing.Name)
+                        </MudText>
+                    </div>
+                    <div class="api-platform-actions">
+                        <MudButton Variant="Variant.Outlined" Color="Color.Info"
+                                   StartIcon="@Icons.Material.Filled.Cable"
+                                   OnClick="TestPlatform" Disabled="_testing || _editing.Id == 0">
+                            @(_testing ? "测试中..." : "测试连接")
+                        </MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save"
+                                   OnClick="SavePlatform" Disabled="_saving">
+                            @(_saving ? "保存中..." : "保存平台")
+                        </MudButton>
+                    </div>
+                </div>
+
+                <MudTabs @bind-ActivePanelIndex="_activeTab"
+                         Elevation="0"
+                         Rounded="false"
+                         ApplyEffectsToContainer="true"
+                         KeepPanelsAlive="true"
+                         Class="api-platform-tabs"
+                         PanelClass="api-platform-tab-panel">
+                    <MudTabPanel Text="基本信息" Icon="@Icons.Material.Filled.Tune">
+                        <div class="api-tab-intro">
+                            <MudText Typo="Typo.subtitle1">平台连接与运行状态</MudText>
+                            <span>定义平台入口、请求节流及运行开关。</span>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_editing.Name" Label="平台名称" Required="true" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_editing.BaseUrl" Label="BaseUrl" Required="true" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudNumericField @bind-Value="_editing.RequestIntervalMilliseconds" Label="请求间隔（毫秒）" Min="0" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="8" Class="api-switches">
+                                <MudSwitch @bind-Value="_editing.Enabled" Label="启用平台" Color="Color.Primary" />
+                                <MudSwitch @bind-Value="_editing.IgnoreSslErrors" Label="忽略 SSL 证书错误" Color="Color.Primary" />
+                                <MudSwitch @bind-Value="_editing.DebugLogEnabled" Label="调试日志" Color="Color.Primary" />
+                            </MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="认证配置" Icon="@Icons.Material.Filled.Key">
+                        <div class="api-tab-intro">
+                            <MudText Typo="Typo.subtitle1">Token 获取与请求头</MudText>
+                            <span>配置认证请求、有效期解析及需要携带的参数。</span>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="8"><MudTextField @bind-Value="_auth.TokenEndpoint" Label="Token 地址" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudSelect T="string" @bind-Value="_auth.RequestType" Label="认证请求格式" Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@ApiRequestTypes.Form">Form</MudSelectItem>
+                                    <MudSelectItem Value="@ApiRequestTypes.Json">JSON</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_auth.BusinessCodePath" Label="成功码路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_auth.ExpectedBusinessCode" Label="成功码值" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_auth.MessagePath" Label="错误消息路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_auth.TokenPath" Label="Token 路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_auth.ExpiryPath" Label="有效期路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudSelect T="string" @bind-Value="_auth.ExpiryMode" Label="有效期模式" Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@ApiTokenExpiryModes.RelativeSeconds">相对秒数</MudSelectItem>
+                                    <MudSelectItem Value="@ApiTokenExpiryModes.UnixSeconds">Unix 秒时间戳</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_auth.HeaderName" Label="认证头名称" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="6"><MudTextField @bind-Value="_auth.HeaderScheme" Label="认证头前缀" Variant="Variant.Outlined" /></MudItem>
+                        </MudGrid>
+
+                        <div class="api-subsection-header">
+                            <div><strong>认证参数</strong><span>参数会按认证请求格式发送</span></div>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _auth.Parameters.Add(new()))">添加参数</MudButton>
+                        </div>
+                        @for (var index = 0; index < _auth.Parameters.Count; index++)
+                        {
+                            var row = index;
+                            <div class="api-config-row">
+                                <MudTextField @bind-Value="_auth.Parameters[row].Name" Label="参数名" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                <MudTextField @bind-Value="_auth.Parameters[row].Value" Label="参数值" Variant="Variant.Outlined" Margin="Margin.Dense" InputType="@(_auth.Parameters[row].IsSecret ? InputType.Password : InputType.Text)" />
+                                <MudSelect T="string" @bind-Value="_auth.Parameters[row].ValueType" Label="值类型" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    <MudSelectItem Value="@ApiParameterValueTypes.String">文本</MudSelectItem>
+                                    <MudSelectItem Value="@ApiParameterValueTypes.Number">数字</MudSelectItem>
+                                    <MudSelectItem Value="@ApiParameterValueTypes.Boolean">布尔</MudSelectItem>
+                                </MudSelect>
+                                <MudCheckBox @bind-Value="_auth.Parameters[row].IsSecret" Label="密钥" />
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => _auth.Parameters.RemoveAt(row))" />
+                            </div>
+                        }
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="查询配置" Icon="@Icons.Material.Filled.ManageSearch">
+                        <div class="api-tab-intro">
+                            <MudText Typo="Typo.subtitle1">请求体、分页与条件结构</MudText>
+                            <span>业务操作符仅来自当前平台配置。</span>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="8"><MudTextField @bind-Value="_query.EndpointTemplate" Label="查询地址模板" HelperText="接口路径使用 {path}" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4">
+                                <MudSelect T="string" @bind-Value="_query.ParameterMode" Label="业务参数格式" Variant="Variant.Outlined">
+                                    <MudSelectItem Value="@ApiParameterModes.DirectProperties">直接请求字段</MudSelectItem>
+                                    <MudSelectItem Value="@ApiParameterModes.ConditionArray">条件数组</MudSelectItem>
+                                </MudSelect>
+                            </MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_query.InterfaceCodeField" Label="接口编码请求字段" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="8" Class="api-switches">
+                                <MudSwitch @bind-Value="_query.PaginationEnabled"
+                                           Label="@PaginationSwitchLabel"
+                                           Color="Color.Primary" />
+                                <MudSwitch @bind-Value="_query.TimeRangeUsesPagination"
+                                           Label="@TimePaginationSwitchLabel"
+                                           Color="Color.Primary" />
+                            </MudItem>
+                            <MudItem xs="12" sm="3"><MudTextField @bind-Value="_query.PageNumberField" Label="页码字段" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="3"><MudTextField @bind-Value="_query.PageSizeField" Label="每页大小字段" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="3"><MudNumericField @bind-Value="_query.PageSize" Label="每页大小" Min="1" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="3"><MudNumericField T="int?" @bind-Value="_query.MaxResultSize" Label="最大结果数" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_query.MaxResultSizeField" Label="最大结果数字段" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_query.StartTimeField" Label="直接参数开始时间字段" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_query.EndTimeField" Label="直接参数结束时间字段" Variant="Variant.Outlined" /></MudItem>
+                        </MudGrid>
+
+                        @if (_query.ParameterMode == ApiParameterModes.ConditionArray)
+                        {
+                            <div class="api-subsection-header">
+                                <div><strong>条件数组及操作符</strong><span>定义平台实际接收的数组与操作符值</span></div>
+                                <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => Condition.Operators.Add(new()))">添加操作符</MudButton>
+                            </div>
+                            <MudGrid Spacing="2">
+                                <MudItem xs="12" sm="3"><MudTextField @bind-Value="Condition.ArrayField" Label="数组字段" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="3"><MudTextField @bind-Value="Condition.ColumnField" Label="列字段" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="3"><MudTextField @bind-Value="Condition.OperatorField" Label="操作符字段" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="3"><MudTextField @bind-Value="Condition.ValueField" Label="值字段" Variant="Variant.Outlined" /></MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect T="string" @bind-Value="Condition.SingleValueOperator" Label="单值操作符" Variant="Variant.Outlined">
+                                        @foreach (var item in Condition.Operators) { <MudSelectItem Value="@item.Value">@item.DisplayName（@item.Value）</MudSelectItem> }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect T="string" @bind-Value="Condition.MultiValueOperator" Label="多值操作符" Variant="Variant.Outlined">
+                                        @foreach (var item in Condition.Operators) { <MudSelectItem Value="@item.Value">@item.DisplayName（@item.Value）</MudSelectItem> }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect T="string" @bind-Value="Condition.StartTimeOperator" Label="开始时间操作符" Variant="Variant.Outlined">
+                                        @foreach (var item in Condition.Operators) { <MudSelectItem Value="@item.Value">@item.DisplayName（@item.Value）</MudSelectItem> }
+                                    </MudSelect>
+                                </MudItem>
+                                <MudItem xs="12" sm="3">
+                                    <MudSelect T="string" @bind-Value="Condition.EndTimeOperator" Label="结束时间操作符" Variant="Variant.Outlined">
+                                        @foreach (var item in Condition.Operators) { <MudSelectItem Value="@item.Value">@item.DisplayName（@item.Value）</MudSelectItem> }
+                                    </MudSelect>
+                                </MudItem>
+                            </MudGrid>
+                            @for (var index = 0; index < Condition.Operators.Count; index++)
+                            {
+                                var row = index;
+                                <div class="api-config-row api-operator-row">
+                                    <MudTextField @bind-Value="Condition.Operators[row].Value" Label="发送值" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    <MudTextField @bind-Value="Condition.Operators[row].DisplayName" Label="显示名称" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                    <MudCheckBox @bind-Value="Condition.Operators[row].RequiresValue" Label="需要值" />
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => Condition.Operators.RemoveAt(row))" />
+                                </div>
+                            }
+                        }
+
+                        <div class="api-subsection-header">
+                            <div><strong>查询固定参数</strong><span>每次查询都会携带</span></div>
+                            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Add" OnClick="@(() => _query.FixedParameters.Add(new()))">添加参数</MudButton>
+                        </div>
+                        @for (var index = 0; index < _query.FixedParameters.Count; index++)
+                        {
+                            var row = index;
+                            <div class="api-config-row">
+                                <MudTextField @bind-Value="_query.FixedParameters[row].Name" Label="参数名" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                <MudTextField @bind-Value="_query.FixedParameters[row].Value" Label="参数值" Variant="Variant.Outlined" Margin="Margin.Dense" />
+                                <MudSelect T="string" @bind-Value="_query.FixedParameters[row].ValueType" Label="值类型" Variant="Variant.Outlined" Margin="Margin.Dense">
+                                    <MudSelectItem Value="@ApiParameterValueTypes.String">文本</MudSelectItem>
+                                    <MudSelectItem Value="@ApiParameterValueTypes.Number">数字</MudSelectItem>
+                                    <MudSelectItem Value="@ApiParameterValueTypes.Boolean">布尔</MudSelectItem>
+                                </MudSelect>
+                                <span></span>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" OnClick="@(() => _query.FixedParameters.RemoveAt(row))" />
+                            </div>
+                        }
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="响应配置" Icon="@Icons.Material.Filled.DataObject">
+                        <div class="api-tab-intro">
+                            <MudText Typo="Typo.subtitle1">业务状态与数据路径</MudText>
+                            <span>使用点路径从响应 JSON 中取值，数据路径留空表示根节点。</span>
+                        </div>
+                        <MudGrid Spacing="2">
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.BusinessCodePath" Label="业务状态路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.ExpectedBusinessCode" Label="成功状态值" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.MessagePath" Label="错误消息路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.DataPath" Label="数据路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.HasMorePath" Label="是否有下一页路径" Variant="Variant.Outlined" /></MudItem>
+                            <MudItem xs="12" sm="4"><MudTextField @bind-Value="_response.TotalPagesPath" Label="总页数路径" Variant="Variant.Outlined" /></MudItem>
+                        </MudGrid>
+                    </MudTabPanel>
+
+                    <MudTabPanel Text="接口目录" Icon="@Icons.Material.Filled.Hub">
+                        <div class="api-tab-intro">
+                            <MudText Typo="Typo.subtitle1">当前平台的可用接口</MudText>
+                            <span>任务和采集源从这里选择平台接口。</span>
+                        </div>
+                        @if (_editing.Id == 0)
+                        {
+                            <MudAlert Severity="Severity.Info" Variant="Variant.Text">请先保存平台，再维护接口目录。</MudAlert>
+                        }
+                        else
+                        {
+                            <MudTable Items="_interfaces" Dense="true" Hover="true" Elevation="0" Class="api-interface-table">
+                                <HeaderContent>
+                                    <MudTh>编码</MudTh>
+                                    <MudTh>名称</MudTh>
+                                    <MudTh>相对路径</MudTh>
+                                    <MudTh></MudTh>
+                                </HeaderContent>
+                                <RowTemplate>
+                                    <MudTd DataLabel="编码">@context.Code</MudTd>
+                                    <MudTd DataLabel="名称">@context.Name</MudTd>
+                                    <MudTd DataLabel="相对路径">@(string.IsNullOrWhiteSpace(context.RelativePath) ? "—" : context.RelativePath)</MudTd>
+                                    <MudTd><MudIconButton Icon="@Icons.Material.Filled.Edit" OnClick="@(() => EditInterface(context))" /></MudTd>
+                                </RowTemplate>
+                                <NoRecordsContent><MudText Typo="Typo.body2">暂无接口，可在下方添加。</MudText></NoRecordsContent>
+                            </MudTable>
+                            <div class="api-interface-editor">
+                                <div class="api-subsection-header">
+                                    <div><strong>@(_interfaceEdit.Id == 0 ? "添加接口" : "编辑接口")</strong><span>相对路径可以留空</span></div>
+                                </div>
+                                <MudGrid Spacing="2">
+                                    <MudItem xs="12" sm="3"><MudTextField @bind-Value="_interfaceEdit.Code" Label="接口编码" Variant="Variant.Outlined" /></MudItem>
+                                    <MudItem xs="12" sm="4"><MudTextField @bind-Value="_interfaceEdit.Name" Label="接口名称" Variant="Variant.Outlined" /></MudItem>
+                                    <MudItem xs="12" sm="3"><MudTextField @bind-Value="_interfaceEdit.RelativePath" Label="相对路径" Variant="Variant.Outlined" /></MudItem>
+                                    <MudItem xs="12" sm="2" Class="api-interface-save">
+                                        <MudButton FullWidth="true" Variant="Variant.Filled" Color="Color.Primary"
+                                                   StartIcon="@Icons.Material.Filled.Save" OnClick="SaveInterface">
+                                            保存接口
+                                        </MudButton>
+                                    </MudItem>
+                                </MudGrid>
+                            </div>
+                        }
+                    </MudTabPanel>
+                </MudTabs>
+            </section>
+        </div>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private int _activeTab;
+    private List<ApiPlatformConfig> _platforms = [];
+    private List<ApiInterface> _interfaces = [];
+    private ApiPlatformConfig _editing = new();
+    private ApiAuthConfig _auth = new();
+    private ApiQueryConfig _query = new();
+    private ApiResponseConfig _response = new();
+    private ApiInterface _interfaceEdit = new();
+    private ApiConditionArrayConfig Condition => _query.ConditionArray ??= new();
+    private string PaginationSwitchLabel => $"启用分页 · {(_query.PaginationEnabled ? "已开启" : "已关闭")}";
+    private string TimePaginationSwitchLabel => $"时间查询使用分页 · {(_query.TimeRangeUsesPagination ? "已开启" : "已关闭")}";
+
+    protected override async Task OnPageInitializedAsync() { await LoadPlatforms(); _loading = false; }
+
+    private async Task LoadPlatforms(int? selectedId = null, bool preserveTab = false)
+    {
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _platforms = await db.ApiPlatformConfigs.AsNoTracking().OrderBy(p => p.Name).ToListAsync(CancellationToken);
+        var id = selectedId ?? _editing.Id;
+        if (id > 0 && _platforms.Any(p => p.Id == id)) await SelectPlatform(id, !preserveTab);
+        else if (_platforms.Count > 0) await SelectPlatform(_platforms[0].Id, !preserveTab);
+        else NewPlatform();
+    }
+
+    private async Task SelectPlatform(int id, bool resetTab = true)
+    {
+        if (resetTab)
+            _activeTab = 0;
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        _editing = await db.ApiPlatformConfigs.AsNoTracking().FirstAsync(p => p.Id == id, CancellationToken);
+        _auth = _editing.GetAuthConfig(); _query = _editing.GetQueryConfig(); _response = _editing.GetResponseConfig();
+        _interfaces = await db.ApiInterfaces.AsNoTracking().Where(i => i.ApiPlatformId == id)
+            .OrderBy(i => i.Name).ThenBy(i => i.Code).ToListAsync(CancellationToken);
+        _interfaceEdit = new ApiInterface { ApiPlatformId = id };
+    }
+
+    private void NewPlatform()
+    {
+        _activeTab = 0;
+        _editing = new(); _auth = new(); _query = new(); _response = new(); _interfaces = []; _interfaceEdit = new();
+    }
+
+    private async Task SavePlatform()
+    {
+        if (!ValidatePlatform()) return;
+        _saving = true;
+        try
+        {
+            _editing.Name = _editing.Name.Trim();
+            _editing.BaseUrl = _editing.BaseUrl.Trim();
+            _editing.AuthConfig = ApiPlatformJson.Serialize(_auth);
+            _editing.QueryConfig = ApiPlatformJson.Serialize(_query);
+            _editing.ResponseConfig = ApiPlatformJson.Serialize(_response);
+            _editing.UpdatedAt = DateTime.UtcNow;
+            await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+            var normalizedName = _editing.Name.ToLower();
+            if (await db.ApiPlatformConfigs.AnyAsync(item =>
+                    item.Id != _editing.Id && item.Name.ToLower() == normalizedName, CancellationToken))
+            {
+                inj_snackbar.Add("平台名称已存在", Severity.Warning);
+                return;
+            }
+            if (_editing.Id == 0) db.ApiPlatformConfigs.Add(_editing); else db.ApiPlatformConfigs.Update(_editing);
+            await db.SaveChangesAsync(CancellationToken);
+            inj_apiPlatformClient.ReloadConfig(_editing.Id);
+            await LoadPlatforms(_editing.Id, true);
+            inj_snackbar.Add("API 平台配置已保存", Severity.Success);
+        }
+        catch (Exception ex) { inj_snackbar.Add($"保存失败：{ex.Message}", Severity.Error); }
+        finally { _saving = false; }
+    }
+
+    private async Task TestPlatform()
+    {
+        if (!ValidatePlatform()) return;
+        _testing = true;
+        try
+        {
+            _editing.AuthConfig = ApiPlatformJson.Serialize(_auth);
+            await inj_apiPlatformClient.TestConnectionAsync(_editing, CancellationToken);
+            inj_snackbar.Add("连接测试成功", Severity.Success);
+        }
+        catch (Exception ex) { inj_snackbar.Add($"连接测试失败：{ex.Message}", Severity.Error); }
+        finally { _testing = false; }
+    }
+
+    private bool ValidatePlatform()
+    {
+        if (string.IsNullOrWhiteSpace(_editing.Name) || string.IsNullOrWhiteSpace(_editing.BaseUrl) ||
+            string.IsNullOrWhiteSpace(_auth.TokenEndpoint) || string.IsNullOrWhiteSpace(_auth.TokenPath) ||
+            string.IsNullOrWhiteSpace(_query.EndpointTemplate))
+        { inj_snackbar.Add("请填写平台、认证和查询必填项", Severity.Warning); return false; }
+        if (!Uri.TryCreate(_editing.BaseUrl, UriKind.Absolute, out _))
+        { inj_snackbar.Add("BaseUrl 格式无效", Severity.Warning); return false; }
+        if (HasInvalidParameters(_auth.Parameters) || HasInvalidParameters(_query.FixedParameters))
+        { inj_snackbar.Add("认证参数和查询固定参数的参数名不能为空或重复", Severity.Warning); return false; }
+        if (_query.PaginationEnabled &&
+            (string.IsNullOrWhiteSpace(_query.PageNumberField) || string.IsNullOrWhiteSpace(_query.PageSizeField) || _query.PageSize < 1))
+        { inj_snackbar.Add("启用分页时必须配置页码字段、每页大小字段和有效的每页大小", Severity.Warning); return false; }
+        if (_query.ParameterMode == ApiParameterModes.ConditionArray)
+        {
+            if (string.IsNullOrWhiteSpace(Condition.ArrayField) || string.IsNullOrWhiteSpace(Condition.ColumnField) ||
+                string.IsNullOrWhiteSpace(Condition.OperatorField) || string.IsNullOrWhiteSpace(Condition.ValueField))
+            { inj_snackbar.Add("请完整填写条件数组名称及列、操作符、值字段名称", Severity.Warning); return false; }
+
+            var operators = Condition.Operators;
+            if (operators.Count == 0 || operators.Any(item => string.IsNullOrWhiteSpace(item.Value) || string.IsNullOrWhiteSpace(item.DisplayName)))
+            { inj_snackbar.Add("操作符的发送值和显示名称不能为空", Severity.Warning); return false; }
+            if (operators.GroupBy(item => item.Value, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            { inj_snackbar.Add("操作符发送值不能重复", Severity.Warning); return false; }
+
+            var roles = new[]
+            {
+                Condition.SingleValueOperator,
+                Condition.MultiValueOperator,
+                Condition.StartTimeOperator,
+                Condition.EndTimeOperator
+            };
+            if (roles.Any(string.IsNullOrWhiteSpace) || roles.Any(role =>
+                    !operators.Any(item => string.Equals(item.Value, role, StringComparison.OrdinalIgnoreCase))))
+            { inj_snackbar.Add("请从操作符列表中指定单值、多值、开始时间和结束时间操作符", Severity.Warning); return false; }
+        }
+        return true;
+    }
+
+    private static bool HasInvalidParameters(IEnumerable<ApiParameterConfig> parameters)
+    {
+        var values = parameters.ToList();
+        return values.Any(item => string.IsNullOrWhiteSpace(item.Name)) ||
+               values.GroupBy(item => item.Name.Trim(), StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1);
+    }
+
+    private void EditInterface(ApiInterface item) => _interfaceEdit = new()
+    { Id = item.Id, ApiPlatformId = item.ApiPlatformId, Code = item.Code, Name = item.Name, RelativePath = item.RelativePath };
+
+    private async Task SaveInterface()
+    {
+        if (string.IsNullOrWhiteSpace(_interfaceEdit.Code) || string.IsNullOrWhiteSpace(_interfaceEdit.Name))
+        { inj_snackbar.Add("接口编码和名称不能为空", Severity.Warning); return; }
+        _interfaceEdit.ApiPlatformId = _editing.Id;
+        _interfaceEdit.Code = _interfaceEdit.Code.Trim(); _interfaceEdit.Name = _interfaceEdit.Name.Trim();
+        _interfaceEdit.RelativePath = (_interfaceEdit.RelativePath ?? "").Trim().Trim('/');
+        await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
+        var normalizedCode = _interfaceEdit.Code.ToLower();
+        var normalizedPath = _interfaceEdit.RelativePath.ToLower();
+        if (await db.ApiInterfaces.AnyAsync(item =>
+                item.Id != _interfaceEdit.Id && item.ApiPlatformId == _editing.Id &&
+                item.Code.ToLower() == normalizedCode && item.RelativePath.ToLower() == normalizedPath,
+                CancellationToken))
+        {
+            inj_snackbar.Add("当前平台已存在同编码、同路径的接口", Severity.Warning);
+            return;
+        }
+        if (_interfaceEdit.Id == 0) db.ApiInterfaces.Add(_interfaceEdit); else db.ApiInterfaces.Update(_interfaceEdit);
+        await db.SaveChangesAsync(CancellationToken);
+        await SelectPlatform(_editing.Id, false);
+        inj_snackbar.Add("接口目录已保存", Severity.Success);
+    }
+}

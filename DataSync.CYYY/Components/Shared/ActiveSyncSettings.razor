@@ -18,16 +18,12 @@
     }
     else
     {
-        @if (_lastRunAt.HasValue || _receiptCount > 0)
-        {
-            <div class="active-runtime-line">
-                <span>最近执行 <strong>@FormatDateTime(_lastRunAt)</strong></span>
-                <span>监控病例 <strong>@_caseCount</strong></span>
-                <span>已推送记录 <strong>@_receiptCount</strong></span>
-                <span class="@(_errorCount > 0 ? "has-error" : string.Empty)">异常 <strong>@_errorCount</strong></span>
-            </div>
-        }
-
+        <MudTabs Elevation="0"
+                 Rounded="false"
+                 KeepPanelsAlive="true"
+                 Class="active-sync-subtabs"
+                 PanelClass="active-sync-subtab-panel">
+            <MudTabPanel Text="同步设置" Icon="@Icons.Material.Filled.Tune">
         <div class="active-task-grid @(_enabled ? string.Empty : "is-disabled")">
             <MudTextField @bind-Value="_activeRecordsUrl"
                           Label="Active 病历接口地址"
@@ -52,8 +48,8 @@
             </MudSelect>
             <MudSelect T="string"
                        @bind-Value="_visitSnSource"
-                       Label="住院次数取值字段"
-                       HelperText="从 Active 病历接口返回值中取值，用于填充同步任务的住院次数字段"
+                       Label="就诊标识取值字段"
+                       HelperText="从 Active 病历接口返回值中取值，用于填充同步任务的就诊号字段"
                        Variant="Variant.Outlined"
                        Disabled="@(!_enabled)">
                 @foreach (var option in ActiveIdentitySources)
@@ -131,54 +127,162 @@
                 }
             </div>
         }
+            </MudTabPanel>
+
+            <MudTabPanel Text="Active 病例" Icon="@Icons.Material.Filled.Assessment">
+        @if (_lastRunAt.HasValue || _receiptCount > 0)
+        {
+            <div class="active-runtime-line">
+                <span>最近执行 <strong>@FormatDateTime(_lastRunAt)</strong></span>
+                <span>当前 Active <strong>@_caseCount</strong></span>
+                <span>已推送记录 <strong>@_receiptCount</strong></span>
+                <span class="@(_errorCount > 0 ? "has-error" : string.Empty)">异常 <strong>@_errorCount</strong></span>
+            </div>
+        }
 
         <div class="active-log-heading">
             <div>
-                <MudText Typo="Typo.subtitle1">运行日志</MudText>
-                <MudText Typo="Typo.caption" Color="Color.Secondary">最近 80 条 Active 病历同步记录。</MudText>
+                <MudText Typo="Typo.subtitle1">Active 病例同步明细</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    一行对应一个 Active 病例和一个接口，同时展示原始字段、任务映射与同步状态。
+                </MudText>
             </div>
             <MudButton Variant="Variant.Outlined"
                        Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.Refresh"
                        Disabled="@(_activeTaskId <= 0 || _refreshingLogs)"
                        OnClick="RefreshRuntimeAsync">
-                刷新日志
+                刷新 Active 列表
             </MudButton>
         </div>
 
-        @if (_activeTaskId <= 0)
+        @if (!string.IsNullOrWhiteSpace(_activeListError))
         {
-            <div class="active-log-empty">保存同步任务后可查看运行日志。</div>
-        }
-        else if (_runLogs.Count == 0)
-        {
-            <div class="active-log-empty">还没有运行日志。</div>
-        }
-        else
-        {
-            <div class="active-log-list">
-                @foreach (var log in _runLogs)
+            <div class="active-list-error">
+                <strong>Active 列表刷新失败</strong>
+                <span>@_activeListError</span>
+                @if (_activeListLastSuccessAt.HasValue)
                 {
-                    <div class="active-log-row" @key="log.Id">
-                        <div class="active-log-head">
-                            <span class="@GetLogLevelClass(log.Level)">@GetLogLevelText(log.Level)</span>
-                            <time>@FormatDateTime(log.CreatedAt)</time>
-                        </div>
-                        <div class="active-log-message">@log.Message</div>
-                        <div class="active-log-meta">
-                            <span>@(string.IsNullOrWhiteSpace(log.SourceName) ? "任务" : log.SourceName)</span>
-                            @if (!string.IsNullOrWhiteSpace(log.InpatientNo))
-                            {
-                                <span>住院号 @log.InpatientNo</span>
-                            }
-                            <span>Active @log.ActiveCaseCount</span>
-                            <span>查询 @log.QueryCount</span>
-                            <span>推送 @log.PushedCount</span>
-                        </div>
-                    </div>
+                    <small>当前保留 @_activeListLastSuccessAt.Value.ToString("yyyy-MM-dd HH:mm:ss") 的列表。</small>
                 }
             </div>
         }
+
+        @if (_activeTaskId <= 0)
+        {
+            <div class="active-log-empty">保存同步任务后可查看 Active 病例。</div>
+        }
+        else if (_runtimeItems.Count == 0)
+        {
+            <div class="active-log-empty">当前没有 Active 病例，或 Active 列表尚未成功加载。</div>
+        }
+        else
+        {
+            <div class="active-list-toolbar">
+                <MudTextField T="string"
+                              @bind-Value="_runtimeSearch"
+                              Immediate="true"
+                              Clearable="true"
+                              Placeholder="搜索病案号、住院号、住院次数"
+                              Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search"
+                              Variant="Variant.Outlined"
+                              Margin="Margin.Dense" />
+                <MudSelect T="int?"
+                           @bind-Value="_runtimeSourceFilter"
+                           Label="接口"
+                           Clearable="true"
+                           Variant="Variant.Outlined"
+                           Margin="Margin.Dense">
+                    @foreach (var source in GetRuntimeSources())
+                    {
+                        <MudSelectItem T="int?" Value="@((int?)source.Id)">@source.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </div>
+
+            <div class="active-result-filters" aria-label="同步状态筛选">
+                @foreach (var filter in RuntimeFilters)
+                {
+                    <button type="button"
+                            class="@GetRuntimeFilterClass(filter.Value)"
+                            @onclick="@(() => _runtimeFilter = filter.Value)">
+                        <span>@filter.Label</span>
+                        <strong>@GetRuntimeCount(filter.Value)</strong>
+                    </button>
+                }
+            </div>
+
+            var filteredItems = GetFilteredRuntimeItems();
+            @if (filteredItems.Count == 0)
+            {
+                <div class="active-log-empty">当前筛选条件下没有 Active 病例。</div>
+            }
+            else
+            {
+                <div class="active-flat-table-wrap">
+                    <table class="active-flat-table">
+                        <thead>
+                            <tr>
+                                <th>状态</th>
+                                <th>Active ID</th>
+                                <th>mrn</th>
+                                <th>inpatientNo</th>
+                                <th>visitNo</th>
+                                <th>入院时间</th>
+                                <th>内部标识</th>
+                                <th>任务字段映射</th>
+                                <th>接口</th>
+                                <th>最近查询</th>
+                                <th>最近推送</th>
+                                <th>累计推送</th>
+                                <th>执行时间</th>
+                                <th>下次执行</th>
+                                <th>错误</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in filteredItems)
+                            {
+                                <tr @key="item.RowKey">
+                                    <td><span class="@GetRuntimeStatusClass(item)">@GetRuntimeStatusText(item)</span></td>
+                                    <td>@FormatActiveId(item.ActiveId)</td>
+                                    <td>@FormatActiveValue(item.Mrn)</td>
+                                    <td>@FormatActiveValue(item.InpatientNo)</td>
+                                    <td>@FormatActiveValue(item.VisitNo)</td>
+                                    <td>@FormatDateTime(item.AdmissionTime)</td>
+                                    <td class="active-internal-ids">
+                                        <span title="@item.PatientId">patientId：@FormatGuid(item.PatientId)</span>
+                                        <span title="@item.EventId">eventId：@FormatGuid(item.EventId)</span>
+                                    </td>
+                                    <td class="active-mapping-cell">
+                                        <span>@item.PatientField ← @item.PatientSource</span>
+                                        <strong>@FormatActiveValue(item.MappedPatientId)</strong>
+                                        @if (!string.IsNullOrWhiteSpace(item.VisitField))
+                                        {
+                                            <span>@item.VisitField ← @item.VisitSource</span>
+                                            <strong>@FormatActiveValue(item.MappedVisitSn)</strong>
+                                        }
+                                    </td>
+                                    <td class="active-interface-cell">
+                                        <strong>@item.SourceName</strong>
+                                        <span>@item.ServerCode</span>
+                                    </td>
+                                    <td>@item.LastResultCount 条</td>
+                                    <td>@item.LastPushedCount 条</td>
+                                    <td>@item.PushedCount 条</td>
+                                    <td>@FormatDateTime(item.LastQueryAt)</td>
+                                    <td>@FormatDateTime(item.NextQueryTime)</td>
+                                    <td class="active-error-cell" title="@item.DisplayError">@FormatActiveValue(item.DisplayError)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        }
+            </MudTabPanel>
+        </MudTabs>
     }
 </section>
 
@@ -208,8 +312,13 @@
     private int _caseCount;
     private int _receiptCount;
     private int _errorCount;
-    private List<ActiveSyncRunLog> _runLogs = [];
+    private List<ActiveRuntimeItem> _runtimeItems = [];
     private bool _refreshingLogs;
+    private string _runtimeFilter = RuntimeAllFilter;
+    private string _runtimeSearch = "";
+    private int? _runtimeSourceFilter;
+    private string? _activeListError;
+    private DateTime? _activeListLastSuccessAt;
 
     protected override async Task OnPageInitializedAsync()
     {
@@ -366,23 +475,135 @@
 
     private async Task LoadRuntimeAsync(int activeTaskId)
     {
+        List<ActiveMedicalRecordInfo> activeCases;
+        try
+        {
+            activeCases = await inj_activeSyncService.GetCurrentActiveCasesAsync(activeTaskId, CancellationToken);
+            _activeListError = null;
+            _activeListLastSuccessAt = DateTime.Now;
+        }
+        catch (Exception ex)
+        {
+            _activeListError = ex.Message;
+            return;
+        }
+
         await using var db = await ContextFactory.CreateDbContextAsync(CancellationToken);
-        _runLogs = await db.ActiveSyncRunLogs
+        var sources = await db.ActiveSyncSources
+            .AsNoTracking()
+            .Where(item => item.TaskId == activeTaskId && item.Enabled)
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.DisplayName)
+            .ToListAsync(CancellationToken);
+        var inpatientNos = activeCases
+            .Select(item => item.InpatientNo)
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var states = inpatientNos.Count == 0
+            ? new List<ActiveSyncCaseSourceState>()
+            : await db.ActiveSyncCaseSourceStates
+                .AsNoTracking()
+                .Where(item => item.TaskId == activeTaskId && inpatientNos.Contains(item.InpatientNo))
+                .ToListAsync(CancellationToken);
+        var receiptCounts = inpatientNos.Count == 0
+            ? new List<ActiveReceiptCount>()
+            : await db.ActiveSyncRecordReceipts
+                .AsNoTracking()
+                .Where(item => item.TaskId == activeTaskId && inpatientNos.Contains(item.InpatientNo))
+                .GroupBy(item => new { item.SourceId, item.InpatientNo })
+                .Select(group => new ActiveReceiptCount
+                {
+                    SourceId = group.Key.SourceId,
+                    InpatientNo = group.Key.InpatientNo,
+                    Count = group.Count()
+                })
+                .ToListAsync(CancellationToken);
+        var latestLogs = inpatientNos.Count == 0
+            ? new List<ActiveLatestRun>()
+            : await db.ActiveSyncRunLogs
+                .AsNoTracking()
+                .Where(item => item.TaskId == activeTaskId &&
+                    item.SourceId.HasValue &&
+                    item.InpatientNo != null &&
+                    inpatientNos.Contains(item.InpatientNo))
+                .GroupBy(item => new { SourceId = item.SourceId!.Value, InpatientNo = item.InpatientNo! })
+                .Select(group => group
+                    .OrderByDescending(item => item.CreatedAt)
+                    .Select(item => new ActiveLatestRun
+                    {
+                        SourceId = item.SourceId!.Value,
+                        InpatientNo = item.InpatientNo!,
+                        QueryCount = item.QueryCount,
+                        PushedCount = item.PushedCount
+                    })
+                    .First())
+                .ToListAsync(CancellationToken);
+        _lastRunAt = await db.ActiveSyncRunLogs
             .AsNoTracking()
             .Where(item => item.TaskId == activeTaskId)
             .OrderByDescending(item => item.CreatedAt)
-            .Take(80)
-            .ToListAsync(CancellationToken);
-        _lastRunAt = _runLogs.FirstOrDefault()?.CreatedAt;
-        _caseCount = await db.ActiveSyncCaseSourceStates
-            .Where(item => item.TaskId == activeTaskId)
-            .Select(item => item.InpatientNo)
-            .Distinct()
-            .CountAsync(CancellationToken);
+            .Select(item => (DateTime?)item.CreatedAt)
+            .FirstOrDefaultAsync(CancellationToken);
+
+        var stateMap = states.ToDictionary(
+            item => BuildSourceCaseKey(item.SourceId, item.InpatientNo),
+            StringComparer.OrdinalIgnoreCase);
+        var receiptMap = receiptCounts.ToDictionary(
+            item => BuildSourceCaseKey(item.SourceId, item.InpatientNo),
+            item => item.Count,
+            StringComparer.OrdinalIgnoreCase);
+        var latestLogMap = latestLogs.ToDictionary(
+            item => BuildSourceCaseKey(item.SourceId, item.InpatientNo),
+            StringComparer.OrdinalIgnoreCase);
+        var runtimeItems = new List<ActiveRuntimeItem>();
+        foreach (var activeCase in activeCases)
+        {
+            var mappedPatientId = ActiveSyncService.ResolveActiveCaseValue(activeCase, _patientIdSource);
+            var mappedVisitSn = ActiveSyncService.ResolveActiveCaseValue(activeCase, _visitSnSource);
+            var mappingError = BuildMappingError(activeCase, mappedPatientId, mappedVisitSn);
+            foreach (var source in sources)
+            {
+                var key = BuildSourceCaseKey(source.Id, activeCase.InpatientNo);
+                stateMap.TryGetValue(key, out var state);
+                receiptMap.TryGetValue(key, out var pushedCount);
+                latestLogMap.TryGetValue(key, out var latestLog);
+                runtimeItems.Add(new ActiveRuntimeItem
+                {
+                    RowKey = $"{activeCase.Cursor}:{source.Id}",
+                    ActiveId = activeCase.Cursor,
+                    Mrn = activeCase.Mrn,
+                    InpatientNo = activeCase.InpatientNo,
+                    VisitNo = activeCase.VisitNo,
+                    AdmissionTime = activeCase.AdmissionTime,
+                    PatientId = activeCase.PatientId,
+                    EventId = activeCase.EventId,
+                    PatientField = TaskConfig.PatientIdField,
+                    PatientSource = _patientIdSource,
+                    MappedPatientId = mappedPatientId,
+                    VisitField = TaskConfig.VisitSnField,
+                    VisitSource = _visitSnSource,
+                    MappedVisitSn = mappedVisitSn,
+                    SourceId = source.Id,
+                    SourceName = string.IsNullOrWhiteSpace(source.DisplayName) ? source.ServerCode : source.DisplayName,
+                    ServerCode = source.ServerCode,
+                    LastQueryAt = state?.LastQueryAt,
+                    NextQueryTime = state?.NextQueryTime,
+                    LastResultCount = latestLog?.QueryCount ?? state?.LastResultCount ?? 0,
+                    LastPushedCount = latestLog?.PushedCount ?? 0,
+                    PushedCount = pushedCount,
+                    LastError = state?.LastError,
+                    MappingError = mappingError
+                });
+            }
+        }
+
+        _runtimeItems = runtimeItems;
+        _caseCount = activeCases.Count;
         _receiptCount = await db.ActiveSyncRecordReceipts
             .CountAsync(item => item.TaskId == activeTaskId, CancellationToken);
-        _errorCount = await db.ActiveSyncCaseSourceStates
-            .CountAsync(item => item.TaskId == activeTaskId && item.LastError != null && item.LastError != "", CancellationToken);
+        _errorCount = _runtimeItems.Count(item =>
+            GetRuntimeStatus(item) is RuntimeMissingStatus or RuntimeErrorStatus);
     }
 
     private void SyncDrafts(IReadOnlyList<SyncTaskInterface> interfaces)
@@ -458,27 +679,121 @@
     {
         if (IngestionService.IsDatabaseSourceType(iface.SourceType))
             return "数据库";
-        return IngestionService.IsDynamicApiSourceType(iface.SourceType) ? "DynamicApi" : "DataLake";
+        return "API 平台";
     }
 
     private static string FormatDateTime(DateTime? value)
         => value.HasValue ? value.Value.ToString("yyyy-MM-dd HH:mm:ss") : "-";
 
-    private static string GetLogLevelClass(string? level)
-        => level?.Trim().ToLowerInvariant() switch
+    private static string FormatActiveId(long value) => value > 0 ? value.ToString() : "-";
+
+    private static string FormatActiveValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? "缺失" : value;
+
+    private static string FormatGuid(Guid? value)
+    {
+        if (!value.HasValue)
+            return "缺失";
+
+        var text = value.Value.ToString();
+        return $"{text[..8]}…";
+    }
+
+    private int GetRuntimeCount(string status)
+        => status == RuntimeAllFilter
+            ? _runtimeItems.Count
+            : _runtimeItems.Count(item => GetRuntimeStatus(item) == status);
+
+    private string GetRuntimeFilterClass(string status)
+        => status == _runtimeFilter ? "active-result-filter is-active" : "active-result-filter";
+
+    private List<ActiveRuntimeItem> GetFilteredRuntimeItems()
+        => _runtimeItems
+            .Where(item => _runtimeFilter == RuntimeAllFilter || GetRuntimeStatus(item) == _runtimeFilter)
+            .Where(item => !_runtimeSourceFilter.HasValue || item.SourceId == _runtimeSourceFilter.Value)
+            .Where(item => MatchesRuntimeSearch(item, _runtimeSearch))
+            .OrderBy(item => GetRuntimeStatusOrder(GetRuntimeStatus(item)))
+            .ThenBy(item => item.InpatientNo)
+            .ThenBy(item => item.SourceName)
+            .ToList();
+
+    private List<ActiveRuntimeSourceOption> GetRuntimeSources()
+        => _runtimeItems
+            .GroupBy(item => new { item.SourceId, item.SourceName })
+            .Select(group => new ActiveRuntimeSourceOption
+            {
+                Id = group.Key.SourceId,
+                Name = group.Key.SourceName
+            })
+            .OrderBy(item => item.Name)
+            .ToList();
+
+    private static bool MatchesRuntimeSearch(ActiveRuntimeItem item, string? search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+            return true;
+
+        var value = search.Trim();
+        return item.Mrn.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            item.InpatientNo.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+            (item.VisitNo?.Contains(value, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    private static string GetRuntimeStatus(ActiveRuntimeItem item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.MappingError))
+            return RuntimeMissingStatus;
+        if (!string.IsNullOrWhiteSpace(item.LastError))
+            return RuntimeErrorStatus;
+        if (!item.LastQueryAt.HasValue)
+            return item.NextQueryTime.HasValue ? RuntimePendingStatus : RuntimeUnstartedStatus;
+        if (item.LastPushedCount > 0)
+            return RuntimeSyncedStatus;
+        return RuntimeEmptyStatus;
+    }
+
+    private static int GetRuntimeStatusOrder(string status)
+        => status switch
         {
-            "error" => "active-log-level is-error",
-            "warning" => "active-log-level is-warning",
-            _ => "active-log-level is-info"
+            RuntimeMissingStatus => 0,
+            RuntimeErrorStatus => 1,
+            RuntimePendingStatus => 2,
+            RuntimeUnstartedStatus => 3,
+            RuntimeEmptyStatus => 4,
+            _ => 5
         };
 
-    private static string GetLogLevelText(string? level)
-        => level?.Trim().ToLowerInvariant() switch
+    private static string GetRuntimeStatusText(ActiveRuntimeItem item)
+        => GetRuntimeStatus(item) switch
         {
-            "error" => "错误",
-            "warning" => "警告",
-            _ => "信息"
+            RuntimeMissingStatus => "字段缺失",
+            RuntimeErrorStatus => "同步失败",
+            RuntimeSyncedStatus => "同步成功",
+            RuntimeEmptyStatus => item.LastResultCount == 0 ? "无数据" : "无新增数据",
+            RuntimePendingStatus => "等待执行",
+            _ => "未开始"
         };
+
+    private static string GetRuntimeStatusClass(ActiveRuntimeItem item)
+        => $"active-result-status is-{GetRuntimeStatus(item)}";
+
+    private string? BuildMappingError(
+        ActiveMedicalRecordInfo activeCase,
+        string patientId,
+        string visitSn)
+    {
+        if (string.IsNullOrWhiteSpace(activeCase.InpatientNo))
+            return "Active 字段 [InpatientNo] 为空，无法建立同步状态";
+        if (string.IsNullOrWhiteSpace(patientId))
+            return $"Active 字段 [{_patientIdSource}] 为空，无法填充 [{TaskConfig.PatientIdField}]";
+        if (!string.IsNullOrWhiteSpace(TaskConfig.VisitSnField) && string.IsNullOrWhiteSpace(visitSn))
+            return $"Active 字段 [{_visitSnSource}] 为空，无法填充 [{TaskConfig.VisitSnField}]";
+
+        return null;
+    }
+
+    private static string BuildSourceCaseKey(int sourceId, string? inpatientNo)
+        => $"{sourceId}:{inpatientNo?.Trim()}";
 
     private sealed class ActiveInterfaceDraft
     {
@@ -489,10 +804,79 @@
         public int PollingIntervalSeconds { get; set; } = 1800;
     }
 
+    private sealed class ActiveRuntimeItem
+    {
+        public string RowKey { get; set; } = "";
+        public long ActiveId { get; set; }
+        public string Mrn { get; set; } = "";
+        public string InpatientNo { get; set; } = "";
+        public string? VisitNo { get; set; }
+        public DateTime? AdmissionTime { get; set; }
+        public Guid? PatientId { get; set; }
+        public Guid? EventId { get; set; }
+        public string PatientField { get; set; } = "";
+        public string PatientSource { get; set; } = "";
+        public string MappedPatientId { get; set; } = "";
+        public string? VisitField { get; set; }
+        public string VisitSource { get; set; } = "";
+        public string MappedVisitSn { get; set; } = "";
+        public int SourceId { get; set; }
+        public string SourceName { get; set; } = "";
+        public string ServerCode { get; set; } = "";
+        public DateTime? LastQueryAt { get; set; }
+        public DateTime? NextQueryTime { get; set; }
+        public int LastResultCount { get; set; }
+        public int LastPushedCount { get; set; }
+        public int PushedCount { get; set; }
+        public string? LastError { get; set; }
+        public string? MappingError { get; set; }
+        public string? DisplayError => MappingError ?? LastError;
+    }
+
+    private sealed class ActiveRuntimeSourceOption
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+    }
+
+    private sealed class ActiveReceiptCount
+    {
+        public int SourceId { get; set; }
+        public string InpatientNo { get; set; } = "";
+        public int Count { get; set; }
+    }
+
+    private sealed class ActiveLatestRun
+    {
+        public int SourceId { get; set; }
+        public string InpatientNo { get; set; } = "";
+        public int QueryCount { get; set; }
+        public int PushedCount { get; set; }
+    }
+
+    private const string RuntimeAllFilter = "all";
+    private const string RuntimeMissingStatus = "missing";
+    private const string RuntimeSyncedStatus = "synced";
+    private const string RuntimePendingStatus = "pending";
+    private const string RuntimeUnstartedStatus = "unstarted";
+    private const string RuntimeEmptyStatus = "empty";
+    private const string RuntimeErrorStatus = "error";
+
+    private static readonly (string Value, string Label)[] RuntimeFilters =
+    [
+        (RuntimeAllFilter, "全部"),
+        (RuntimeMissingStatus, "字段缺失"),
+        (RuntimeSyncedStatus, "同步成功"),
+        (RuntimePendingStatus, "等待执行"),
+        (RuntimeUnstartedStatus, "未开始"),
+        (RuntimeEmptyStatus, "无新增"),
+        (RuntimeErrorStatus, "同步失败")
+    ];
+
     private static readonly (string Value, string Label)[] ActiveIdentitySources =
     [
         ("Mrn", "病案号（mrn）"),
-        ("InpatientNo", "住院号（inpatientNo）"),
+        ("InpatientNo", "就诊号/住院号（inpatientNo）"),
         ("VisitNo", "住院次数（visitNo）"),
         ("PatientId", "患者ID（patientId）"),
         ("EventId", "事件ID（eventId）")

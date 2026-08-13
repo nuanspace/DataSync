@@ -765,7 +765,11 @@ else
                         }
                         <div class="path-edit-row">
                             <div class="path-edit-field">
-                                <PathPickTextField Value="@GetQuestionFieldSourcePath(field)" ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)" Label="源路径" IsActive="@IsPathPickActive(field)" OnActivated="@(() => ActivateQuestionFieldSourcePath(field))" Style="width:100%;" />
+                                <MultiSourcePathEditor Value="@GetQuestionFieldSourcePath(field)"
+                                                       ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)"
+                                                       HelperText="@GetSourcePathHelperText(field.MappingTarget)"
+                                                       ActiveIndex="@GetActiveSourcePathIndex(field)"
+                                                       OnActivated="index => ActivateQuestionFieldSourcePath(field, index)" />
                             </div>
                             <MudTooltip Text="详细设置">
                                 <MudIconButton Icon="@Icons.Material.Filled.Settings" Size="Size.Small" Color="Color.Default" OnClick="@(() => OpenQuestionFieldEditDialog(field, keepCurrentQuestionContext: true))" />
@@ -775,7 +779,7 @@ else
                         <div class="active-row-actions">
                             @if (row != null && !string.IsNullOrWhiteSpace(row.SourcePath))
                             {
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@GetPathScopeText(row.MappingTarget, row.CardId, row.ArrayPath, row.SourcePath)</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@GetSourcePathSummary(row)</MudChip>
                             }
                         </div>
                         @if (!string.IsNullOrWhiteSpace(GetQuestionFieldSourcePath(field)))
@@ -851,7 +855,11 @@ else
                                 }
                                 <div class="path-edit-row">
                                     <div class="path-edit-field">
-                                        <PathPickTextField Value="@sourcePath" ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)" Label="源路径" HelperText="@GetSourcePathHelperText(field.MappingTarget)" IsActive="@IsPathPickActive(field)" OnActivated="@(() => ActivateQuestionFieldSourcePath(field))" Style="width:100%;" />
+                                        <MultiSourcePathEditor Value="@sourcePath"
+                                                               ValueChanged="v => OnQuestionFieldSourcePathChanged(field, v)"
+                                                               HelperText="@GetSourcePathHelperText(field.MappingTarget)"
+                                                               ActiveIndex="@GetActiveSourcePathIndex(field)"
+                                                               OnActivated="index => ActivateQuestionFieldSourcePath(field, index)" />
                                     </div>
                                     <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Clear" OnClick="@(() => ClearQuestionFieldSourcePath(field))" Disabled="@(row == null || string.IsNullOrWhiteSpace(sourcePath))">清空路径</MudButton>
                                 </div>

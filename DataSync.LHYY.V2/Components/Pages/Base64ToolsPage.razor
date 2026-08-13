@@ -1,0 +1,167 @@
+﻿@page "/tools/base64"
+@inherits BasePage
+
+<PageTitle>Base64 工具 - LHYY V2</PageTitle>
+
+<main class="base64-page">
+    <header class="base64-header">
+        <div>
+            <h1>Base64 工具</h1>
+            <p>选择一种转换方式，内容仅在当前浏览器中处理。</p>
+        </div>
+        <div class="base64-local-note" role="note">
+            <span class="base64-local-dot" aria-hidden="true"></span>
+            不上传服务器
+        </div>
+    </header>
+
+    <nav class="base64-mode-selector" aria-label="选择转换方式">
+        <button type="button" class="base64-mode active" data-base64-mode="file-decode"
+                aria-selected="true" aria-controls="base64-panel-file-decode">
+            <span class="base64-mode-icon">B64</span>
+            <span>
+                <strong>Base64 → 文件</strong>
+                <small>粘贴内容并下载文件</small>
+            </span>
+        </button>
+        <button type="button" class="base64-mode" data-base64-mode="text-decode"
+                aria-selected="false" aria-controls="base64-panel-text-decode">
+            <span class="base64-mode-icon">文</span>
+            <span>
+                <strong>Base64 → 文字</strong>
+                <small>按 UTF-8 解码</small>
+            </span>
+        </button>
+        <button type="button" class="base64-mode" data-base64-mode="file-encode"
+                aria-selected="false" aria-controls="base64-panel-file-encode">
+            <span class="base64-mode-icon">档</span>
+            <span>
+                <strong>文件 → Base64</strong>
+                <small>最大 20 MB</small>
+            </span>
+        </button>
+        <button type="button" class="base64-mode" data-base64-mode="text-encode"
+                aria-selected="false" aria-controls="base64-panel-text-encode">
+            <span class="base64-mode-icon">字</span>
+            <span>
+                <strong>文字 → Base64</strong>
+                <small>按 UTF-8 编码</small>
+            </span>
+        </button>
+    </nav>
+
+    <section class="base64-workspace">
+        <article id="base64-panel-file-decode" class="base64-panel" data-base64-panel="file-decode">
+            <div class="base64-panel-heading">
+                <div>
+                    <p class="base64-eyebrow">BASE64 TO FILE</p>
+                    <h2>Base64 转文件</h2>
+                    <p>粘贴纯 Base64 内容，填写文件名后直接下载。</p>
+                </div>
+                <span class="base64-limit">解码后最大 20 MB</span>
+            </div>
+
+            <label for="base64-file-decode-input">Base64 内容</label>
+            <textarea id="base64-file-decode-input" rows="13" spellcheck="false"
+                      placeholder="粘贴不带 data:*;base64, 前缀的纯 Base64"></textarea>
+
+            <div class="base64-inline-field">
+                <div>
+                    <label for="base64-download-name">下载文件名</label>
+                    <input id="base64-download-name" class="base64-file-name-input" type="text"
+                           value="decoded-file.bin" autocomplete="off" />
+                </div>
+                <div class="base64-actions">
+                    <button type="button" class="base64-primary" data-base64-action="download-file">转换并下载</button>
+                    <button type="button" class="base64-quiet" data-base64-action="clear-file-decode">清空</button>
+                </div>
+            </div>
+            <p id="base64-file-decode-status" class="base64-status" aria-live="polite"></p>
+        </article>
+
+        <article id="base64-panel-text-decode" class="base64-panel" data-base64-panel="text-decode" hidden>
+            <div class="base64-panel-heading">
+                <div>
+                    <p class="base64-eyebrow">BASE64 TO TEXT</p>
+                    <h2>Base64 转文字</h2>
+                    <p>支持包含空格和换行的 Base64，结果按 UTF-8 解码。</p>
+                </div>
+                <span class="base64-limit">UTF-8</span>
+            </div>
+
+            <label for="base64-text-decode-input">Base64 内容</label>
+            <textarea id="base64-text-decode-input" rows="9" spellcheck="false"
+                      placeholder="在这里粘贴 Base64 内容"></textarea>
+
+            <div class="base64-actions">
+                <button type="button" class="base64-primary" data-base64-action="decode-text">转换</button>
+                <button type="button" data-base64-action="copy" data-base64-target="base64-text-decode-output">复制结果</button>
+                <button type="button" class="base64-quiet" data-base64-action="clear-text-decode">清空</button>
+            </div>
+
+            <label for="base64-text-decode-output">文字结果</label>
+            <textarea id="base64-text-decode-output" rows="9" readonly spellcheck="false"
+                      placeholder="转换结果会显示在这里"></textarea>
+            <p id="base64-text-decode-status" class="base64-status" aria-live="polite"></p>
+        </article>
+
+        <article id="base64-panel-file-encode" class="base64-panel" data-base64-panel="file-encode" hidden>
+            <div class="base64-panel-heading">
+                <div>
+                    <p class="base64-eyebrow">FILE TO BASE64</p>
+                    <h2>文件转 Base64</h2>
+                    <p>选择文件后生成不带 MIME 前缀的纯 Base64。</p>
+                </div>
+                <span class="base64-limit">最大 20 MB</span>
+            </div>
+
+            <label for="base64-file-encode-input">选择文件</label>
+            <div class="base64-file-picker">
+                <input id="base64-file-encode-input" type="file" />
+                <label for="base64-file-encode-input">浏览文件</label>
+                <span id="base64-file-name">尚未选择文件</span>
+            </div>
+
+            <div class="base64-actions">
+                <button type="button" class="base64-primary" data-base64-action="encode-file">转换</button>
+                <button type="button" data-base64-action="copy" data-base64-target="base64-file-encode-output">复制结果</button>
+                <button type="button" class="base64-quiet" data-base64-action="clear-file-encode">清空</button>
+            </div>
+
+            <label for="base64-file-encode-output">Base64 结果</label>
+            <textarea id="base64-file-encode-output" rows="14" readonly spellcheck="false"
+                      placeholder="选择文件并转换后，结果会显示在这里"></textarea>
+            <p id="base64-file-encode-status" class="base64-status" aria-live="polite"></p>
+        </article>
+
+        <article id="base64-panel-text-encode" class="base64-panel" data-base64-panel="text-encode" hidden>
+            <div class="base64-panel-heading">
+                <div>
+                    <p class="base64-eyebrow">TEXT TO BASE64</p>
+                    <h2>文字转 Base64</h2>
+                    <p>将普通文字按 UTF-8 编码为 Base64。</p>
+                </div>
+                <span class="base64-limit">UTF-8</span>
+            </div>
+
+            <label for="base64-text-encode-input">原始文字</label>
+            <textarea id="base64-text-encode-input" rows="9" spellcheck="false"
+                      placeholder="在这里输入需要编码的文字"></textarea>
+
+            <div class="base64-actions">
+                <button type="button" class="base64-primary" data-base64-action="encode-text">转换</button>
+                <button type="button" data-base64-action="copy" data-base64-target="base64-text-encode-output">复制结果</button>
+                <button type="button" class="base64-quiet" data-base64-action="clear-text-encode">清空</button>
+            </div>
+
+            <label for="base64-text-encode-output">Base64 结果</label>
+            <textarea id="base64-text-encode-output" rows="9" readonly spellcheck="false"
+                      placeholder="转换结果会显示在这里"></textarea>
+            <p id="base64-text-encode-status" class="base64-status" aria-live="polite"></p>
+        </article>
+    </section>
+</main>
+
+@code {
+    protected override bool RequiresIntegrationProject => false;
+}

@@ -40,24 +40,30 @@ public class EventIdentityService
 
         if (!string.IsNullOrWhiteSpace(inpatientNo) && !string.IsNullOrWhiteSpace(visitNo))
         {
-            return await query
+            var identity = await query
                 .Where(x => x.InpatientNo == inpatientNo && x.VisitNo == visitNo)
                 .OrderByDescending(x => x.UpdatedAt)
                 .FirstOrDefaultAsync();
+
+            if (identity != null)
+                return identity;
+        }
+
+        if (!string.IsNullOrWhiteSpace(inpatientNo))
+        {
+            var identity = await query
+                .Where(x => x.InpatientNo == inpatientNo)
+                .OrderByDescending(x => x.UpdatedAt)
+                .FirstOrDefaultAsync();
+
+            if (identity != null)
+                return identity;
         }
 
         if (!string.IsNullOrWhiteSpace(visitNo))
         {
             return await query
                 .Where(x => x.VisitNo == visitNo)
-                .OrderByDescending(x => x.UpdatedAt)
-                .FirstOrDefaultAsync();
-        }
-
-        if (!string.IsNullOrWhiteSpace(inpatientNo))
-        {
-            return await query
-                .Where(x => x.InpatientNo == inpatientNo)
                 .OrderByDescending(x => x.UpdatedAt)
                 .FirstOrDefaultAsync();
         }
@@ -136,20 +142,20 @@ public class EventIdentityService
                 x.VisitNo == visitNo);
         }
 
-        if (entity == null && !string.IsNullOrWhiteSpace(visitNo))
-        {
-            entity = await db.EsbEventIdentities.FirstOrDefaultAsync(x =>
-                x.IntegrationProjectCode == integrationProjectCode &&
-                x.Mrn == mrn &&
-                x.VisitNo == visitNo);
-        }
-
         if (entity == null && !string.IsNullOrWhiteSpace(inpatientNo))
         {
             entity = await db.EsbEventIdentities.FirstOrDefaultAsync(x =>
                 x.IntegrationProjectCode == integrationProjectCode &&
                 x.Mrn == mrn &&
                 x.InpatientNo == inpatientNo);
+        }
+
+        if (entity == null && !string.IsNullOrWhiteSpace(visitNo))
+        {
+            entity = await db.EsbEventIdentities.FirstOrDefaultAsync(x =>
+                x.IntegrationProjectCode == integrationProjectCode &&
+                x.Mrn == mrn &&
+                x.VisitNo == visitNo);
         }
 
         if (entity == null)

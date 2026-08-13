@@ -337,7 +337,6 @@ else
 
             // 当前项目配置
             _defaultLicenseCode = await ConfigSvc.GetDefaultLicenseCodeAsync(CurrentIntegrationProjectCode);
-            var defaultProjectId = await ConfigSvc.GetDefaultProjectIdAsync(CurrentIntegrationProjectCode);
 
             // 接口列表
             _interfaces = await ApplyCurrentProjectScope(db.EsbInterfaceConfigs, false)
@@ -377,7 +376,7 @@ else
                     g => g.Key,
                     g => g.OrderBy(i => i.SortOrder).ThenBy(i => i.TranCode).ToList(),
                     StringComparer.OrdinalIgnoreCase);
-            var productEventTypes = await LoadCurrentProjectEventTypesAsync(defaultProjectId);
+            var productEventTypes = await LoadCurrentProjectEventTypesAsync();
 
             foreach (var eventType in productEventTypes)
             {
@@ -431,15 +430,10 @@ else
         return CloneFormNodes(nodes);
     }
 
-    private async Task<List<ProductEventTypeInfo>> LoadCurrentProjectEventTypesAsync(string? defaultProjectId)
+    private async Task<List<ProductEventTypeInfo>> LoadCurrentProjectEventTypesAsync()
     {
         var result = new List<ProductEventTypeInfo>();
         var seen = new HashSet<(string Name, Guid FormSetId)>();
-
-        if (Guid.TryParse(defaultProjectId, out var projectId))
-        {
-            AddUniqueEventTypes(result, seen, await BioCoreService.GetEventTypesByProjectAsync(projectId));
-        }
 
         var licenseCodes = _interfaces
             .Select(i => i.LicenseCode)
@@ -1452,13 +1446,19 @@ else
             inj_snackbar.Add("源路径和默认值不能同时为空", Severity.Warning);
             return;
         }
+        if (_editItem.SourcePath?.Length > 500)
+        {
+            inj_snackbar.Add("源路径总长度不能超过 500 个字符", Severity.Warning);
+            return;
+        }
 
         if (_editItem.MappingTarget != MappingTarget.SubCard)
         {
-            if (MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(_editItem.SourcePath, GetDialogMainRecordArrayPath(), out var normalizedSourcePath))
-            {
-                _editItem.SourcePath = normalizedSourcePath;
-            }
+            _editItem.SourcePath = MultiSourcePathHelper.JoinPaths(
+                MultiSourcePathHelper.Split(_editItem.SourcePath).Select(path =>
+                    MessageJsonHelper.TryNormalizeMainRecordRelativeSourcePath(path, GetDialogMainRecordArrayPath(), out var normalizedSourcePath)
+                        ? normalizedSourcePath
+                        : path));
 
             foreach (var rule in _editFilterRules)
             {
@@ -1477,7 +1477,7 @@ else
                 var entity = await db.EsbFieldMappings.FindAsync(_editItem.Id);
                 if (entity != null)
                 {
-                    entity.SourcePath = _editItem.SourcePath;
+                    entity.SourcePath = _editItem.SourcePath ?? "";
                     entity.ArrayPath = _editItem.ArrayPath;
                     entity.DictCode = _editItem.DictCode;
                     entity.DictMatchMode = EsbFieldMapping.NormalizeDictMatchMode(_editItem.DictMatchMode);

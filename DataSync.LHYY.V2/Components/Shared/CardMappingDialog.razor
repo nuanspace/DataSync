@@ -87,11 +87,10 @@
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">@row.DataType</MudText>
                                 </td>
                                 <td>
-                                    <PathPickTextField Value="@GetRowDisplaySourcePath(row)"
-                                                       ValueChanged="value => OnRowSourcePathChanged(row, value)"
-                                                       IsActive="@isPickingThis"
-                                                       OnActivated="@(() => OnSourcePathFocus(idx))"
-                                                       Style="min-width:100px;" />
+                                    <MultiSourcePathEditor Value="@GetRowDisplaySourcePath(row)"
+                                                           ValueChanged="value => OnRowSourcePathChanged(row, value)"
+                                                           ActiveIndex="@(isPickingThis ? _pickSourcePathIndex : -1)"
+                                                           OnActivated="sourceIndex => OnSourcePathFocus(idx, sourceIndex)" />
                                 </td>
                                 <td>
                                     <MudTextField @bind-Value="row.DictCode" Margin="Margin.Dense"
@@ -174,6 +173,7 @@
     private enum PickTarget { None, SourcePath, ArrayPath, FilterRule }
     private PickTarget _pickTarget = PickTarget.None;
     private int _pickRowIndex = -1;
+    private int _pickSourcePathIndex;
     private int _pickFilterRuleIndex = -1;
     private Guid? _loadedCardId;
     private string? _loadedEventTypeName;
@@ -306,6 +306,12 @@
 
     private string GetRowDisplaySourcePath(CardMappingRow row)
     {
+        var paths = MultiSourcePathHelper.Split(row.SourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(row.SourcePath))
+        {
+            return MultiSourcePathHelper.JoinPaths(paths.Select(path => GetRowDisplaySourcePath(new CardMappingRow { SourcePath = path })));
+        }
+
         var normalizedSource = row.SourcePath?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(normalizedSource))
         {
@@ -426,10 +432,11 @@
     /// <summary>
     /// SourcePath 输入框获得焦点时自动激活该行
     /// </summary>
-    private void OnSourcePathFocus(int rowIndex)
+    private void OnSourcePathFocus(int rowIndex, int sourcePathIndex)
     {
         _pickTarget = PickTarget.SourcePath;
         _pickRowIndex = rowIndex;
+        _pickSourcePathIndex = sourcePathIndex;
         _pickFilterRuleIndex = -1;
     }
 
@@ -456,7 +463,16 @@
         {
             case PickTarget.SourcePath:
                 if (_pickRowIndex >= 0 && _pickRowIndex < _rows.Count)
-                    _rows[_pickRowIndex].SourcePath = await NormalizePickedRowPathAsync(path, _rows[_pickRowIndex].SourcePath);
+                {
+                    var sourcePaths = MultiSourcePathHelper.Split(_rows[_pickRowIndex].SourcePath);
+                    while (sourcePaths.Count <= _pickSourcePathIndex)
+                    {
+                        sourcePaths.Add("");
+                    }
+
+                    sourcePaths[_pickSourcePathIndex] = await NormalizePickedRowPathAsync(path, sourcePaths[_pickSourcePathIndex]);
+                    _rows[_pickRowIndex].SourcePath = MultiSourcePathHelper.JoinPaths(sourcePaths);
+                }
                 break;
             case PickTarget.ArrayPath:
                 _arrayPath = NormalizeArrayPathForEdit(path);
@@ -549,6 +565,7 @@
     {
         _pickTarget = PickTarget.None;
         _pickRowIndex = -1;
+        _pickSourcePathIndex = 0;
         _pickFilterRuleIndex = -1;
     }
 
@@ -564,14 +581,17 @@
 
         foreach (var row in _rows)
         {
-            if (SubCardPathHelper.TrySplitWildcardPath(row.SourcePath, out var pickedArrayPath, out _))
+            foreach (var sourcePath in MultiSourcePathHelper.Split(row.SourcePath))
             {
-                return pickedArrayPath;
+                if (SubCardPathHelper.TrySplitWildcardPath(sourcePath, out var pickedArrayPath, out _))
+                {
+                    return pickedArrayPath;
+                }
             }
 
             foreach (var rule in row.FilterRules)
             {
-                if (SubCardPathHelper.TrySplitWildcardPath(rule.SourcePath, out pickedArrayPath, out _))
+                if (SubCardPathHelper.TrySplitWildcardPath(rule.SourcePath, out var pickedArrayPath, out _))
                 {
                     return pickedArrayPath;
                 }
@@ -583,7 +603,7 @@
 
     private int CountPendingPathNormalization(IEnumerable<CardMappingRow> rows) =>
         rows.Sum(row =>
-            (SubCardPathHelper.HasArrayWildcard(row.SourcePath) ? 1 : 0)
+            MultiSourcePathHelper.Split(row.SourcePath).Count(SubCardPathHelper.HasArrayWildcard)
             + row.FilterRules.Count(rule => SubCardPathHelper.HasArrayWildcard(rule.SourcePath)));
 
     private async Task<bool> ConfirmPathNormalizationAsync(IEnumerable<CardMappingRow> rows)
@@ -604,6 +624,33 @@
 
     private bool TryNormalizePathForSave(string? sourcePath, string? effectiveArrayPath, string pathLabel, out string normalizedPath, out string? error)
     {
+        var sourcePaths = MultiSourcePathHelper.Split(sourcePath);
+        if (MultiSourcePathHelper.HasPathSeparator(sourcePath))
+        {
+            var normalizedPaths = new List<string>();
+            foreach (var path in sourcePaths)
+            {
+                if (!TryNormalizePathForSave(path, effectiveArrayPath, pathLabel, out var normalizedSourcePath, out error))
+                {
+                    normalizedPath = "";
+                    return false;
+                }
+
+                normalizedPaths.Add(normalizedSourcePath);
+            }
+
+            normalizedPath = MultiSourcePathHelper.JoinPaths(normalizedPaths);
+            if (normalizedPaths.Select(MultiSourcePathHelper.GetSubCardScope).Distinct().Count() > 1)
+            {
+                error = $"{pathLabel} 的多条路径必须位于同一主记录或同一子卡行内。";
+                normalizedPath = "";
+                return false;
+            }
+
+            error = null;
+            return true;
+        }
+
         normalizedPath = sourcePath?.Trim() ?? "";
         error = null;
 
@@ -691,6 +738,13 @@
         }
 
         var rowsToSave = _rows.Where(HasValueSource).ToList();
+        var sourcePathTooLong = rowsToSave.FirstOrDefault(row => row.SourcePath?.Length > 500);
+        if (sourcePathTooLong != null)
+        {
+            inj_snackbar.Add($"字段【{sourcePathTooLong.QuestionTitle}】的源路径总长度不能超过 500 个字符。", Severity.Warning);
+            return;
+        }
+
         var effectiveArrayPath = GetEffectiveArrayPathForSave();
         if (rowsToSave.Count > 0 && string.IsNullOrWhiteSpace(effectiveArrayPath))
         {

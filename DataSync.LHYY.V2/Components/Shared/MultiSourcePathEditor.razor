@@ -1,0 +1,92 @@
+﻿@inherits BasePage
+
+<div class="multi-source-path-editor">
+    @for (var index = 0; index < _paths.Count; index++)
+    {
+        var pathIndex = index;
+        <div class="multi-source-path-row">
+            <PathPickTextField Value="@_paths[pathIndex]"
+                               ValueChanged="value => OnPathChanged(pathIndex, value)"
+                               Label="@(pathIndex == 0 ? Label : $"源路径 {pathIndex + 1}")"
+                               HelperText="@(pathIndex == 0 ? HelperText : null)"
+                               IsActive="@(ActiveIndex == pathIndex)"
+                               OnActivated="@(() => OnActivated.InvokeAsync(pathIndex))"
+                               Style="width:100%;" />
+            <MudIconButton Icon="@Icons.Material.Filled.DeleteOutline"
+                           Size="Size.Small"
+                           Color="Color.Error"
+                           Disabled="@(!AllowMultiple || _paths.Count <= 1)"
+                           OnClick="@(() => RemovePath(pathIndex))" />
+        </div>
+    }
+    @if (AllowMultiple)
+    {
+        <MudButton Variant="Variant.Text" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" OnClick="AddPath">
+            新增源路径
+        </MudButton>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "源路径";
+    [Parameter] public string? HelperText { get; set; }
+    [Parameter] public bool AllowMultiple { get; set; } = true;
+    [Parameter] public int ActiveIndex { get; set; } = -1;
+    [Parameter] public EventCallback<int> OnActivated { get; set; }
+
+    private List<string> _paths = [""];
+    private string? _lastExternalValue;
+
+    protected override Task OnPageInitializedAsync()
+    {
+        LoadPaths(Value);
+        return Task.CompletedTask;
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (!string.Equals(Value ?? "", _lastExternalValue, StringComparison.Ordinal))
+        {
+            LoadPaths(Value);
+        }
+    }
+
+    private void LoadPaths(string? value)
+    {
+        _lastExternalValue = value ?? "";
+        _paths = _lastExternalValue
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Split('\n')
+            .ToList();
+        if (_paths.Count == 0)
+        {
+            _paths.Add("");
+        }
+    }
+
+    private async Task OnPathChanged(int index, string? value)
+    {
+        _paths[index] = value ?? "";
+        await NotifyChangedAsync();
+    }
+
+    private async Task AddPath()
+    {
+        _paths.Add("");
+        await OnActivated.InvokeAsync(_paths.Count - 1);
+    }
+
+    private async Task RemovePath(int index)
+    {
+        _paths.RemoveAt(index);
+        await NotifyChangedAsync();
+        await OnActivated.InvokeAsync(Math.Min(index, _paths.Count - 1));
+    }
+
+    private async Task NotifyChangedAsync()
+    {
+        await ValueChanged.InvokeAsync(string.Join(Environment.NewLine, _paths));
+    }
+}

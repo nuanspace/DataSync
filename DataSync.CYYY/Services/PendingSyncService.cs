@@ -368,6 +368,38 @@ public class PendingSyncService
         await db.SaveChangesAsync(ct);
     }
 
+    public async Task SaveContinuousInterfaceStatesAsync(
+        long id,
+        IReadOnlyDictionary<string, ContinuousInterfacePollingState> states,
+        CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var item = await db.PendingSyncItems.FindAsync([id], ct);
+        if (item == null)
+            return;
+
+        item.ContinuousInterfaceStates = JsonSerializer.Serialize(states);
+        item.UpdatedAt = DateTime.Now;
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task MarkPollingWaitingAsync(long id, DateTime nextRunTime, CancellationToken ct)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var item = await db.PendingSyncItems.FindAsync([id], ct);
+        if (item == null)
+            return;
+
+        var now = DateTime.Now;
+        item.Status = PendingSyncStatuses.Waiting;
+        item.RetryCount = 0;
+        item.LastError = $"持续轮询中，下次执行时间 {nextRunTime:yyyy-MM-dd HH:mm:ss}";
+        item.NextRetryTime = nextRunTime;
+        item.LastCompletedAt = now;
+        item.UpdatedAt = now;
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>
     /// 仅因接口访问时间窗延期，不消耗自动重试次数。
     /// </summary>

@@ -1,0 +1,276 @@
+﻿.api-platform-selected { background: var(--mud-palette-action-default-hover); }
+.api-config-row { display: grid; grid-template-columns: 1fr 1.4fr 1fr auto auto; gap: 12px; align-items: center; margin-top: 8px; }
+.api-operator-row { grid-template-columns: 1fr 1.5fr auto auto; }
+@media (max-width: 960px) { .api-config-row, .api-operator-row { grid-template-columns: 1fr; } }
+
+.api-platform-page {
+    width: 100%;
+    animation: api-page-enter 180ms ease-out;
+}
+
+.api-platform-page-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.api-platform-title {
+    font-weight: 650;
+    letter-spacing: -.02em;
+}
+
+.api-platform-subtitle {
+    margin-top: 4px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .875rem;
+}
+
+.api-platform-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    min-height: 620px;
+    border-top: 1px solid var(--mud-palette-divider);
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.api-platform-sidebar {
+    align-self: start;
+    min-height: 620px;
+    padding: 20px 18px 20px 0;
+    border-right: 1px solid var(--mud-palette-divider);
+}
+
+.api-platform-list {
+    display: grid;
+    gap: 4px;
+    margin-top: 16px;
+}
+
+.api-platform-list-item {
+    display: grid;
+    gap: 5px;
+    width: 100%;
+    padding: 11px 12px;
+    color: var(--mud-palette-text-primary);
+    text-align: left;
+    background: transparent;
+    border: 0;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background-color 140ms ease, transform 140ms ease;
+}
+
+.api-platform-list-item:hover {
+    background: var(--mud-palette-action-default-hover);
+    transform: translateX(2px);
+}
+
+.api-platform-list-item.api-platform-selected {
+    background: var(--mud-palette-action-default-hover);
+    box-shadow: inset 2px 0 0 var(--mud-palette-primary);
+}
+
+.api-platform-list-name {
+    overflow: hidden;
+    font-size: .9rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.api-platform-list-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .75rem;
+}
+
+.api-status-dot {
+    width: 6px;
+    height: 6px;
+    background: var(--mud-palette-text-disabled);
+    border-radius: 50%;
+}
+
+.api-status-dot.is-enabled {
+    background: var(--mud-palette-success);
+}
+
+.api-platform-workspace {
+    min-width: 0;
+    padding-left: 24px;
+}
+
+.api-platform-workspace-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 88px;
+    gap: 20px;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.api-platform-eyebrow {
+    margin-bottom: 2px;
+    color: var(--mud-palette-text-secondary);
+    font-size: .7rem;
+    font-weight: 650;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.api-platform-workspace-title {
+    font-weight: 650;
+}
+
+.api-platform-actions,
+.api-switches {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+::deep .api-platform-tabs .mud-tabs-tabbar {
+    padding: 0 8px;
+    background: transparent;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+::deep .api-platform-tabs .mud-tab {
+    min-height: 54px;
+    text-transform: none;
+}
+
+::deep .api-platform-tab-panel {
+    min-height: 430px;
+    padding: 24px 18px 30px;
+    animation: api-tab-enter 160ms ease-out;
+}
+
+.api-tab-intro {
+    display: grid;
+    gap: 3px;
+    margin-bottom: 22px;
+}
+
+.api-tab-intro span,
+.api-subsection-header span {
+    color: var(--mud-palette-text-secondary);
+    font-size: .8rem;
+}
+
+.api-subsection-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 28px 0 10px;
+    padding-top: 18px;
+    border-top: 1px solid var(--mud-palette-divider);
+}
+
+.api-subsection-header > div {
+    display: grid;
+    gap: 2px;
+}
+
+.api-config-row {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr 1fr auto auto;
+    align-items: center;
+    gap: 12px;
+    margin-top: 0;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--mud-palette-divider);
+}
+
+.api-operator-row {
+    grid-template-columns: 1fr 1.5fr auto auto;
+}
+
+.api-interface-table {
+    margin-top: 6px;
+}
+
+.api-interface-editor {
+    margin-top: 20px;
+}
+
+.api-interface-editor .api-subsection-header {
+    margin-top: 0;
+}
+
+.api-interface-save {
+    display: flex;
+    align-items: center;
+}
+
+@keyframes api-page-enter {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes api-tab-enter {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 960px) {
+    .api-platform-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .api-platform-sidebar {
+        min-height: auto;
+        padding: 16px 0;
+        border-right: 0;
+        border-bottom: 1px solid var(--mud-palette-divider);
+    }
+
+    .api-platform-list {
+        display: flex;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+
+    .api-platform-list-item {
+        flex: 0 0 180px;
+    }
+
+    .api-platform-workspace {
+        padding-left: 0;
+    }
+}
+
+@media (max-width: 700px) {
+    .api-platform-workspace-header {
+        align-items: stretch;
+        flex-direction: column;
+        padding-inline: 0;
+    }
+
+    .api-platform-actions {
+        flex-wrap: wrap;
+    }
+
+    .api-switches {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .api-config-row,
+    .api-operator-row {
+        grid-template-columns: 1fr;
+    }
+
+    ::deep .api-platform-tabs .mud-tabs-tabbar {
+        padding-inline: 0;
+    }
+
+    ::deep .api-platform-tab-panel {
+        padding-inline: 0;
+    }
+}

@@ -292,15 +292,17 @@ public class FieldMappingExecutor
             var row = new SubCardRowData();
             foreach (var mapping in group.Mappings)
             {
-                var source = ResolveSubCardSource(
-                    body,
-                    mainContext,
-                    item,
-                    parentContext,
-                    mapping.SourcePath,
-                    group.ArrayPath,
-                    effectiveArrayPath);
-                var value = await ApplyMappingValueAsync(source?.ToString(), mapping);
+                var sourceValue = MultiSourcePathHelper.JoinValues(
+                    MultiSourcePathHelper.Split(mapping.SourcePath)
+                        .Select(sourcePath => ResolveSubCardSource(
+                            body,
+                            mainContext,
+                            item,
+                            parentContext,
+                            sourcePath,
+                            group.ArrayPath,
+                            effectiveArrayPath)?.ToString()));
+                var value = await ApplyMappingValueAsync(sourceValue, mapping);
                 if (value.Value == null)
                     continue;
 
@@ -466,8 +468,11 @@ public class FieldMappingExecutor
         List<EsbFilterRule>? rules,
         bool collectArrayValues = false)
     {
+        var sourcePaths = collectArrayValues
+            ? MultiSourcePathHelper.Split(mapping.SourcePath)
+            : new List<string> { mapping.SourcePath };
         var hasArraySource = collectArrayValues
-                             && SubCardPathHelper.HasArrayWildcard(mapping.SourcePath);
+                             && sourcePaths.Any(SubCardPathHelper.HasArrayWildcard);
         var hasArrayItemRules = hasArraySource
                                 && rules?.Any(rule => rule.IsEnabled && rule.FilterScope == FilterScope.RowFilter) == true;
         var mappingRules = hasArrayItemRules
@@ -477,24 +482,25 @@ public class FieldMappingExecutor
         if (!_filterRuleService.CheckMappingRules(body, context, mappingRules))
             return new MappedValue(null, false);
 
-        string? sourceValue;
-        if (hasArrayItemRules)
+        var sourceValues = new List<string?>();
+        foreach (var sourcePath in sourcePaths)
         {
-            var filtered = _filterRuleService.FilterMappingArrayValues(
-                body,
-                context,
-                mapping.SourcePath,
-                rules,
-                context);
-            if (filtered.MatchedCount == 0)
-                return new MappedValue(null, false);
+            if (hasArrayItemRules && SubCardPathHelper.HasArrayWildcard(sourcePath))
+            {
+                var filtered = _filterRuleService.FilterMappingArrayValues(
+                    body,
+                    context,
+                    sourcePath,
+                    rules,
+                    context);
+                sourceValues.AddRange(filtered.Values);
+                continue;
+            }
 
-            sourceValue = filtered.Values.Count == 0 ? null : string.Join("；", filtered.Values);
+            sourceValues.Add(ResolveSourceValue(body, context, sourcePath, collectArrayValues));
         }
-        else
-        {
-            sourceValue = ResolveSourceValue(body, context, mapping.SourcePath, collectArrayValues);
-        }
+
+        var sourceValue = MultiSourcePathHelper.JoinValues(sourceValues);
 
         if (sourceValue == null && mapping.IsRequired)
         {

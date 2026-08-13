@@ -94,6 +94,32 @@ public class PendingSyncItem
         }
     }
 
+    /// <summary>
+    /// 持续轮询接口状态 JSON。
+    /// </summary>
+    [Column("continuous_interface_states")]
+    public string ContinuousInterfaceStates { get; set; } = "{}";
+
+    [NotMapped]
+    public Dictionary<string, ContinuousInterfacePollingState> ContinuousInterfaceStateMap
+    {
+        get
+        {
+            try
+            {
+                var states = System.Text.Json.JsonSerializer
+                    .Deserialize<Dictionary<string, ContinuousInterfacePollingState>>(ContinuousInterfaceStates);
+                return states == null
+                    ? new Dictionary<string, ContinuousInterfacePollingState>(StringComparer.OrdinalIgnoreCase)
+                    : new Dictionary<string, ContinuousInterfacePollingState>(states, StringComparer.OrdinalIgnoreCase);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                return new Dictionary<string, ContinuousInterfacePollingState>(StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
     [Column("last_started_at")]
     public DateTime? LastStartedAt { get; set; }
 
@@ -105,4 +131,11 @@ public class PendingSyncItem
 
     [Column("updated_at")]
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
+}
+
+public sealed class ContinuousInterfacePollingState
+{
+    public DateTime LastSuccessAt { get; set; }
+
+    public DateTime NextRunAt { get; set; }
 }
