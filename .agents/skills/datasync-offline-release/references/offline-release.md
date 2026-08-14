@@ -34,6 +34,7 @@
 - `NTCARE_UPLOADS_PATH` 必须是已存在、非符号链接、可读写的绝对路径，并映射到 LHYY `AttachmentRoot=/app/uploads`。
 - uploads 存储必须支持同目录硬链接和原子重命名。安装脚本只探测能力，不创建附件根、递归改属主或放宽权限。
 - `FollowUpPackageImport.Enabled` 初始关闭；完成页面预检和测试包验证后才启用。
+- `external-cube` 默认不要求 form schema 下的 vector 扩展；仅当目标环境明确启用向量能力时把 `CubeCompatibility:RequireVectorExtension` 设为 `true`。`fresh-cube` 制品继续携带并验证 pgvector，逐包字段类型检查在两种模式下都不能绕过。
 
 ## 验收
 

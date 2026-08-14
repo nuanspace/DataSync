@@ -67,6 +67,7 @@ public static class ExternalCubeCompatibilityTool
                 .Build();
             var connectionString = configuration.GetConnectionString("CubeDb")
                 ?? throw new InvalidOperationException("未找到连接字符串 'CubeDb'。");
+            var requireVectorExtension = configuration.GetValue<bool>("CubeCompatibility:RequireVectorExtension");
 
             await using var connection = new NpgsqlConnection(connectionString);
             await connection.OpenAsync();
@@ -78,7 +79,12 @@ public static class ExternalCubeCompatibilityTool
             var privileges = await ReadPrivilegesAsync(connection, transaction, DefaultRequirements);
             var schemasWithUsage = await ReadSchemasWithUsageAsync(connection, transaction, RequiredSchemas);
             var vectorInstalled = await HasVectorExtensionAsync(connection, transaction);
-            var issues = Evaluate(columns, privileges, schemasWithUsage, vectorInstalled).ToList();
+            var issues = Evaluate(
+                columns,
+                privileges,
+                schemasWithUsage,
+                vectorInstalled,
+                requireVectorExtension: requireVectorExtension).ToList();
             issues.AddRange(await ReadBackupPrivilegeIssuesAsync(connection, transaction));
 
             if (issues.Count == 0)
@@ -98,11 +104,14 @@ public static class ExternalCubeCompatibilityTool
                         schemasWithUsage,
                         vectorInstalled,
                         dynamicRequirements,
-                        checkVector: false));
+                        requireVectorExtension: false));
                 }
             }
 
             await transaction.RollbackAsync();
+
+            if (!requireVectorExtension && !vectorInstalled)
+                Console.WriteLine("提示：CubeDb 未安装 form schema 下的 vector 扩展；当前未启用向量能力，因此不阻止兼容性检查。");
 
             if (issues.Count > 0)
             {
@@ -129,7 +138,7 @@ public static class ExternalCubeCompatibilityTool
         IReadOnlySet<string> schemasWithUsage,
         bool vectorInstalled,
         IReadOnlyCollection<ExternalCubeTableRequirement>? requirements = null,
-        bool checkVector = true)
+        bool requireVectorExtension = false)
     {
         requirements ??= DefaultRequirements;
         var issues = new List<string>();
@@ -157,7 +166,7 @@ public static class ExternalCubeCompatibilityTool
             if (!schemasWithUsage.Contains(schema))
                 issues.Add($"当前账号缺少 schema 使用权限 {schema}:USAGE");
 
-        if (checkVector && !vectorInstalled)
+        if (requireVectorExtension && !vectorInstalled)
             issues.Add("缺少 form schema 下的 vector 扩展");
 
         return issues;
@@ -184,7 +193,7 @@ public static class ExternalCubeCompatibilityTool
             schemasWithUsage,
             vectorInstalled: true,
             requirements,
-            checkVector: false);
+            requireVectorExtension: false);
     }
 
     public static async Task<IReadOnlyList<string>> CheckPackageAccessAsync(

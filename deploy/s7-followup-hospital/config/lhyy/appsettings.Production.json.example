@@ -31,6 +31,9 @@
   "Deployment": {
     "Mode": "external-cube"
   },
+  "CubeCompatibility": {
+    "RequireVectorExtension": false
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",

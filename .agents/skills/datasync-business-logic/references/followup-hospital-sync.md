@@ -67,5 +67,6 @@
 - CYYY 与 LHYY 共用 DataSync 管理库和包仓库；LHYY 的 `CubeDb` 指向 ntcare 业务库。
 - 私钥、known-hosts、token、公钥、包仓库、staging、备份、恢复标记和附件目录必须持久化并限制权限。
 - `FollowUpPackageImport.Enabled` 默认关闭，预检和测试包通过后才开启。
+- `CubeCompatibility:RequireVectorExtension` 默认关闭；未启用向量能力时，CubeDb 缺少 form schema 下的 vector 扩展只告警。明确启用向量能力时必须打开该门禁；包内 vector 字段仍由逐包 schema/字段类型检查阻断不兼容导入。
 
 本链路变更必须使用 `datasync-hospital-sync-delivery`，按状态机、安全门禁、回滚和跨端契约验证，不得仅做局部编译。
