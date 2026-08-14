@@ -51,6 +51,33 @@ public sealed class HtmlTextExtractionServiceTests
     }
 
     [Fact]
+    public void Extract_标题值为空_不读取下一行标签内容()
+    {
+        const string source = "姓名：测试患者    职业：&lt;br&gt;性别：男    工作单位：&lt;br&gt;年龄：79    入院时间：2026年07月20日14时07分";
+        var rules = new List<HtmlExtractionRule>
+        {
+            CreateLabelRule("姓名"),
+            CreateLabelRule("职业"),
+            CreateLabelRule("性别"),
+            CreateLabelRule("工作单位"),
+            CreateLabelRule("年龄"),
+            CreateLabelRule("入院时间")
+        };
+
+        var result = new HtmlTextExtractionService().Extract(
+            ToBase64(source, Encoding.UTF8),
+            CreateProfile(),
+            rules);
+
+        Assert.Equal("测试患者", result.ExtractedFields["姓名"]);
+        Assert.Null(result.ExtractedFields["职业"]);
+        Assert.Equal("男", result.ExtractedFields["性别"]);
+        Assert.Null(result.ExtractedFields["工作单位"]);
+        Assert.Equal("79", result.ExtractedFields["年龄"]);
+        Assert.Equal("2026年07月20日14时07分", result.ExtractedFields["入院时间"]);
+    }
+
+    [Fact]
     public void Extract_空格表格存在空白首列_保留相对缩进和列位置()
     {
         const string source = "<br>    专科检查<br>        心脏相对浊音界<br>        右(cm)    肋间    左(cm)<br>        2         II      2<br>        2         III     4<br>        3         IV      6<br>                 V       8<br>                 MCL     8.5";
@@ -138,6 +165,13 @@ public sealed class HtmlTextExtractionServiceTests
         MaxInputBytes = 1024 * 1024,
         PreserveSections = true,
         SectionHeadings = HtmlProfileService.DefaultSectionHeadingsText
+    };
+
+    private static HtmlExtractionRule CreateLabelRule(string fieldCode) => new()
+    {
+        FieldCode = fieldCode,
+        SourceLabel = fieldCode,
+        ExtractionType = HtmlExtractionType.LabelValue
     };
 
     private static string ToBase64(string value, Encoding encoding)

@@ -245,10 +245,10 @@ public sealed partial class HtmlTextExtractionService
             .Select(value => BuildFlexibleTextPattern(value!))
             .ToList();
         var nextLabelPattern = otherLabels.Count == 0
-            ? @"[^\s:：]{1,20}\s*[:：]"
-            : $"(?:{string.Join("|", otherLabels)})\\s*[:：]";
+            ? @"[^\s:：]{1,20}[^\S\r\n]*[:：]"
+            : $"(?:{string.Join("|", otherLabels)})[^\\S\\r\\n]*[:：]";
         var regex = new Regex(
-            $@"(?m)(?:^|\n|\s{{2,}}){labelPattern}\s*[:：]\s*(?<value>.*?)(?=\s{{2,}}{nextLabelPattern}|\n|$)",
+            $@"(?m)(?:^|\n|[^\S\r\n]{{2,}}){labelPattern}[^\S\r\n]*[:：][^\S\r\n]*(?<value>.*?)(?=[^\S\r\n]{{2,}}{nextLabelPattern}|\n|$)",
             RegexOptions.CultureInvariant,
             RegexTimeout);
         var match = regex.Match(source);

@@ -16,7 +16,7 @@ public sealed class HtmlManualTestService
     public const int MaxCandidateCount = 200;
 
     private static readonly Regex LabelCandidateRegex = new(
-        @"(?m)(?:^|\n|\s{2,})(?<label>[\p{L}\p{N}（）()／/_-]{1,20})\s*[:：]\s*(?<value>.*?)(?=\s{2,}[\p{L}\p{N}（）()／/_-]{1,20}\s*[:：]|\n|$)",
+        @"(?m)(?:^|\n|[^\S\r\n]{2,})(?<label>[\p{L}\p{N}（）()／/_-]{1,20})[^\S\r\n]*[:：][^\S\r\n]*(?<value>.*?)(?=[^\S\r\n]{2,}[\p{L}\p{N}（）()／/_-]{1,20}[^\S\r\n]*[:：]|\n|$)",
         RegexOptions.CultureInvariant,
         TimeSpan.FromSeconds(1));
 

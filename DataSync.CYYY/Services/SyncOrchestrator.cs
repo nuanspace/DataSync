@@ -918,7 +918,7 @@ public class SyncOrchestrator
                     continue;
                 }
 
-                payloads.Add(BuildCompositePayload(rootInterface, plan.RootRecord, plan.ChildInterface.MountField!, childRecords));
+                payloads.Add(BuildCompositePayload(rootInterface, plan.RootRecord, plan.ChildInterface, childRecords));
             }
 
             LogCompositeSkippedRecords(rootInterface, skippedReasons);
@@ -1654,11 +1654,16 @@ public class SyncOrchestrator
     private static Dictionary<string, object> BuildCompositePayload(
         SyncTaskInterface rootInterface,
         Dictionary<string, object> rootRecord,
-        string mountField,
+        SyncTaskInterface childInterface,
         List<Dictionary<string, object>> childRecords)
     {
         var payload = BuildRootOutputRecord(rootInterface, rootRecord);
-        payload[mountField] = childRecords.Select(CloneRecord).ToList();
+        var mountField = childInterface.MountField!;
+        var mountedRecords = CompositeChildRecordSelector.SelectForMount(
+            childInterface.ServerCode,
+            mountField,
+            childRecords);
+        payload[mountField] = mountedRecords.Select(CloneRecord).ToList();
         return payload;
     }
 

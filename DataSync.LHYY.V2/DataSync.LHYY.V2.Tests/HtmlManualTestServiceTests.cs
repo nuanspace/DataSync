@@ -267,6 +267,24 @@ public sealed class HtmlManualTestServiceTests
     }
 
     [Fact]
+    public void DiscoverCandidates_空标题值不串到下一行候选()
+    {
+        var service = CreateService();
+        var result = service.Test(
+            ToBase64("姓名：测试患者    职业：\n性别：男    工作单位：\n年龄：79"),
+            CreateProfile(),
+            [],
+            null);
+
+        var candidates = service.DiscoverCandidates(result, []);
+
+        Assert.Null(Assert.Single(candidates, candidate => candidate.FieldCode == "职业").PreviewValue);
+        Assert.Equal("男", Assert.Single(candidates, candidate => candidate.FieldCode == "性别").PreviewValue);
+        Assert.Null(Assert.Single(candidates, candidate => candidate.FieldCode == "工作单位").PreviewValue);
+        Assert.Equal("79", Assert.Single(candidates, candidate => candidate.FieldCode == "年龄").PreviewValue);
+    }
+
+    [Fact]
     public void DiscoverCandidates_已有同名字段标记为已配置()
     {
         var service = CreateService();
