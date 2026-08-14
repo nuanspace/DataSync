@@ -26,6 +26,14 @@
             <div class="dict-create-entry-header">
                 <MudText Typo="Typo.subtitle2">字典条目</MudText>
                 <div class="dict-create-entry-actions">
+                    @if (!_editExisting)
+                    {
+                        <MudButton Variant="Variant.Text" Size="Size.Small"
+                                   StartIcon="@Icons.Material.Filled.UploadFile"
+                                   OnClick="ToggleJsonImport">
+                            JSON 导入
+                        </MudButton>
+                    }
                     <MudButton Variant="Variant.Text" Size="Size.Small"
                                StartIcon="@Icons.Material.Filled.AutoFixHigh"
                                OnClick="OpenTemplateDialog">
@@ -38,6 +46,24 @@
                     </MudButton>
                 </div>
             </div>
+
+            @if (_jsonImportVisible && !_editExisting)
+            {
+                <div class="dict-json-import-panel">
+                    <MudTextField T="string" @bind-Value="_jsonImportText"
+                                  Label="粘贴简单 JSON"
+                                  Placeholder="{&quot;高血压&quot;:&quot;58917EAD-6B01-45E9-8731-ACFAD2371F8B&quot;}"
+                                  HelperText="key 为目标选项，value 为条件关键词；导入后仍需点击保存。"
+                                  Variant="Variant.Outlined" Margin="Margin.Dense" Lines="5" />
+                    <div class="dict-json-import-actions">
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="CancelJsonImport">取消</MudButton>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                                   OnClick="ImportJsonEntries">
+                            导入条目
+                        </MudButton>
+                    </div>
+                </div>
+            }
 
             <div class="dict-create-table-wrap">
                 <MudSimpleTable Hover="true" Class="dict-create-table">
@@ -157,6 +183,8 @@
     private List<DictEntryItem> _entries = [];
     private bool _editExisting;
     private string? _recommendedMatchMode;
+    private bool _jsonImportVisible;
+    private string? _jsonImportText;
 
     private string DialogHeading => _editExisting ? "编辑字典" : "新建字典";
 
@@ -293,6 +321,89 @@
     private void AddEntry()
     {
         _entries.Add(new DictEntryItem());
+    }
+
+    private void ToggleJsonImport()
+    {
+        _jsonImportVisible = !_jsonImportVisible;
+    }
+
+    private void CancelJsonImport()
+    {
+        _jsonImportVisible = false;
+        _jsonImportText = null;
+    }
+
+    private void ImportJsonEntries()
+    {
+        if (string.IsNullOrWhiteSpace(_jsonImportText))
+        {
+            inj_snackbar.Add("请先粘贴 JSON。", Severity.Warning);
+            return;
+        }
+
+        JToken token;
+        try
+        {
+            token = JToken.Parse(_jsonImportText, new JsonLoadSettings
+            {
+                DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error
+            });
+        }
+        catch (Newtonsoft.Json.JsonException)
+        {
+            inj_snackbar.Add("JSON 格式错误或存在重复 key。", Severity.Warning);
+            return;
+        }
+
+        if (token is not JObject jsonObject || !jsonObject.HasValues)
+        {
+            inj_snackbar.Add("只支持包含条目的简单 JSON 对象。", Severity.Warning);
+            return;
+        }
+
+        var importedEntries = new List<DictEntryItem>();
+        var importedKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var property in jsonObject.Properties())
+        {
+            var targetValue = property.Name.Trim();
+            if (targetValue.Length == 0 || property.Value.Type != JTokenType.String)
+            {
+                inj_snackbar.Add("JSON 的 key 和 value 都必须是非空字符串。", Severity.Warning);
+                return;
+            }
+
+            var keyword = property.Value.Value<string>()?.Trim();
+            if (string.IsNullOrEmpty(keyword))
+            {
+                inj_snackbar.Add("JSON 的 key 和 value 都必须是非空字符串。", Severity.Warning);
+                return;
+            }
+
+            if (!importedKeywords.Add(keyword))
+            {
+                inj_snackbar.Add($"条件关键词重复：{keyword}", Severity.Warning);
+                return;
+            }
+
+            importedEntries.Add(new DictEntryItem
+            {
+                TargetValue = targetValue,
+                Conditions =
+                [
+                    new DictConditionItem
+                    {
+                        MatchMode = DictExpressionHelper.MatchModeAll,
+                        Keywords = [keyword]
+                    }
+                ]
+            });
+        }
+
+        _entries = importedEntries;
+        _jsonImportVisible = false;
+        _jsonImportText = null;
+        inj_snackbar.Add($"已导入 {_entries.Count} 条字典条目，请确认后保存。", Severity.Success);
     }
 
     private static void AddCondition(DictEntryItem entry)

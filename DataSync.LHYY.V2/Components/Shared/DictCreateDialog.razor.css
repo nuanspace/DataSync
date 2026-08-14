@@ -43,6 +43,21 @@
     gap: 6px;
 }
 
+.dict-json-import-panel {
+    margin-bottom: 10px;
+    padding: 12px;
+    border: 1px solid #c9dce8;
+    border-radius: 6px;
+    background: #f8fbfd;
+}
+
+.dict-json-import-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 8px;
+}
+
 .dict-template-panel {
     max-height: 360px;
     overflow-y: auto;

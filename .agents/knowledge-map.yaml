@@ -33,13 +33,13 @@
       "id": "lhyy-esb",
       "title": "LHYY ESB 接收、识别、映射与写入",
       "skill": "datasync-business-logic",
-      "keywords": ["ESB", "SOAP", "接口识别", "字段映射", "过滤", "幂等", "Bio.Core", "待身份绑定", "LHYY"],
+      "keywords": ["ESB", "SOAP", "接口识别", "字段映射", "字典导入", "过滤", "幂等", "Bio.Core", "待身份绑定", "LHYY"],
       "symbols": ["EsbController", "EsbReceiverService", "InterfaceRecognitionService", "GenericMessageProcessor", "FieldMappingExecutor", "BioCoreIntegrationService"],
       "workflows": ["JSON接收", "SOAP接收", "消息识别", "字段映射", "患者事件写入"],
       "source_paths": ["DataSync.LHYY.V2/DataSync.LHYY.V2.csproj", "DataSync.LHYY.V2/Dockerfile", "DataSync.LHYY.V2/Controllers/**", "DataSync.LHYY.V2/Services/**", "DataSync.LHYY.V2/Handlers/**", "DataSync.LHYY.V2/Models/**", "DataSync.LHYY.V2/Data/**", "DataSync.LHYY.V2/Scripts/**"],
       "references": [".agents/skills/datasync-business-logic/references/lhyy-esb.md"],
       "review_record": ".agents/knowledge-reviews/lhyy-esb.json",
-      "impact_types": ["接收协议", "识别顺序", "处理状态", "映射语义", "写入目标"],
+      "impact_types": ["接收协议", "识别顺序", "处理状态", "字典配置", "映射语义", "写入目标"],
       "last_verified_commit": "20c92eac988986a61512cab803d35deb71377c36"
     },
     {
