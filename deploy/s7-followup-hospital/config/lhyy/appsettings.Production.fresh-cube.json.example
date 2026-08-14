@@ -31,6 +31,9 @@
   "Deployment": {
     "Mode": "fresh-cube"
   },
+  "CubeCompatibility": {
+    "RequireVectorExtension": true
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",

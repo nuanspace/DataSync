@@ -7,6 +7,7 @@
 - 同一天 LHYY 数据库变更追加到 `Scripts/yyyyMM/yyyyMMdd.sql`；CYYY 遵循其 `Migrations/yyyy-MM/` 规则。
 - `db-upgrade` 命令仅检查内置脚本，不绕过页面状态和确认机制执行升级。
 - FollowUp 患者身份合并禁止对 CubeDb 执行自定义 DDL。维护窗口内只在 DataSyncDb 执行 `20260811.sql`，启动兼容检查仅验证 CubeDb 既有患者身份字段读权限和包内业务表权限；存量旧映射通过显式工具以 CubeDb 只读事务迁移，工具无法恢复历史时改走 `RecoveryBaseline`。
+- CubeDb 的 vector 扩展是按需能力：`CubeCompatibility:RequireVectorExtension` 默认关闭，缺失时启动兼容检查只告警；明确启用向量能力时必须打开并作为失败项。逐包 schema/字段类型检查仍拒绝不兼容的 vector 字段，不能用默认放宽替代包级校验。
 
 ## 优化任务安全模型
 

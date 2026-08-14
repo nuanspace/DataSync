@@ -59,9 +59,9 @@ bash start.sh       # 启动前自动执行只读 cube-compat-check
 bash status.sh
 ```
 
-`cube-compat-check` 只在只读事务中核对连接、v3 默认启用的 23 张目标表、来源适配与 EDC 可见性维护表、患者身份判定字段及映射唯一索引、8 个 schema 的 `USAGE`、按导入策略实际需要的表权限、导入前完整 `pg_dump` 所需的全部业务 schema/table/sequence 读取权限，以及 form schema 下的 vector 扩展。`UseExistingById/RejectIfMissing` 要求 `SELECT`，`InsertIfMissing` 要求 `INSERT`，`Upsert` 要求 `SELECT/INSERT/UPDATE`（PostgreSQL 的 `ON CONFLICT DO UPDATE` 会读取 `EXCLUDED` 列）；当前导入流程不要求 `DELETE`。
+`cube-compat-check` 只在只读事务中核对连接、v3 默认启用的 23 张目标表、来源适配与 EDC 可见性维护表、患者身份判定字段及映射唯一索引、8 个 schema 的 `USAGE`、按导入策略实际需要的表权限，以及导入前完整 `pg_dump` 所需的全部业务 schema/table/sequence 读取权限。`CubeCompatibility:RequireVectorExtension` 默认是 `false`；未启用向量能力时，缺少 form schema 下的 vector 扩展只提示、不阻止启动，显式设为 `true` 时仍作为失败项。`UseExistingById/RejectIfMissing` 要求 `SELECT`，`InsertIfMissing` 要求 `INSERT`，`Upsert` 要求 `SELECT/INSERT/UPDATE`（PostgreSQL 的 `ON CONFLICT DO UPDATE` 会读取 `EXCLUDED` 列）；当前导入流程不要求 `DELETE`。
 
-启动检查还会读取目标库 `form.form_question.table_name`，逐一验证已引用的 `target.*` 动态表、`patient_event_id` 字段及 `INSERT/UPDATE` 权限。云端后续可能启用新的动态表，因此每个数据包在真正导入前仍会执行完整 schema/主键/字段类型检查；`external-cube` 模式还会按该包映射后的目标表和 `ImportPolicy` 再检查 schema `USAGE` 与最小表权限。新动态表缺失或权限不足时包会进入结构待处理状态，不会开始写库。实施人员应在首次包和云端表清单变更后先手工拉取并完成这道检查，再开启自动导入。
+启动检查还会读取目标库 `form.form_question.table_name`，逐一验证已引用的 `target.*` 动态表、`patient_event_id` 字段及 `INSERT/UPDATE` 权限。云端后续可能启用新的动态表，因此每个数据包在真正导入前仍会执行完整 schema/主键/字段类型检查；`external-cube` 模式还会按该包映射后的目标表和 `ImportPolicy` 再检查 schema `USAGE` 与最小表权限。包实际携带的 vector 字段仍受这套字段类型检查约束，不兼容时拒绝导入。新动态表缺失或权限不足时包会进入结构待处理状态，不会开始写库。实施人员应在首次包和云端表清单变更后先手工拉取并完成这道检查，再开启自动导入。
 
 任一检查失败即拒绝启动或拒绝该包导入。`DEPLOYMENT_MODE` 会传入 LHYY，`external-cube` 模式下服务端和数据库升级页面均拒绝通过升级模块对 CubeDb 执行初始化、基础库恢复、比对同步、内置脚本或 SQL 文件，但正常数据包导入、导入前完整备份，以及对该备份的人工故障恢复不受影响。若结构不兼容，由目标库负责人先按正式发布流程完成升级，医院端部署包不代执行。
 

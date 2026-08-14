@@ -20,7 +20,21 @@ public sealed class ExternalCubeCompatibilityToolTests
     }
 
     [Fact]
-    public void 缺少患者判定字段和Vector时返回明确问题()
+    public void 默认未启用向量能力时Vector缺失不阻止检查()
+    {
+        var columns = CreateCompatibleColumns();
+
+        var issues = ExternalCubeCompatibilityTool.Evaluate(
+            columns,
+            CreateCompatiblePrivileges(),
+            CreateCompatibleSchemas(),
+            vectorInstalled: false);
+
+        Assert.Empty(issues);
+    }
+
+    [Fact]
+    public void 显式启用向量能力时Vector缺失返回明确问题()
     {
         var columns = CreateCompatibleColumns();
         ((HashSet<string>)columns["public.unique_patient"]).Remove("gender");
@@ -29,7 +43,8 @@ public sealed class ExternalCubeCompatibilityToolTests
             columns,
             CreateCompatiblePrivileges(),
             CreateCompatibleSchemas(),
-            vectorInstalled: false);
+            vectorInstalled: false,
+            requireVectorExtension: true);
 
         Assert.Contains("缺少字段 public.unique_patient.gender", issues);
         Assert.Contains("缺少 form schema 下的 vector 扩展", issues);
@@ -152,7 +167,7 @@ public sealed class ExternalCubeCompatibilityToolTests
             new HashSet<string>(["target"], StringComparer.OrdinalIgnoreCase),
             vectorInstalled: true,
             [requirement],
-            checkVector: false);
+            requireVectorExtension: false);
 
         Assert.Contains("缺少字段 target.form_answer_1.patient_event_id", issues);
         Assert.Contains("当前账号缺少权限 target.form_answer_1:UPDATE", issues);
