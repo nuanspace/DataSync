@@ -287,7 +287,22 @@
     // 路径选取目标枚举（与 MappingEditDialog 模式一致）
 
 
-    private enum PathPickTarget { None, Mrn, EventTime, VisitNo, InpatientNo, SourceMessageId, MainRecordArray, OcrSource, HtmlSource, FilterRule, MatchRule, IdempotentKeyPart }
+    private enum PathPickTarget
+    {
+        None,
+        Mrn,
+        EventTime,
+        VisitNo,
+        InpatientNo,
+        CombinedVisitIdentity,
+        SourceMessageId,
+        MainRecordArray,
+        OcrSource,
+        HtmlSource,
+        FilterRule,
+        MatchRule,
+        IdempotentKeyPart
+    }
 
     private enum EventIdentityModeOption
     {
