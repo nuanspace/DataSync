@@ -20,7 +20,7 @@
       "id": "cyyy-ingestion",
       "title": "CYYY 主动采集与同步编排",
       "skill": "datasync-business-logic",
-      "keywords": ["采集", "数据湖", "同步任务", "补数据", "数据库源", "pending", "CYYY"],
+      "keywords": ["采集", "数据湖", "同步任务", "补数据", "数据库源", "JSON字段", "FOR JSON PATH", "pending", "CYYY"],
       "symbols": ["IngestionService", "DataLakeClient", "SyncOrchestrator", "ApiPushService", "DatabasePushService"],
       "workflows": ["医院数据采集", "本地数据池", "队列推送", "补数据"],
       "source_paths": ["DataSync.CYYY/DataSync.CYYY.csproj", "DataSync.CYYY/Dockerfile", "DataSync.CYYY/Services/**", "DataSync.CYYY/Workers/**", "DataSync.CYYY/Models/**", "DataSync.CYYY/Data/**", "DataSync.CYYY/Scripts/**", "DataSync.CYYY/Migrations/**"],
